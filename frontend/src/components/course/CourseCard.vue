@@ -28,7 +28,7 @@ const emit = defineEmits<{ (e: 'click', course: Course): void }>()
 
     <footer class="course-card__footer">
       <div class="course-card__metric">
-        <span class="course-card__metric-value tabular-nums">{{ course.classes.length }}</span>
+        <span class="course-card__metric-value tabular-nums">{{ course.classCount }}</span>
         <span class="course-card__metric-label">班级</span>
       </div>
       <div class="course-card__metric">

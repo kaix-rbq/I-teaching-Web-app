@@ -6,18 +6,11 @@ import axios, {
 import { ElMessage } from 'element-plus'
 import type { ApiResponse } from '@/types/api'
 import { TOKEN_KEY, USER_KEY } from '@/constants'
-import { mockAdapter } from '@/mocks'
-
-export const USE_MOCK = import.meta.env.VITE_USE_MOCK === 'true'
 
 const http = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || '/api/v1',
   timeout: 20000
 })
-
-if (USE_MOCK) {
-  http.defaults.adapter = mockAdapter
-}
 
 http.interceptors.request.use((config) => {
   const token = localStorage.getItem(TOKEN_KEY)
@@ -44,9 +37,6 @@ http.interceptors.response.use(
     const body = response.data
     if (body && typeof body === 'object' && 'code' in body) {
       if (body.code === 0) return response
-      if (body.code === 401) {
-        handleUnauthorized()
-      }
       ElMessage.error(body.message || '请求失败')
       return Promise.reject(new Error(body.message || '请求失败'))
     }
@@ -54,6 +44,7 @@ http.interceptors.response.use(
   },
   (error: AxiosError<ApiResponse<unknown>>) => {
     const status = error.response?.status
+    // 后端鉴权失败统一返回 HTTP 401 + code 40101，据此清 token 并跳登录页
     if (status === 401) {
       handleUnauthorized()
     }

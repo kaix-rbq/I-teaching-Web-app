@@ -5,8 +5,8 @@ import { usePagination } from './usePagination'
 
 export interface CourseListQuery {
   semester: string
-  department: string
-  teacherId: string
+  departmentId: number | ''
+  teacherId: number | ''
   status: CourseStatus | ''
   keyword: string
 }
@@ -15,7 +15,7 @@ export function useCourseList() {
   const { page, pageSize, total, setTotal, setPage, setPageSize } = usePagination()
   const query = reactive<CourseListQuery>({
     semester: '',
-    department: '',
+    departmentId: '',
     teacherId: '',
     status: '',
     keyword: ''
@@ -29,8 +29,11 @@ export function useCourseList() {
     error.value = false
     try {
       const params: CourseQuery = {
-        ...query,
+        semester: query.semester || undefined,
+        departmentId: query.departmentId || undefined,
+        teacherId: query.teacherId || undefined,
         status: query.status || undefined,
+        keyword: query.keyword || undefined,
         page: page.value,
         pageSize: pageSize.value
       }
@@ -53,7 +56,7 @@ export function useCourseList() {
 
   function reset(): void {
     query.semester = ''
-    query.department = ''
+    query.departmentId = ''
     query.teacherId = ''
     query.status = ''
     query.keyword = ''

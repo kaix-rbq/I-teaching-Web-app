@@ -1,9 +1,10 @@
 export type Role = 'director' | 'teacher' | 'supervisor'
 
 export interface User {
-  id: string
+  id: number
   name: string
   role: Role
+  departmentId?: number
   department?: string
   jobNo?: string
   avatar?: string

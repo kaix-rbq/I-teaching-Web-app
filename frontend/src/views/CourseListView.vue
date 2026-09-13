@@ -77,16 +77,16 @@ onMounted(() => {
 
       <el-select
         v-if="canFilterTeacher"
-        v-model="query.department"
+        v-model="query.departmentId"
         placeholder="教研室"
         clearable
         class="course-list__field course-list__field--wide"
       >
         <el-option
           v-for="department in dict.departments"
-          :key="department"
-          :label="department"
-          :value="department"
+          :key="department.id"
+          :label="department.name"
+          :value="department.id"
         />
       </el-select>
 

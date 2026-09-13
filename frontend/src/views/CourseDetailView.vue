@@ -6,7 +6,7 @@ import EmptyState from '@/components/common/EmptyState.vue'
 import ResourceList from '@/components/course/ResourceList.vue'
 import ResourceUploader from '@/components/course/ResourceUploader.vue'
 import { fetchCourseDetailApi } from '@/api/course'
-import { deleteResourceApi, fetchResourcesApi, uploadResourceApi } from '@/api/resource'
+import { deleteResourceApi, downloadResourceApi, fetchResourcesApi, uploadResourceApi } from '@/api/resource'
 import { getCourseStatusMeta, RESOURCE_ACCEPT, MAX_RESOURCE_SIZE } from '@/constants'
 import { useAuthStore } from '@/stores/auth'
 import type { Course } from '@/types/course'
@@ -42,7 +42,7 @@ const summary = computed(() => {
   return [
     { label: '学分', value: course.value.credit, unit: '分' },
     { label: '学时', value: course.value.hours, unit: '学时' },
-    { label: '班级数', value: course.value.classes.length, unit: '个' },
+    { label: '班级数', value: course.value.classes?.length ?? course.value.classCount, unit: '个' },
     { label: '学生人次', value: course.value.studentCount, unit: '人次' },
     { label: '课程资源', value: course.value.resourceCount, unit: '份' }
   ]
@@ -110,8 +110,18 @@ async function handleDelete(resource: Resource): Promise<void> {
   }
 }
 
-function handleDownload(resource: Resource): void {
-  ElMessage.success(`已开始下载：${resource.name}`)
+async function handleDownload(resource: Resource): Promise<void> {
+  try {
+    const blob = await downloadResourceApi(resource.id)
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = resource.name
+    link.click()
+    URL.revokeObjectURL(url)
+  } catch {
+    // 错误提示由 api/http.ts 拦截器统一处理
+  }
 }
 
 function goEdit(): void {
@@ -195,18 +205,21 @@ onMounted(async () => {
             <h3 class="course-detail__section-title">课程简介</h3>
             <p class="course-detail__paragraph">{{ course.description || '暂无课程简介' }}</p>
           </div>
-          <div class="course-detail__section">
+          <div v-if="course.objective" class="course-detail__section">
             <h3 class="course-detail__section-title">培养目标</h3>
-            <p class="course-detail__paragraph">{{ course.objective || '暂无培养目标' }}</p>
+            <p class="course-detail__paragraph">{{ course.objective }}</p>
           </div>
-          <div class="course-detail__section">
+          <div v-if="course.major" class="course-detail__section">
             <h3 class="course-detail__section-title">适用专业</h3>
-            <p class="course-detail__paragraph">{{ course.major || '暂无' }}</p>
+            <p class="course-detail__paragraph">{{ course.major }}</p>
           </div>
         </el-tab-pane>
 
-        <el-tab-pane :label="`开课信息（${course.classes.length}）`" name="classes">
-          <el-table :data="course.classes" row-key="id" stripe>
+        <el-tab-pane
+          :label="`开课信息（${course.classes?.length ?? 0}）`"
+          name="classes"
+        >
+          <el-table :data="course.classes ?? []" row-key="id" stripe>
             <el-table-column prop="className" label="班级名称" min-width="160" />
             <el-table-column prop="schedule" label="上课时间" min-width="140" />
             <el-table-column prop="location" label="上课地点" min-width="140" />

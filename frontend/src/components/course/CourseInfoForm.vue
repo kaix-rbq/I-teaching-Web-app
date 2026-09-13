@@ -4,15 +4,19 @@ import type { FormInstance, FormRules } from 'element-plus'
 import { COURSE_STATUS } from '@/constants'
 import { useDictStore } from '@/stores/dict'
 import type { CourseFormModel } from '@/types/course'
+import type { DepartmentOption } from '@/types/dict'
 
 const props = withDefaults(
   defineProps<{
     mode: 'create' | 'edit'
     submitting?: boolean
+    /** 可选教研室；主任场景由页面收敛为本室 */
+    departmentOptions?: DepartmentOption[]
   }>(),
   {
     mode: 'create',
-    submitting: false
+    submitting: false,
+    departmentOptions: () => []
   }
 )
 
@@ -28,9 +32,7 @@ const formRef = ref<FormInstance>()
 
 const isEdit = computed(() => props.mode === 'edit')
 
-const teacherOptions = computed(() =>
-  model.value.department ? dict.teachersOfDepartment(model.value.department) : []
-)
+const teacherOptions = computed(() => dict.teachersOfDepartment(model.value.departmentId))
 
 const rules: FormRules<CourseFormModel> = {
   code: [
@@ -42,7 +44,7 @@ const rules: FormRules<CourseFormModel> = {
     }
   ],
   name: [{ required: true, message: '请输入课程名称', trigger: 'blur' }],
-  department: [{ required: true, message: '请选择所属教研室', trigger: 'change' }],
+  departmentId: [{ required: true, message: '请选择所属教研室', trigger: 'change' }],
   teacherId: [{ required: true, message: '请选择授课教师', trigger: 'change' }],
   semester: [{ required: true, message: '请选择学期', trigger: 'change' }],
   credit: [{ required: true, message: '请输入学分', trigger: 'change' }],
@@ -92,13 +94,13 @@ function handleCancel(): void {
       <el-input v-model="model.name" placeholder="请输入课程名称" maxlength="50" />
     </el-form-item>
 
-    <el-form-item label="所属教研室" prop="department">
-      <el-select v-model="model.department" placeholder="请选择教研室" @change="handleDepartmentChange">
+    <el-form-item label="所属教研室" prop="departmentId">
+      <el-select v-model="model.departmentId" placeholder="请选择教研室" @change="handleDepartmentChange">
         <el-option
-          v-for="department in dict.departments"
-          :key="department"
-          :label="department"
-          :value="department"
+          v-for="department in props.departmentOptions"
+          :key="department.id"
+          :label="department.name"
+          :value="department.id"
         />
       </el-select>
     </el-form-item>
@@ -107,7 +109,7 @@ function handleCancel(): void {
       <el-select
         v-model="model.teacherId"
         placeholder="请先选择教研室"
-        :disabled="!model.department"
+        :disabled="!model.departmentId"
       >
         <el-option
           v-for="teacher in teacherOptions"

@@ -518,6 +518,8 @@ interface PageResult<T> { list: T[]; total: number; page: number; pageSize: numb
 | DELETE | `/resources/:id` | teacher | 删除资源 |
 | GET | `/supervision/coverage` | supervisor | 覆盖率统计 |
 | GET | `/supervision/plans` | supervisor | 听评课安排（分页 + 状态筛选） |
+| GET | `/departments` | 登录 | 教研室列表（课程列表筛选下拉数据源，`[{id, name}]`） |
+| GET | `/teachers` | 登录 | 教师列表，查询参数 `departmentId`（筛选下拉数据源，`[{id, name}]`） |
 
 ### 10.3 请求层约定
 

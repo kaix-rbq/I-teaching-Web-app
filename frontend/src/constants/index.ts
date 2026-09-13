@@ -78,6 +78,12 @@ export const RESOURCE_TYPE_LABELS: Record<ResourceType, string> = {
 
 export const PAGE_SIZES = [10, 20, 50]
 
+/** 学期字典：Sprint 1 由前端常量维护，与后端 internal/service/consts.go 的 Semesters 同源 */
+export const SEMESTERS = ['2026-2027-1', '2025-2026-2', '2025-2026-1']
+
+/** 当前学期（工作台/覆盖率口径），与后端 CurrentSemester 一致 */
+export const CURRENT_SEMESTER = SEMESTERS[0]
+
 export function resolveResourceType(fileName: string): ResourceType {
   const ext = fileName.slice(fileName.lastIndexOf('.') + 1).toLowerCase()
   if (ext === 'pdf') return 'pdf'

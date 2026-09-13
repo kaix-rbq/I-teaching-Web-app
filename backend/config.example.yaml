@@ -1,0 +1,25 @@
+# 「爱教学」后端配置模板
+# 复制为 config.yaml 后按本地环境修改；config.yaml 不入库（见 .gitignore）。
+# 环境变量优先级高于本文件，前缀 AIJIAOXUE_，层级用下划线连接。
+# 例：AIJIAOXUE_MYSQL_DSN / AIJIAOXUE_JWT_SECRET / AIJIAOXUE_SERVER_PORT
+
+server:
+  port: 8080
+  mode: debug # debug | release
+
+mysql:
+  dsn: "aijiaoxue:aijiaoxue_dev@tcp(127.0.0.1:3306)/aijiaoxue?charset=utf8mb4&parseTime=True&loc=Local"
+  maxOpenConns: 20
+  maxIdleConns: 5
+
+jwt:
+  secret: "change-me-in-production" # 生产环境必须用 AIJIAOXUE_JWT_SECRET 覆盖
+  ttl: "24h"
+
+upload:
+  dir: "./uploads"
+  maxSize: 104857600 # 100MB
+  allowExt: [".pdf", ".doc", ".docx", ".ppt", ".pptx", ".mp4", ".zip"]
+
+cors:
+  origins: ["http://localhost:5173", "http://127.0.0.1:5173"] # 前端 dev 地址

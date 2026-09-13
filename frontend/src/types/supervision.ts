@@ -1,8 +1,8 @@
 export type SupervisionStatus = 'planned' | 'completed'
 
 export interface SupervisionPlan {
-  id: string
-  courseId: string
+  id: number
+  courseId: number
   courseName: string
   teacherName: string
   supervisorName: string
@@ -24,6 +24,7 @@ export interface CoverageStat {
 
 export interface SupervisionQuery {
   status?: SupervisionStatus | ''
+  /** 计划日期起（在 api 层映射为后端 dateFrom） */
   date?: string
   page?: number
   pageSize?: number
@@ -37,11 +38,15 @@ export interface DashboardStat {
   tone?: 'primary' | 'success' | 'warning' | 'info' | 'supervisor'
 }
 
+/**
+ * 工作台视图模型。
+ * 后端 GET /dashboard 按角色返回三种 DTO，由 api/dashboard.ts 收敛成同一形状，
+ * 页面组件因此只需一套模板 + 角色分支。
+ */
 export interface DashboardData {
   stats: DashboardStat[]
   courses?: import('./course').Course[]
   plans?: SupervisionPlan[]
-  coverage?: CoverageStat
+  coverage?: CoverageStat | null
   recentResources?: import('./resource').Resource[]
-  departments?: DepartmentCoverage[]
 }

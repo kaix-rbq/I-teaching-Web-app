@@ -47,8 +47,8 @@ function asCourse(row: unknown): Course {
     <el-table-column prop="teacherName" label="授课教师" width="110" />
     <el-table-column prop="department" label="教研室" min-width="180" />
     <el-table-column prop="semester" label="学期" width="120" />
-    <el-table-column prop="classes" label="班级数" width="90" align="center">
-      <template #default="{ row }">{{ row.classes.length }}</template>
+    <el-table-column prop="classCount" label="班级数" width="90" align="center">
+      <template #default="{ row }">{{ row.classCount }}</template>
     </el-table-column>
     <el-table-column prop="studentCount" label="学生人次" width="100" align="right">
       <template #default="{ row }">

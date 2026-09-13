@@ -4,12 +4,14 @@ import { useRoute, useRouter } from 'vue-router'
 import PageHeader from '@/components/common/PageHeader.vue'
 import CourseInfoForm from '@/components/course/CourseInfoForm.vue'
 import { createCourseApi, fetchCourseDetailApi, updateCourseApi } from '@/api/course'
+import { useAuthStore } from '@/stores/auth'
 import { useDictStore } from '@/stores/dict'
-import type { CourseFormModel } from '@/types/course'
+import type { CourseFormModel, CourseUpsertPayload } from '@/types/course'
 
 const route = useRoute()
 const router = useRouter()
 const dict = useDictStore()
+const auth = useAuthStore()
 
 const isEdit = computed(() => route.name === 'course-edit')
 const courseId = computed(() => String(route.params.id ?? ''))
@@ -23,10 +25,20 @@ const form = reactive<CourseFormModel>({
   credit: 3,
   hours: 48,
   semester: '',
-  department: '',
+  departmentId: '',
   teacherId: '',
   description: '',
   status: 'open'
+})
+
+/**
+ * 主任只能维护本室课程（后端 §11：departmentId 必须等于主任本室），
+ * 因此教研室下拉只呈现本室，避免提交必然 40302 的选项。
+ */
+const departmentOptions = computed(() => {
+  const own = auth.user?.departmentId
+  if (!own) return dict.departments
+  return dict.departments.filter((item) => item.id === own)
 })
 
 let initialSnapshot = ''
@@ -56,7 +68,7 @@ async function loadDetail(): Promise<void> {
       credit: course.credit,
       hours: course.hours,
       semester: course.semester,
-      department: course.department,
+      departmentId: course.departmentId,
       teacherId: course.teacherId,
       description: course.description,
       status: course.status
@@ -69,15 +81,16 @@ async function loadDetail(): Promise<void> {
 }
 
 async function handleSubmit(value: CourseFormModel): Promise<void> {
+  if (!value.departmentId || !value.teacherId) return
   submitting.value = true
   try {
-    const payload: Omit<CourseFormModel, 'id'> = {
+    const payload: CourseUpsertPayload = {
       code: value.code,
       name: value.name,
       credit: value.credit,
       hours: value.hours,
       semester: value.semester,
-      department: value.department,
+      departmentId: value.departmentId,
       teacherId: value.teacherId,
       description: value.description,
       status: value.status
@@ -114,6 +127,8 @@ onMounted(async () => {
   await dict.load()
   if (!isEdit.value) {
     form.semester = dict.semesters[0] ?? ''
+    // 默认选中主任本室，与其数据范围保持一致
+    form.departmentId = auth.user?.departmentId ?? departmentOptions.value[0]?.id ?? ''
     initialSnapshot = snapshot()
   }
   await loadDetail()
@@ -135,6 +150,7 @@ onMounted(async () => {
         v-model="form"
         :mode="isEdit ? 'edit' : 'create'"
         :submitting="submitting"
+        :department-options="departmentOptions"
         @submit="handleSubmit"
         @cancel="handleCancel"
       />
