@@ -1,0 +1,34 @@
+/* Element Plus 主题变量覆盖：与 styles/tokens.scss 保持同源。
+   使用 html:root 提高优先级，确保晚于 Element Plus 默认 base.css 加载时仍生效 */
+html:root {
+  --el-color-primary: var(--color-primary);
+  --el-color-primary-light-3: var(--color-primary-hover);
+  --el-color-primary-light-5: #85a5f8;
+  --el-color-primary-light-7: #adc6ff;
+  --el-color-primary-light-8: #d6e4ff;
+  --el-color-primary-light-9: var(--color-primary-bg);
+  --el-color-primary-dark-2: var(--color-primary-active);
+
+  --el-color-success: var(--color-success);
+  --el-color-warning: var(--color-warning);
+  --el-color-danger: var(--color-error);
+  --el-color-error: var(--color-error);
+  --el-color-info: var(--color-info);
+
+  --el-text-color-primary: var(--color-text-primary);
+  --el-text-color-regular: var(--color-text-secondary);
+  --el-text-color-secondary: var(--color-text-tertiary);
+  --el-text-color-placeholder: var(--color-text-disabled);
+
+  --el-border-color: var(--color-border);
+  --el-border-color-light: var(--color-divider);
+  --el-border-color-lighter: var(--color-divider);
+  --el-fill-color-blank: var(--color-bg-card);
+  --el-bg-color-page: var(--color-bg-page);
+
+  --el-border-radius-base: var(--radius-md);
+  --el-border-radius-small: var(--radius-sm);
+
+  --el-font-family: var(--font-family);
+  --el-font-size-base: var(--font-size-base);
+}
