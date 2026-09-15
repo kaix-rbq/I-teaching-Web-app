@@ -36,17 +36,21 @@
 
 > `[M]` Must 必须实现；`[S]` Should 应该实现；`[C]` Could 有余力实现。
 
-### 2.2 范围边界（Won't — 一律不做）
+### 2.2 范围边界
+
+> **⚠️ 范围更新（Sprint 2/3 已启动）**
+> 原 Sprint 1 Won't 清单中的「课堂录音上传 / 语音转写 / AI 评估」与「质量分析报告 / 教学改进建议」**已解除**，正式进入 Sprint 2「看课堂」与 Sprint 3「帮教师」。
+> 新的用户故事、页面跳转链路、路由表、组件清单与评分展示规范见 **[`Sprint2-3-教学评价与提优-开发计划.md`](./Sprint2-3-教学评价与提优-开发计划.md)** §7。
+
+**Sprint 2/3 仍然不做（Won't）**：
 
 - ❌ 移动端 App / 移动端深度适配（桌面优先，目标分辨率 ≥1280px）
-- ❌ 用户注册、找回密码（账号由管理员预置，Sprint 1 仅登录）
-- ❌ 课堂录音上传、语音转写、AI 评估（属 Sprint 2）
-- ❌ 质量分析报告、教学改进建议（属 Sprint 3）
-- ❌ 真实教务系统对接（数据用 Mock 或自建种子数据）
+- ❌ 用户注册、找回密码（账号由管理员预置）
+- ❌ 真实教务系统对接（数据用自建种子数据）
 - ❌ 微格教学资源库
 - ❌ 引入第二套 UI 组件库
 
-**智能体守则：收到超出上述边界的编码请求时，应在回复中明确指出"该需求超出 Sprint 1 范围"，并建议先与产品负责人（成员一）确认，不得直接实现。**
+**智能体守则：收到超出上述边界的编码请求时，应在回复中明确指出"该需求超出当前 Sprint 范围"，并建议先与产品负责人（成员一）确认，不得直接实现。**
 
 ## 3. 用户角色与权限矩阵
 
@@ -194,9 +198,18 @@ aijiaoxue-web/
 | `/courses/new` | course-new | CourseFormView | App | director | S3.1 |
 | `/courses/:id` | course-detail | CourseDetailView | App | 登录 | S2.x / S4.1 / S4.2 |
 | `/courses/:id/edit` | course-edit | CourseFormView | App | director | S3.1 |
-| `/supervision` | supervision | SupervisionView | App | supervisor | S5.1 |
+| `/supervision` | supervision | SupervisionView | App | supervisor | S5.1 / S6.7 |
+| `/teachers` | teacher-list | TeacherListView | App | director / supervisor | S6.4 |
+| `/teachers/:id` | teacher-detail | TeacherDetailView | App | director / supervisor | S6.5 |
+| `/courses/:id/improve` | course-improve | CourseImproveView | App | teacher | S6.6 / S8.1 |
+| `/sessions/:id/evaluation` | session-evaluation | SessionEvaluationView | App | supervisor（他人只读） | S6.3 / S7.2 |
 | `/profile` | profile | ProfileView | App | 登录 | 辅助（低优先级） |
 | `/:pathMatch(.*)*` | not-found | NotFoundView | Blank | 公开 | — |
+
+> **Sprint 2/3 路由变更说明**（详见开发计划 §7）：
+> - `/supervision` **不删除**，由「督导总览」改造为「听评课管理」完整分页列表——工作台只展示前 8 条，删页会导致第 9 条以后无法访问；
+> - 主任工作台移除「本室教师开课情况」表格与「近期开课」列表（与课程管理重复），改为「课程管理」「教师管理」两个入口卡；
+> - 「教学提优」采用**并列路由** `/courses/:id/improve` 而非替换 `/courses/:id`：教师从「我的课程」点击时跳提优页，路径语义清晰且可继续访问原详情页。
 
 守卫逻辑（`router/guards.ts`）：
 1. 无 token 且目标非公开页 → 重定向 `/login?redirect=…`；

@@ -29,15 +29,20 @@
 | S4.2 | 教师 | 上传/维护课程资源 | S | multipart 上传 · 本地存储 · 删除 |
 | S5.1 | 督导 | 查看督导覆盖率与听评课安排 | M | `/supervision/coverage` · `/supervision/plans` |
 
-### 2.2 范围边界（Won't — 一律不做）
+### 2.2 范围边界
 
-- ❌ 课堂录音上传、ASR 语音转写接入（Qwen-Audio 属 Sprint 2，由成员四届时接入）
-- ❌ 质量评估报告、教学优化建议（Sprint 3）
-- ❌ 用户注册、找回密码、第三方登录（账号由种子数据预置）
+> **⚠️ 范围更新（Sprint 2/3 已启动）**
+> 原 Sprint 1 Won't 清单中的「课堂录音上传 / ASR 语音转写接入」与「质量评估报告 / 教学优化建议」**已解除**，正式进入 Sprint 2「看课堂」与 Sprint 3「帮教师」。
+> 新的开发目标、用户故事、评分体系、数据模型与接口契约见 **[`Sprint2-3-教学评价与提优-开发计划.md`](./Sprint2-3-教学评价与提优-开发计划.md)**；本文件 §8 契约与 §13 模型表随该计划同步扩充。
+
+**Sprint 2/3 仍然不做（Won't）**：
+
+- ❌ 用户注册、找回密码、第三方登录（账号仍由种子数据预置）
 - ❌ 消息通知、全文搜索引擎、读写分离、微服务拆分
 - ❌ 引入第二个 Web 框架或 ORM
+- ❌ 移动端 App / 真实教务系统对接 / 实时课堂直播 / 视频画面分析
 
-**智能体守则：收到超出上述边界的编码请求时，必须在回复中明确指出"该需求超出 Sprint 1 范围"，建议先与 DRI（第 1 轮为成员一·徐仕杰）确认，不得直接实现。**
+**智能体守则：收到超出上述边界的编码请求时，必须在回复中明确指出"该需求超出当前 Sprint 范围"，建议先与 DRI（成员一·徐仕杰）确认，不得直接实现。**
 
 ## 3. 角色与数据范围规则（本手册最核心的一节）
 
@@ -171,6 +176,10 @@ cors:
 ## 8. 接口契约（15 个业务接口 + 1 个运维接口）
 
 前缀 `/api/v1`。**字段名与前端 `src/types/` 逐字对齐，本节是前后端联调的唯一事实源。**
+
+> **Sprint 2/3 新增接口**（授课记录、当堂课评估、评价聚合、录音转写、智能体）见
+> [`Sprint2-3-教学评价与提优-开发计划.md`](./Sprint2-3-教学评价与提优-开发计划.md) §5，
+> 新增错误码 40002 / 40902 / 50002 / 50003 见该文件同节。
 
 ### 8.1 认证 auth
 
@@ -460,6 +469,14 @@ HTTP 请求
 | ClassInfo | course_classes | 开课班级 |
 | Resource | resources | 课程资源 |
 | SupervisionPlan | supervision_plans | 听评课安排 |
+| TeachingSession | teaching_sessions | **Sprint 2 新增**：授课记录（某次具体的课，一切评价的落点） |
+| Evaluation | evaluations | **Sprint 2 新增**：评价（`evaluator_type` 区分督导/智能体，可插拔 scorer） |
+| Recording | recordings | **Sprint 2.2 新增**：课堂录音 |
+| Transcript | transcripts | **Sprint 2.2 新增**：课堂转写（异步任务产物） |
+
+> Sprint 2/3 的建表 DDL、迁移脚本与评分算法见
+> [`Sprint2-3-教学评价与提优-开发计划.md`](./Sprint2-3-教学评价与提优-开发计划.md) §3、§4。
+> 新增表**只新增、不改存量表**（`supervision_plans` 不动，由 `teaching_sessions.plan_id` 反向关联）。
 
 - 迁移策略：开发期以 `database/schema.sql` 为唯一事实源手工执行；GORM **不使用 AutoMigrate**（避免双源漂移）；表结构变更 = 修改 schema.sql + 更新 model + 在 PR 说明列明变更；
 - 连接池：`SetMaxOpenConns/SetMaxIdleConns` 来自配置；启动时 `db.Ping()` 失败直接 fatal 退出。

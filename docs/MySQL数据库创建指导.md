@@ -438,9 +438,13 @@ func (Course) TableName() string { return "courses" }
 | 阶段 | 动作 |
 |------|------|
 | Sprint 1 | schema.sql + seed.sql 手工执行（本文档）；表结构变更 = 更新 schema.sql + 后端 model + PR 说明列明 |
-| Sprint 2（看课堂） | 新增 `recordings`（课堂录音）、`transcripts`（转写文本，挂 ASR 智能体）、`evaluation_records`（听评记录）；均以 `course_id` 外键挂接，**不改存量表** |
-| Sprint 3（帮教师） | 新增 `quality_reports`（质量报告）、`knowledge_base`（教学知识库条目） |
-| 版本化时机 | 从 Sprint 2 起引入 `golang-migrate`（`migrations/V2__add_recordings.sql`），Sprint 1 不引入以保持简单 |
+| Sprint 2（看课堂） | 新增 `teaching_sessions`（**授课记录**，核心实体）、`evaluations`（督导 + 智能体同表，靠 `evaluator_type` 区分）→ `migrations/V2__teaching_sessions_and_evaluations.sql`；阶段二再新增 `recordings`（课堂录音）、`transcripts`（转写文本，异步任务产物）→ `migrations/V3__recordings_and_transcripts.sql`。均**只新增、不改存量表** |
+| Sprint 3（帮教师） | 新增 `quality_reports`（质量报告）、申诉复核相关表（`evaluation_appeals`）；`knowledge_base`（教学知识库条目） |
+| 版本化时机 | 从 Sprint 2 起引入 `golang-migrate`（`migrations/V2__xxx.sql`），Sprint 1 不引入以保持简单 |
+
+> **完整 DDL、字段说明与三个实现陷阱**（`class_id` 唯一索引 NULL 不去重、转写必须异步、列式优于 EAV）见
+> [`Sprint2-3-教学评价与提优-开发计划.md`](./Sprint2-3-教学评价与提优-开发计划.md) §4。
+> 该文件同时给出评分维度、计分公式与聚合 SQL（§3）。
 
 ## 10. 备份与恢复
 
