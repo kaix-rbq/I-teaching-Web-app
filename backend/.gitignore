@@ -4,13 +4,10 @@ config.yaml
 # 上传的课程资源文件
 uploads/
 
-# 构建产物
+# 构建产物与 air 热重载临时文件
 bin/
 tmp/
 *.exe
-
-# air 热重载临时文件
-tmp/
 
 # 测试与覆盖率
 coverage.out
