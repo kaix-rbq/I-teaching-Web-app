@@ -11,7 +11,9 @@ ITmanage/
 ├── docs/                 # 团队设计文档（编码前必读）
 │   ├── backend_AGENTS.md          # 后端编码宪法：技术栈 / 目录 / 分层 / 接口契约
 │   ├── frontend_AGENTS.md         # 前端编码宪法：页面 / 组件 / 设计令牌 / 接口约定
-│   └── MySQL数据库创建指导.md      # 建库建表 DDL 与种子数据的唯一事实源
+│   ├── MySQL数据库创建指导.md      # 建库建表 DDL 与种子数据的唯一事实源
+│   ├── Sprint2-3-教学评价与提优-开发计划.md   # Sprint 2/3 功能与规范（评分体系、建表、接口、权限、路由）
+│   └── Sprint2-3-任务清单.md       # 按模块分发的简短任务清单（详细信息指向开发计划）
 ├── backend/              # Go + Gin + GORM 后端服务（aijiaoxue-api）
 └── frontend/             # Vue 3 + TypeScript + Element Plus 前端（aijiaoxue-web）
 ```
@@ -47,6 +49,24 @@ cd frontend && npm install
 # 后端依赖（仅首次 / go.mod 变更后）
 cd backend && go mod tidy
 ```
+
+> **国内网络必读：配置 Go 模块代理**
+> WSL / 国内网络通常**无法直连** `proxy.golang.org`，表现为首次 `go mod tidy`、`make run` 卡住或报 `dial tcp ... i/o timeout`。
+> 首次使用前执行一次（写入 `~/.config/go/env`，持久生效）：
+>
+> ```bash
+> go env -w GOPROXY=https://goproxy.cn,direct
+> ```
+>
+> 若本机已运行代理（如 Clash 监听 `127.0.0.1:7897`），也可走代理直连官方源：
+>
+> ```bash
+> export HTTP_PROXY=http://127.0.0.1:7897
+> export HTTPS_PROXY=http://127.0.0.1:7897
+> go env -w GOPROXY=https://proxy.golang.org,direct
+> ```
+>
+> 校验：`go env GOPROXY`，再在 `backend/` 下执行 `go mod download` 应能正常完成（约 14s / 首次）。
 
 ### 2. 首次初始化（只做一次）
 
