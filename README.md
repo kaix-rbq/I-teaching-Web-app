@@ -8,6 +8,8 @@
 
 ```
 ITmanage/
+├── README.md             # 环境、启停、验证、协作入口
+├── CONTRIBUTING.md       # 协作与提交流程：分支规范、红线清单、冲突解决、评审要求、PR 模板
 ├── docs/                 # 团队设计文档（编码前必读）
 │   ├── backend_AGENTS.md          # 后端编码宪法：技术栈 / 目录 / 分层 / 接口契约
 │   ├── frontend_AGENTS.md         # 前端编码宪法：页面 / 组件 / 设计令牌 / 接口约定
@@ -17,6 +19,8 @@ ITmanage/
 ├── backend/              # Go + Gin + GORM 后端服务（aijiaoxue-api）
 └── frontend/             # Vue 3 + TypeScript + Element Plus 前端（aijiaoxue-web）
 ```
+
+> **新成员请先读 [`CONTRIBUTING.md`](./CONTRIBUTING.md)**——里面的 §1 给出文档阅读顺序，§4 是每次开发的完整动作序列，§6 是绝不能碰的红线。
 
 ## 技术栈
 
@@ -81,9 +85,9 @@ cp config.example.yaml config.yaml
 bash scripts/init_db.sh
 #    等价的四步手工方式：
 #    make db-init                                  # schema.sql：建库 / 建用户 / 六张表
-#    make db-seed                                  # seed.sql：清空并写入种子数据
+#    make db-seed                                  # seed.sql：⚠️ 先 TRUNCATE 全部 6 张表再写入，只对本地库执行
 #    make seed                                     # cmd/seed：bcrypt 覆写演示账号密码（密码 123456）
-#    mysql -u aijiaoxue -paijiaoxue_dev aijiaoxue -e "SELECT ..."   # 见 §3 自查
+#    mysql -u aijiaoxue -paijiaoxue_dev aijiaoxue -e "SELECT ..."   # 见下方 ③ 自查
 
 # ③ 自查（期望 departments=3 users=6 courses=8 classes=14 resources=6 plans=5）
 mysql -u aijiaoxue -paijiaoxue_dev aijiaoxue -e "
@@ -159,7 +163,10 @@ npm run preview      # 本地预览构建产物
 | 终止全部 | ① 前端 `Ctrl+C` ② 后端 `Ctrl+C` ③ `bash .devtools/mysql/stop.sh` |
 | 只重启后端 | 后端窗口 `Ctrl+C` → `make run`（改用 air 时改 service/repo 会自动重启） |
 | 只重启前端 | 一般无需重启（HMR）；**改 `.env.development` / `vite.config.ts` 必须重启** |
-| 重新灌种子数据 | `cd backend && make db-seed && make seed` |
+| 重新灌种子数据 ⚠️ | `cd backend && make db-seed && make seed` —— **`seed.sql` 会先 `TRUNCATE` 全部 6 张表**，仅用于本地开发库 |
+
+> ⚠️ **`make db-seed` 是破坏性操作**：`backend/database/seed.sql` 开头执行 `SET FOREIGN_KEY_CHECKS=0` + 对全部 6 张表 `TRUNCATE`，会清空既有数据后重新写入种子。
+> 只对**本地开发库**执行；**绝不要对共享库或他人正在使用的库执行**。只想重置密码哈希时用 `make seed`（只 UPDATE `users.password_hash`，不清数据）。
 
 ### 4. 验证方式（按改动范围选择）
 
@@ -183,9 +190,44 @@ npm run build        # 构建通过
 `scripts/verify.sh` 的期望值全部来自 `docs/MySQL数据库创建指导.md` §6 速查表，**改数据口径时同步改脚本与文档**。
 注意：脚本会新建一门课程并在结束时清理，因此请勿在业务高峰期对共享库执行。
 
-### 5. 扩展功能的标准工作流
+### 5. 协作与提交流程（PR 模式）
 
-#### 5.1 分层铁律（改代码前先定位层）
+> **完整规范见 [`CONTRIBUTING.md`](./CONTRIBUTING.md)**——标准动作序列、契约先行对照表、红线清单、冲突解决、事故补救、评审要求、PR 描述模板。本节只列最小必读。
+
+**核心规则：任何改动都不得直接推到 `main`**，必须走「建分支 → 自检 → 提 PR → 评审 → 合入」。
+
+```bash
+# 开工：从最新 main 切分支（命名 feature/<故事编号>-<短描述>）
+git switch main && git pull --ff-only origin main
+git switch -c feature/S6.3-session-evaluation
+
+# 开发：契约先行——改接口/表结构/设计约定，先改文档再改代码（见 §6.2 / §6.3）
+
+# 自检全绿后再提交
+cd backend      && make lint && make test && make build
+cd ../frontend  && npm run lint && npm run typecheck && npm run test && npm run build
+
+git status && git diff --staged      # 先看清改了什么
+git add <具体文件>                    # 不要用 git add -A
+git commit -m "feat(session): 新增授课记录列表接口"
+git push -u origin feature/S6.3-session-evaluation
+# 然后在 GitHub 开 PR，目标分支选 main
+```
+
+**四条最容易踩的红线**：
+
+| 禁止 | 后果 | 正确做法 |
+|------|------|---------|
+| 直接 `git push` 到 `main` | 绕过评审，覆盖团队代码 | 开分支提 PR |
+| `git push --force` | 重写已共享历史，抹掉他人提交 | 用 `git revert`；只有自己的分支且已 rebase 时才用 `--force-with-lease` |
+| `git add -A` 不看 diff 就提交 | 把 `config.yaml`、`.devtools/` 等带进仓库 | `git status` + `git diff --staged` 确认后再逐个 `git add` |
+| 对共享数据库跑 `make db-seed` | **`seed.sql` 会 TRUNCATE 全部 6 张表，数据清空** | 只对本地库执行（见 §3.4） |
+
+**评审要求**：至少 1 人 approve 才能合入，**作者不得自审自合**。后端由成员四初审 + 成员一/三复审；前端由成员二初审 + 成员一/三复审。
+
+### 6. 扩展功能的标准工作流
+
+#### 6.1 分层铁律（改代码前先定位层）
 
 ```
 HTTP → middleware（鉴权/角色守卫）
@@ -211,7 +253,7 @@ HTTP → middleware（鉴权/角色守卫）
 | 新增全局状态 | `frontend/src/stores/`（仅 auth / dict 两个 store） |
 | 新增颜色、字号、间距 | `frontend/src/styles/tokens.scss`（业务代码禁止硬编码） |
 
-#### 5.2 场景 A：新增一个查询接口（最常见）
+#### 6.2 场景 A：新增一个查询接口（最常见）
 
 **改动顺序固定，不要跳步：**
 
@@ -223,7 +265,7 @@ HTTP → middleware（鉴权/角色守卫）
 6. **前端** —— `src/api/` 加请求函数 → `src/types/` 对齐字段 → `src/views/` 或 `components/` 消费；列表页必须实现**加载中 / 空数据 / 加载失败**三态。
 7. **验证** —— `make lint && make test && make build`；把断言补进 `scripts/verify.sh`；前端 `npm run typecheck && npm run build`。
 
-#### 5.3 场景 B：新增表 / 修改表结构
+#### 6.3 场景 B：新增表 / 修改表结构
 
 1. 改 `docs/MySQL数据库创建指导.md` §4 的 DDL（文档是唯一事实源），同步改 `backend/database/schema.sql`。
 2. 改 `backend/internal/model/<table>.go`：字段与列一一对应，写 `TableName()`。**禁止使用 GORM `AutoMigrate`**（避免代码与数据库双源漂移）。
@@ -235,7 +277,7 @@ HTTP → middleware（鉴权/角色守卫）
 4. 若是 Sprint 2/3 的新表（`recordings` / `transcripts` / `quality_reports`），**只新增、不动存量结构**，外键以 `course_id` 挂接。
 5. 在 PR 说明中列明「表结构变更清单」，并由成员四 + 成员一复核。
 
-#### 5.4 场景 C：接口契约变更（前后端联调返工的高发区）
+#### 6.4 场景 C：接口契约变更（前后端联调返工的高发区）
 
 ```text
 改 docs/backend_AGENTS.md §8
@@ -247,7 +289,7 @@ HTTP → middleware（鉴权/角色守卫）
 
 **契约变更必须一次性改完四端**（文档 / dto / types / api），否则表现是「接口 200 但页面空白」。
 
-#### 5.5 场景 D：只改前端页面
+#### 6.5 场景 D：只改前端页面
 
 1. 类型先行：`src/types/` → `src/api/` → `src/components/` → `src/views/`。
 2. 颜色/字号/间距只用 `styles/tokens.scss` 里的 CSS 变量。
@@ -255,7 +297,7 @@ HTTP → middleware（鉴权/角色守卫）
 4. 请求失败提示由 `src/api/http.ts` 拦截器统一弹出，**页面层不要重复弹错**。
 5. 验证：`npm run lint && npm run typecheck && npm run build`，再手工过一遍三态与权限显隐。
 
-### 6. 出错的解决措施（排查手册）
+### 7. 出错的解决措施（排查手册）
 
 先用「断点定位法」判断故障在哪一段：
 
@@ -288,11 +330,11 @@ HTTP → middleware（鉴权/角色守卫）
 
 1. **先看后端日志**：请求日志是 slog JSON（`method` / `path` / `status` / `latency_ms` / `user_id`），SQL 错误也会打印，多数问题一眼可定位。
 2. **错误信息不外泄**：对外只返回 `errcode` 的中文文案，堆栈与 SQL 错误只进日志；排查时以日志为准。
-3. **不要绕过权限**：任何「先在前端放开、后端后面补」的写法都违反 §3 数据裁剪铁律，一律拒绝。
+3. **不要绕过权限**：任何「先在前端放开、后端后面补」的写法都违反 `docs/backend_AGENTS.md` §3 数据裁剪铁律，一律拒绝。
 4. **不要手改库来兼容代码**：表结构以 `database/schema.sql` 为准，禁止 GORM `AutoMigrate` 造成双源漂移。
 5. **范围守卫**：涉及 `docs/*_AGENTS.md` §2.2 Won't 清单的需求（课堂录音、ASR、质量报告、用户注册、第二套 UI 库等）必须先亮红灯说明，不得直接实现。
 
-### 7. 附录 A：容器内沙箱 MySQL（仅本开发容器）
+### 8. 附录 A：容器内沙箱 MySQL（仅本开发容器）
 
 本容器的 3306 端口已被一个凭据未知的 MySQL 占用，因此仓库内另行放置了一个**无需 root** 的本地实例：
 
@@ -312,7 +354,7 @@ mysql:
   dsn: "aijiaoxue:aijiaoxue_dev@tcp(127.0.0.1:3306)/aijiaoxue?charset=utf8mb4&parseTime=True&loc=Local"
 ```
 
-### 8. 附录 B：实现相对设计文档的差异（需团队确认）
+### 9. 附录 B：实现相对设计文档的差异（需团队确认）
 
 后端严格按 `docs/backend_AGENTS.md` §8 契约实现，以下为**为满足现有前端页面与联调所需而做的纯增量补充**（不删改原有字段，向后兼容）：
 
@@ -325,7 +367,7 @@ mysql:
 | `SupervisorDashboard` | `byDepartment` | 前端 §7.3「按教研室覆盖率排行」 |
 | `GET /healthz` | 同时挂载 `/healthz` 与 `/api/v1/healthz` | 兼容设计文档 §8.7 与 §15 验收脚本两种写法 |
 | `GET /resources/:id/download` | 已实现（文档标注「可选」） | 前端资源下载为真实功能，非占位 |
-| `courses.objective` / `courses.major` | **未实现** | 前端详情页「培养目标 / 适用专业」在 Sprint 1 DDL 中无对应列，页面已做空值降级；若需启用须按 §5.3 新增列 |
+| `courses.objective` / `courses.major` | **未实现** | 前端详情页「培养目标 / 适用专业」在 Sprint 1 DDL 中无对应列，页面已做空值降级；若需启用须按 §6.3 新增列 |
 
 > 前端原 `src/mocks/` 临时数据与 `VITE_USE_MOCK` 开关已删除，前端全部数据来自后端 API（开发期经 Vite proxy）。接口 id 统一使用后端 `uint64` 对应的 `number` 类型。
 
