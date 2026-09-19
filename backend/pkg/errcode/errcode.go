@@ -15,6 +15,7 @@ type Code int
 const (
 	OK            Code = 0
 	Params        Code = 40001
+	BizRule       Code = 40002
 	Unauthorized  Code = 40101
 	ForbiddenRole Code = 40301
 	ForbiddenData Code = 40302
@@ -26,6 +27,7 @@ const (
 var messages = map[Code]string{
 	OK:            "ok",
 	Params:        "参数校验失败",
+	BizRule:       "业务规则校验失败",
 	Unauthorized:  "登录状态已失效，请重新登录",
 	ForbiddenRole: "当前角色无权访问该功能",
 	ForbiddenData: "无权操作该数据",

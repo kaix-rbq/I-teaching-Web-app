@@ -23,3 +23,17 @@ upload:
 
 cors:
   origins: ["http://localhost:5173", "http://127.0.0.1:5173"] # 前端 dev 地址
+
+# 课堂评价计分口径（开发计划 §2.2）。权重合计必须为 1.00，服务启动时校验。
+# 变更口径时必须递增 formulaVersion：历史分按旧口径保留，聚合按版本隔离。
+evaluation:
+  weights: # frontier 为观测项，权重 0，不计入加权总分
+    objective: 0.30
+    content: 0.30
+    interaction: 0.20
+    organization: 0.20
+    frontier: 0.00
+  supervisorWeight: 0.5 # α：综合分中督导评分权重
+  agentWeight: 0.5 # 1−α：综合分中智能体评分权重
+  formulaVersion: "v1"
+  minSampleSize: 3 # 低于该值标记"样本不足"

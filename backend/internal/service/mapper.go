@@ -86,3 +86,82 @@ func toPlanItems(rows []repository.PlanRow) []dto.PlanItem {
 	}
 	return out
 }
+
+// toSessionDetail 映射单场授课记录详情。
+func toSessionDetail(row repository.SessionDetailRow) dto.SessionDetail {
+	return dto.SessionDetail{
+		ID:          row.ID,
+		CourseID:    row.CourseID,
+		CourseCode:  row.CourseCode,
+		CourseName:  row.CourseName,
+		ClassID:     row.ClassID,
+		ClassName:   row.ClassName,
+		TeacherID:   row.TeacherID,
+		TeacherName: row.TeacherName,
+		Semester:    row.Semester,
+		SessionDate: row.SessionDate.Format("2006-01-02"),
+		Period:      row.Period,
+		Topic:       row.Topic,
+		Status:      row.Status,
+	}
+}
+
+// toSessionListItems 映射授课记录列表（双侧评分摘要保留两位小数）。
+func toSessionListItems(rows []repository.SessionListRow) []dto.SessionListItem {
+	out := make([]dto.SessionListItem, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, dto.SessionListItem{
+			ID:              row.ID,
+			SessionDate:     row.SessionDate.Format("2006-01-02"),
+			Period:          row.Period,
+			Topic:           row.Topic,
+			Status:          row.Status,
+			SupervisorScore: round2Ptr(row.SupervisorTotal),
+			AgentScore:      round2Ptr(row.AgentTotal),
+			EvaluationCount: row.EvaluationCount,
+		})
+	}
+	return out
+}
+
+// toEvaluationDTO 映射单条评价（时间输出 ISO 8601）。
+func toEvaluationDTO(row repository.EvaluationRow) dto.EvaluationDTO {
+	return dto.EvaluationDTO{
+		EvaluatorID:    row.EvaluatorID,
+		EvaluatorName:  row.EvaluatorName,
+		EvaluatorType:  row.EvaluatorType,
+		AIModelVersion: row.AIModelVersion,
+		AIConfidence:   round2Ptr(row.AIConfidence),
+		FormulaVersion: row.FormulaVersion,
+		Objective:      uint8PtrToIntPtr(row.ObjectiveScore),
+		Content:        uint8PtrToIntPtr(row.ContentScore),
+		Interaction:    uint8PtrToIntPtr(row.InteractionScore),
+		Organization:   uint8PtrToIntPtr(row.OrganizationScore),
+		Frontier:       uint8PtrToIntPtr(row.FrontierScore),
+		TotalScore:     round2Ptr(row.TotalScore),
+		Comment:        row.Comment,
+		Highlights:     row.Highlights,
+		Improvements:   row.Improvements,
+		Suggestions:    row.Suggestions,
+		CreatedAt:      row.CreatedAt.Format(time.RFC3339),
+		UpdatedAt:      row.UpdatedAt.Format(time.RFC3339),
+	}
+}
+
+// round2Ptr 保留两位小数（nil 透传）。
+func round2Ptr(v *float64) *float64 {
+	if v == nil {
+		return nil
+	}
+	rounded := round2(*v)
+	return &rounded
+}
+
+// uint8PtrToIntPtr 把仓储层的维度原始分（1-5）转换为 DTO 的 *int。
+func uint8PtrToIntPtr(v *uint8) *int {
+	if v == nil {
+		return nil
+	}
+	i := int(*v)
+	return &i
+}
