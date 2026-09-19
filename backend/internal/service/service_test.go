@@ -325,3 +325,180 @@ func TestMapResourceType(t *testing.T) {
 		assert.Equal(t, want, mapResourceType(ext), "ext=%s", ext)
 	}
 }
+
+// evalCfg 构造与开发计划 §2.2 一致的计分口径（frontier 为观测项，权重 0）。
+func evalCfg() config.EvaluationConfig {
+	return config.EvaluationConfig{
+		Weights:          config.WeightConfig{Objective: 0.30, Content: 0.30, Interaction: 0.20, Organization: 0.20},
+		SupervisorWeight: 0.5,
+		AgentWeight:      0.5,
+		FormulaVersion:   "v1",
+		MinSampleSize:    3,
+	}
+}
+
+// sessionRow 构造一场已存在的授课记录（课程 1 / 教师 2 / 软件工程教研室）。
+func sessionRow() *repository.SessionDetailRow {
+	return &repository.SessionDetailRow{
+		ID: 7, CourseID: 1, TeacherID: 2, DepartmentID: 1,
+		CourseCode: "SE3101", CourseName: "软件项目管理", Semester: "2026-2027-1",
+		TeacherName: "李明", Status: "scheduled",
+	}
+}
+
+// TestCheckSessionScope 覆盖授课记录读取的越权矩阵（T1.5 验收：越权 40302）。
+func TestCheckSessionScope(t *testing.T) {
+	row := sessionRow()
+
+	cases := []struct {
+		name    string
+		scope   Scope
+		wantErr bool
+	}{
+		{name: "主任看本室场次", scope: Scope{DepartmentID: 1}, wantErr: false},
+		{name: "主任看他室场次", scope: Scope{DepartmentID: 2}, wantErr: true},
+		{name: "教师看本人场次", scope: Scope{TeacherID: 2}, wantErr: false},
+		{name: "教师看他人场次", scope: Scope{TeacherID: 3}, wantErr: true},
+		{name: "督导看任意场次", scope: Scope{}, wantErr: false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := checkSessionScope(tc.scope, row)
+			if tc.wantErr {
+				require.Error(t, err)
+				assert.Equal(t, errcode.ForbiddenData, errcode.From(err).Code)
+				return
+			}
+			assert.NoError(t, err)
+		})
+	}
+}
+
+// TestResolveSemester 覆盖学期参数解析（§2.5.6：缺省当前学期，未知学期 40001）。
+func TestResolveSemester(t *testing.T) {
+	sem, err := resolveSemester("")
+	require.NoError(t, err)
+	assert.Equal(t, CurrentSemester, sem)
+
+	sem, err = resolveSemester("2025-2026-2")
+	require.NoError(t, err)
+	assert.Equal(t, "2025-2026-2", sem)
+
+	_, err = resolveSemester("2099-2100-1")
+	require.Error(t, err)
+	assert.Equal(t, errcode.Params, errcode.From(err).Code)
+}
+
+// TestSessionCreateRules 覆盖督导创建授课记录的业务规则（S6.1）。
+func TestSessionCreateRules(t *testing.T) {
+	newSvc := func(sessions *fakeSessionRepo) SessionService {
+		courses := &fakeCourseRepo{
+			getDetail: func(ctx context.Context, id uint64) (*repository.CourseRow, error) {
+				return &repository.CourseRow{ID: 1, Code: "SE3101", Name: "软件项目管理", TeacherID: 2, Semester: "2026-2027-1"}, nil
+			},
+		}
+		return NewSessionService(sessions, &fakeEvalRepo{}, courses, &fakeUserRepo{}, evalCfg())
+	}
+
+	t.Run("日期晚于今天返回 40002", func(t *testing.T) {
+		svc := newSvc(&fakeSessionRepo{})
+		_, err := svc.Create(context.Background(), dto.SessionCreateReq{CourseID: 1, SessionDate: "2099-01-01", Period: "1-2 节"})
+		require.Error(t, err)
+		assert.Equal(t, errcode.BizRule, errcode.From(err).Code)
+	})
+
+	t.Run("同课程同日同节次重复返回 40901", func(t *testing.T) {
+		svc := newSvc(&fakeSessionRepo{
+			existsDuplicate: func(ctx context.Context, courseID, classID uint64, date time.Time, period string, excludeID uint64) (bool, error) {
+				return true, nil
+			},
+		})
+		yesterday := time.Now().AddDate(0, 0, -1).Format("2006-01-02")
+		_, err := svc.Create(context.Background(), dto.SessionCreateReq{CourseID: 1, SessionDate: yesterday, Period: "3-4 节"})
+		require.Error(t, err)
+		assert.Equal(t, errcode.Conflict, errcode.From(err).Code)
+	})
+
+	t.Run("成功创建：teacher_id 随课程落库且初始状态 scheduled", func(t *testing.T) {
+		var created *model.TeachingSession
+		sessions := &fakeSessionRepo{
+			create: func(ctx context.Context, s *model.TeachingSession) error {
+				s.ID = 9
+				created = s
+				return nil
+			},
+			getDetail: func(ctx context.Context, id uint64) (*repository.SessionDetailRow, error) {
+				return &repository.SessionDetailRow{
+					ID: 9, CourseID: 1, TeacherID: 2, Status: "scheduled",
+					CourseName: "软件项目管理", TeacherName: "李明", Semester: "2026-2027-1",
+				}, nil
+			},
+		}
+		svc := newSvc(sessions)
+		yesterday := time.Now().AddDate(0, 0, -1).Format("2006-01-02")
+		detail, err := svc.Create(context.Background(), dto.SessionCreateReq{CourseID: 1, SessionDate: yesterday, Period: "验收节次", Topic: "T"})
+		require.NoError(t, err)
+		require.NotNil(t, created)
+		assert.Equal(t, uint64(2), created.TeacherID)
+		assert.Equal(t, model.SessionStatusScheduled, created.Status)
+		assert.Equal(t, "scheduled", detail.Status)
+		assert.Equal(t, "李明", detail.TeacherName)
+	})
+}
+
+// TestSubmitSupervisorEvaluationRules 覆盖评分提交的业务规则（S6.3）。
+func TestSubmitSupervisorEvaluationRules(t *testing.T) {
+	svc := NewSessionService(&fakeSessionRepo{
+		getDetail: func(ctx context.Context, id uint64) (*repository.SessionDetailRow, error) {
+			return sessionRow(), nil
+		},
+	}, &fakeEvalRepo{}, &fakeCourseRepo{}, &fakeUserRepo{}, evalCfg())
+
+	_, err := svc.SubmitSupervisorEvaluation(context.Background(), 5, 7, dto.SupervisorEvaluationReq{Comment: "无维度"})
+	require.Error(t, err)
+	assert.Equal(t, errcode.BizRule, errcode.From(err).Code)
+}
+
+// TestSubmitSupervisorEvaluationIdempotent 验证 T1.6 验收：重复提交整行覆盖而非报错。
+func TestSubmitSupervisorEvaluationIdempotent(t *testing.T) {
+	stored := map[uint64]*model.Evaluation{}
+	sessions := &fakeSessionRepo{
+		getDetail: func(ctx context.Context, id uint64) (*repository.SessionDetailRow, error) {
+			return sessionRow(), nil
+		},
+	}
+	evals := &fakeEvalRepo{
+		upsert: func(ctx context.Context, e *model.Evaluation) error {
+			stored[e.EvaluatorID] = e
+			return nil
+		},
+		listBySession: func(ctx context.Context, sessionID uint64) ([]repository.EvaluationRow, error) {
+			rows := make([]repository.EvaluationRow, 0, len(stored))
+			for _, e := range stored {
+				rows = append(rows, repository.EvaluationRow{Evaluation: *e, EvaluatorName: "陈静"})
+			}
+			return rows, nil
+		},
+	}
+	svc := NewSessionService(sessions, evals, &fakeCourseRepo{}, &fakeUserRepo{}, evalCfg())
+
+	i := func(v int) *int { return &v }
+	first, err := svc.SubmitSupervisorEvaluation(context.Background(), 5, 7, dto.SupervisorEvaluationReq{
+		Objective: i(4), Content: i(3), Interaction: i(2), Organization: i(3), Frontier: i(2),
+	})
+	require.NoError(t, err)
+	require.NotNil(t, first.TotalScore)
+	assert.Equal(t, 52.5, *first.TotalScore)
+	assert.Equal(t, "v1", first.FormulaVersion)
+	assert.Equal(t, "evaluated", sessions.lastStatus)
+
+	second, err := svc.SubmitSupervisorEvaluation(context.Background(), 5, 7, dto.SupervisorEvaluationReq{
+		Objective: i(5), Content: i(4), Interaction: i(4), Organization: i(4), Frontier: i(3),
+	})
+	require.NoError(t, err)
+	require.NotNil(t, second.TotalScore)
+	assert.Equal(t, 82.5, *second.TotalScore)
+	assert.Len(t, stored, 1)
+	assert.Equal(t, "陈静", second.EvaluatorName)
+}

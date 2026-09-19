@@ -7,15 +7,18 @@ import (
 	"time"
 
 	"github.com/spf13/viper"
+
+	"aijiaoxue-api/pkg/scoring"
 )
 
 // Config 是应用的全部可配置项。
 type Config struct {
-	Server ServerConfig `mapstructure:"server"`
-	MySQL  MySQLConfig  `mapstructure:"mysql"`
-	JWT    JWTConfig    `mapstructure:"jwt"`
-	Upload UploadConfig `mapstructure:"upload"`
-	CORS   CORSConfig   `mapstructure:"cors"`
+	Server     ServerConfig     `mapstructure:"server"`
+	MySQL      MySQLConfig      `mapstructure:"mysql"`
+	JWT        JWTConfig        `mapstructure:"jwt"`
+	Upload     UploadConfig     `mapstructure:"upload"`
+	CORS       CORSConfig       `mapstructure:"cors"`
+	Evaluation EvaluationConfig `mapstructure:"evaluation"`
 }
 
 // ServerConfig 描述 HTTP 服务监听参数。
@@ -49,6 +52,36 @@ type CORSConfig struct {
 	Origins []string `mapstructure:"origins"`
 }
 
+// EvaluationConfig 描述课堂评价计分口径（开发计划 §2.2）。
+// 变更口径必须递增 FormulaVersion：历史分按旧口径保留，聚合按版本隔离。
+type EvaluationConfig struct {
+	Weights          WeightConfig `mapstructure:"weights"`
+	SupervisorWeight float64      `mapstructure:"supervisorWeight"`
+	AgentWeight      float64      `mapstructure:"agentWeight"`
+	FormulaVersion   string       `mapstructure:"formulaVersion"`
+	MinSampleSize    int          `mapstructure:"minSampleSize"`
+}
+
+// WeightConfig 是 5 个维度的生效权重；非零项合计必须为 1.00。
+type WeightConfig struct {
+	Objective    float64 `mapstructure:"objective"`
+	Content      float64 `mapstructure:"content"`
+	Interaction  float64 `mapstructure:"interaction"`
+	Organization float64 `mapstructure:"organization"`
+	Frontier     float64 `mapstructure:"frontier"`
+}
+
+// ScoringWeights 转换为 pkg/scoring 的权重结构。
+func (e EvaluationConfig) ScoringWeights() scoring.Weights {
+	return scoring.Weights{
+		Objective:    e.Weights.Objective,
+		Content:      e.Weights.Content,
+		Interaction:  e.Weights.Interaction,
+		Organization: e.Weights.Organization,
+		Frontier:     e.Weights.Frontier,
+	}
+}
+
 // TTLDuration 把 jwt.ttl 解析为 time.Duration。
 func (c JWTConfig) TTLDuration() time.Duration {
 	d, err := time.ParseDuration(c.TTL)
@@ -73,6 +106,17 @@ func Load(path string) (*Config, error) {
 	v.SetDefault("upload.dir", "./uploads")
 	v.SetDefault("upload.maxSize", 100*1024*1024)
 
+	// 评分口径默认值 = 开发计划 §2.2（frontier 为观测项，权重 0）。
+	v.SetDefault("evaluation.weights.objective", 0.30)
+	v.SetDefault("evaluation.weights.content", 0.30)
+	v.SetDefault("evaluation.weights.interaction", 0.20)
+	v.SetDefault("evaluation.weights.organization", 0.20)
+	v.SetDefault("evaluation.weights.frontier", 0.00)
+	v.SetDefault("evaluation.supervisorWeight", 0.5)
+	v.SetDefault("evaluation.agentWeight", 0.5)
+	v.SetDefault("evaluation.formulaVersion", "v1")
+	v.SetDefault("evaluation.minSampleSize", 3)
+
 	v.SetEnvPrefix("AIJIAOXUE")
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	v.AutomaticEnv()
@@ -90,6 +134,10 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.JWT.Secret == "" {
 		return nil, fmt.Errorf("config: jwt.secret 不能为空")
+	}
+	// §2.2 硬性约定：维度权重非零项合计必须为 1.00，服务启动时校验。
+	if err := cfg.Evaluation.ScoringWeights().Validate(); err != nil {
+		return nil, fmt.Errorf("config: %w", err)
 	}
 	return &cfg, nil
 }
