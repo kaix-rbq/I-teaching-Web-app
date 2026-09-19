@@ -20,6 +20,19 @@ const (
 	PlanStatusCompleted = "completed"
 )
 
+// 授课记录状态。
+const (
+	SessionStatusScheduled = "scheduled"
+	SessionStatusRecorded  = "recorded"
+	SessionStatusEvaluated = "evaluated"
+)
+
+// 评价来源（evaluator_type）：supervisor 与 agent 同表同结构，聚合层只认该枚举。
+const (
+	EvaluatorSupervisor = "supervisor"
+	EvaluatorAgent      = "agent"
+)
+
 // 资源类型（按扩展名映射）。
 const (
 	ResourceTypePDF   = "pdf"
