@@ -2,7 +2,7 @@ APP := aijiaoxue-api
 CONFIG ?= config.yaml
 PKG := ./...
 
-.PHONY: help run build seed test lint tidy db-init db-seed verify
+.PHONY: help run build seed test lint tidy db-init db-seed migrate migrate-down migrate-version verify
 
 help:
 	@echo "make run      启动开发服务（air 热重载，未安装则回退 go run）"
@@ -13,6 +13,9 @@ help:
 	@echo "make tidy     go mod tidy"
 	@echo "make db-init  执行 database/schema.sql（建库建表，需 root 密码）"
 	@echo "make db-seed  执行 database/seed.sql（清空并写入种子数据）"
+	@echo "make migrate  执行 golang-migrate 升级到最新版本（V1 基线 + V2 起新表）"
+	@echo "make migrate-down  回滚一个迁移版本"
+	@echo "make migrate-version  查看当前迁移版本"
 	@echo "make verify   端到端验收脚本 scripts/verify.sh"
 
 run:
@@ -46,6 +49,15 @@ db-init:
 
 db-seed:
 	mysql -u root -p aijiaoxue < database/seed.sql
+
+migrate:
+	go run ./cmd/migrate -config $(CONFIG) up
+
+migrate-down:
+	go run ./cmd/migrate -config $(CONFIG) down 1
+
+migrate-version:
+	go run ./cmd/migrate -config $(CONFIG) version
 
 verify:
 	bash scripts/verify.sh
