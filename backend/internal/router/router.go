@@ -73,6 +73,7 @@ func New(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) *gin.Engine {
 	authed.GET("/sessions/:id", sessionH.Detail)
 	authed.GET("/sessions/:id/evaluation", sessionH.Evaluation)
 	authed.GET("/teachers/:id/evaluation-summary", teacherScoreH.TeacherSummary)
+	authed.GET("/teachers/:id/evaluations", teacherScoreH.TeacherEvaluations)
 
 	authed.Group("", middleware.RequireRoles(service.RoleDirector)).
 		POST("/courses", courseH.Create).

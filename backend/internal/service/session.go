@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"aijiaoxue-api/internal/config"
@@ -88,6 +89,10 @@ func (s *sessionService) Create(ctx context.Context, req dto.SessionCreateReq) (
 		Status:      model.SessionStatusScheduled,
 	}
 	if err := s.sessions.Create(ctx, session); err != nil {
+		// 唯一性预检与写入之间存在并发窗口，数据库唯一键兜底时同样返回 40901。
+		if repository.IsDuplicate(err) {
+			return nil, errcode.New(errcode.Conflict, "该课程同日同节次已存在授课记录")
+		}
 		return nil, errcode.Wrap(errcode.Internal, "创建授课记录失败", err)
 	}
 	return s.Detail(ctx, RoleSupervisor, 0, 0, session.ID)
@@ -192,9 +197,9 @@ func (s *sessionService) SubmitSupervisorEvaluation(
 	}
 
 	dims := scoring.NewDimensionScores(req.Objective, req.Content, req.Interaction, req.Organization, req.Frontier)
-	if req.Objective == nil && req.Content == nil && req.Interaction == nil &&
-		req.Organization == nil && req.Frontier == nil {
-		return nil, errcode.New(errcode.BizRule, "至少需要提交一个维度的评分")
+	// 督导评分强制 5 个维度全部录入（§2.1：只有智能体侧允许 null）；缺失返回 40002（§4 错误码表）。
+	if missing := missingDimensions(req); len(missing) > 0 {
+		return nil, errcode.Newf(errcode.BizRule, "评分维度缺失：%s，五个维度均为必填", strings.Join(missing, "、"))
 	}
 
 	total := scoring.SideTotal(dims, s.cfg.ScoringWeights())
@@ -255,4 +260,26 @@ func intPtrToUint8(v *int) *uint8 {
 	}
 	u := uint8(*v)
 	return &u
+}
+
+// missingDimensions 返回督导评分请求中缺失的维度中文名（空表示五维齐全）。
+// 顺序固定为 objective→content→interaction→organization→frontier，便于测试与提示。
+func missingDimensions(req dto.SupervisorEvaluationReq) []string {
+	checks := []struct {
+		name string
+		v    *int
+	}{
+		{"教学目标与内容准确性", req.Objective},
+		{"内容质量与深度", req.Content},
+		{"学生互动与参与", req.Interaction},
+		{"课堂组织与节奏", req.Organization},
+		{"前沿与交叉学科", req.Frontier},
+	}
+	var missing []string
+	for _, c := range checks {
+		if c.v == nil {
+			missing = append(missing, c.name)
+		}
+	}
+	return missing
 }

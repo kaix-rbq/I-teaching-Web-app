@@ -21,6 +21,7 @@ type TeacherScoreService interface {
 	List(ctx context.Context, role string, deptID uint64, q dto.TeacherScoreListQuery) (*dto.PageResult[dto.TeacherScoreItem], error)
 	TeacherSummary(ctx context.Context, role string, deptID, userID, teacherID uint64, semester string) (*dto.TeacherEvaluationSummary, error)
 	CourseSummary(ctx context.Context, role string, deptID, userID, courseID uint64, semester string) (*dto.CourseEvaluationSummary, error)
+	TeacherEvaluations(ctx context.Context, role string, deptID, userID, teacherID uint64, q dto.TeacherEvaluationTimelineQuery) (*dto.PageResult[dto.TeacherEvaluationTimelineItem], error)
 }
 
 type teacherScoreService struct {
@@ -110,28 +111,9 @@ func (s *teacherScoreService) TeacherSummary(
 		return nil, err
 	}
 
-	teacher, err := s.users.GetByID(ctx, teacherID)
+	teacher, err := s.checkTeacherAccess(ctx, role, deptID, userID, teacherID)
 	if err != nil {
-		if repository.IsNotFound(err) {
-			return nil, errcode.New(errcode.NotFound, "教师不存在")
-		}
-		return nil, errcode.Wrap(errcode.Internal, "查询教师失败", err)
-	}
-	if teacher.Role != model.RoleTeacher {
-		return nil, errcode.New(errcode.NotFound, "教师不存在")
-	}
-	switch role {
-	case RoleTeacher:
-		if teacherID != userID {
-			return nil, errcode.New(errcode.ForbiddenData, "教师只能查看本人的评分")
-		}
-	case RoleDirector:
-		if teacher.DeptID() != deptID {
-			return nil, errcode.New(errcode.ForbiddenData, "无权查看其他教研室的教师")
-		}
-	case RoleSupervisor:
-	default:
-		return nil, errcode.New(errcode.ForbiddenRole, errcode.ForbiddenRole.Message())
+		return nil, err
 	}
 
 	rows, err := s.evals.ListSessionDimRows(ctx, repository.SessionDimFilter{
@@ -214,31 +196,174 @@ func (s *teacherScoreService) CourseSummary(
 	}, nil
 }
 
+// checkTeacherAccess 校验「谁能看这个教师的评分」：teacher 仅自己 / director 本室 / supervisor 全校。
+// 越权返回 40302；角色不在矩阵内返回 40301；教师不存在返回 40401。
+// TeacherSummary 与 TeacherEvaluations 共用，避免两处权限口径漂移。
+func (s *teacherScoreService) checkTeacherAccess(
+	ctx context.Context, role string, deptID, userID, teacherID uint64,
+) (*model.User, error) {
+	teacher, err := s.users.GetByID(ctx, teacherID)
+	if err != nil {
+		if repository.IsNotFound(err) {
+			return nil, errcode.New(errcode.NotFound, "教师不存在")
+		}
+		return nil, errcode.Wrap(errcode.Internal, "查询教师失败", err)
+	}
+	if teacher.Role != model.RoleTeacher {
+		return nil, errcode.New(errcode.NotFound, "教师不存在")
+	}
+	switch role {
+	case RoleTeacher:
+		if teacherID != userID {
+			return nil, errcode.New(errcode.ForbiddenData, "教师只能查看本人的评分")
+		}
+	case RoleDirector:
+		if teacher.DeptID() != deptID {
+			return nil, errcode.New(errcode.ForbiddenData, "无权查看其他教研室的教师")
+		}
+	case RoleSupervisor:
+	default:
+		return nil, errcode.New(errcode.ForbiddenRole, errcode.ForbiddenRole.Message())
+	}
+	return teacher, nil
+}
+
+// TeacherEvaluations 返回教师「历次评价时间线」（S6.5 / T1.13）：按场次日期倒序，
+// 每行含课次信息 + 督导结构化评语 + 智能体参考 + 场次综合分，一次拉取即可渲染，
+// 免去前端「按课程取场次、再逐场取评语」的 N+1 编排。
+// 权限与教师面板一致（teacher 仅自己 / director 本室 / supervisor 全校）。
+func (s *teacherScoreService) TeacherEvaluations(
+	ctx context.Context, role string, deptID, userID, teacherID uint64, q dto.TeacherEvaluationTimelineQuery,
+) (*dto.PageResult[dto.TeacherEvaluationTimelineItem], error) {
+	sem, err := resolveSemester(q.Semester)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := s.checkTeacherAccess(ctx, role, deptID, userID, teacherID); err != nil {
+		return nil, err
+	}
+
+	rows, err := s.evals.ListSessionDimRows(ctx, repository.SessionDimFilter{
+		TeacherID:      teacherID,
+		Semester:       sem,
+		FormulaVersion: s.cfg.FormulaVersion,
+	})
+	if err != nil {
+		return nil, errcode.Wrap(errcode.Internal, "查询教师评价时间线失败", err)
+	}
+
+	// 只保留「有评价」的场次（时间线不展示空课次），按课次日期倒序。
+	evaluated := make([]repository.SessionDimRow, 0, len(rows))
+	for _, row := range rows {
+		if row.HasSupervisor || row.HasAgent {
+			evaluated = append(evaluated, row)
+		}
+	}
+	sort.SliceStable(evaluated, func(i, j int) bool {
+		if !evaluated[i].SessionDate.Equal(evaluated[j].SessionDate) {
+			return evaluated[i].SessionDate.After(evaluated[j].SessionDate)
+		}
+		return evaluated[i].SessionID > evaluated[j].SessionID
+	})
+
+	page, pageSize := normalizePage(q.Page, q.PageSize)
+	total := len(evaluated)
+	start := (page - 1) * pageSize
+	if start > total {
+		start = total
+	}
+	end := start + pageSize
+	if end > total {
+		end = total
+	}
+	pageRows := evaluated[start:end]
+
+	// 只为当前页场次批量取评语，避免逐场查询。
+	ids := make([]uint64, 0, len(pageRows))
+	for _, row := range pageRows {
+		ids = append(ids, row.SessionID)
+	}
+	evalRows, err := s.evals.ListBySessionIDs(ctx, ids)
+	if err != nil {
+		return nil, errcode.Wrap(errcode.Internal, "查询课堂评价失败", err)
+	}
+	bySession := make(map[uint64][]repository.EvaluationRow, len(pageRows))
+	for _, e := range evalRows {
+		bySession[e.SessionID] = append(bySession[e.SessionID], e)
+	}
+
+	weights := s.cfg.ScoringWeights()
+	items := make([]dto.TeacherEvaluationTimelineItem, 0, len(pageRows))
+	for _, row := range pageRows {
+		item := dto.TeacherEvaluationTimelineItem{
+			SessionID:             row.SessionID,
+			SessionDate:           row.SessionDate.Format("2006-01-02"),
+			Period:                row.Period,
+			Topic:                 row.Topic,
+			CourseID:              row.CourseID,
+			CourseCode:            row.CourseCode,
+			CourseName:            row.CourseName,
+			Status:                row.Status,
+			CompositeScore:        round2Ptr(scoring.SessionComposite(sessionScoreFromDim(row), weights, s.cfg.SupervisorWeight)),
+			SupervisorEvaluations: []dto.EvaluationDTO{},
+		}
+		var supSum float64
+		var supN int
+		for _, e := range bySession[row.SessionID] {
+			d := toEvaluationDTO(e)
+			switch e.EvaluatorType {
+			case model.EvaluatorSupervisor:
+				item.SupervisorEvaluations = append(item.SupervisorEvaluations, d)
+				if d.TotalScore != nil {
+					supSum += *d.TotalScore
+					supN++
+				}
+			case model.EvaluatorAgent:
+				agent := d
+				item.AgentEvaluation = &agent
+				item.AgentScore = round2Ptr(d.TotalScore)
+			}
+		}
+		if supN > 0 {
+			avg := round2(supSum / float64(supN))
+			item.SupervisorScore = &avg
+		}
+		items = append(items, item)
+	}
+	return dto.NewPageResult(items, int64(total), page, pageSize), nil
+}
+
+// sessionScoreFromDim 把一行场次维度均分映射为 scoring.SessionScore（双侧可缺）。
+// 聚合与「历次评价时间线」共用，保证同一场次的分数口径完全一致。
+func sessionScoreFromDim(row repository.SessionDimRow) scoring.SessionScore {
+	item := scoring.SessionScore{SessionID: row.SessionID, CourseID: row.CourseID}
+	if row.HasSupervisor {
+		item.Supervisor = &scoring.DimensionScores{
+			Objective:    row.SupObjective,
+			Content:      row.SupContent,
+			Interaction:  row.SupInteraction,
+			Organization: row.SupOrganization,
+			Frontier:     row.SupFrontier,
+		}
+	}
+	if row.HasAgent {
+		item.Agent = &scoring.DimensionScores{
+			Objective:    row.AiObjective,
+			Content:      row.AiContent,
+			Interaction:  row.AiInteraction,
+			Organization: row.AiOrganization,
+			Frontier:     row.AiFrontier,
+		}
+	}
+	return item
+}
+
 // aggregate 是全部聚合的唯一路径：仓储行 → scoring.SessionScore → Aggregate。
 // 任何新增的评分视图都必须经过它，禁止另写聚合公式。
 func (s *teacherScoreService) aggregate(rows []repository.SessionDimRow) scoring.Summary {
 	items := make([]scoring.SessionScore, 0, len(rows))
 	for _, row := range rows {
-		item := scoring.SessionScore{SessionID: row.SessionID, CourseID: row.CourseID}
-		if row.HasSupervisor {
-			item.Supervisor = &scoring.DimensionScores{
-				Objective:    row.SupObjective,
-				Content:      row.SupContent,
-				Interaction:  row.SupInteraction,
-				Organization: row.SupOrganization,
-				Frontier:     row.SupFrontier,
-			}
-		}
-		if row.HasAgent {
-			item.Agent = &scoring.DimensionScores{
-				Objective:    row.AiObjective,
-				Content:      row.AiContent,
-				Interaction:  row.AiInteraction,
-				Organization: row.AiOrganization,
-				Frontier:     row.AiFrontier,
-			}
-		}
-		items = append(items, item)
+		items = append(items, sessionScoreFromDim(row))
 	}
 	return scoring.Aggregate(items, s.cfg.ScoringWeights(), s.cfg.SupervisorWeight)
 }
@@ -260,7 +385,7 @@ func (s *teacherScoreService) toScoreSummary(sum scoring.Summary) dto.ScoreSumma
 	}
 
 	flags := sum.Flags
-	if sum.Sample.SessionCount < s.cfg.MinSampleSize {
+	if sum.Sample.EvaluatedCount < s.cfg.MinSampleSize {
 		flags = append(flags, "sample_insufficient")
 	}
 	if flags == nil {
@@ -274,10 +399,11 @@ func (s *teacherScoreService) toScoreSummary(sum scoring.Summary) dto.ScoreSumma
 		Dimensions:      dims,
 		Sample: dto.SampleDTO{
 			SessionCount:     sum.Sample.SessionCount,
+			EvaluatedCount:   sum.Sample.EvaluatedCount,
 			SupervisorCount:  sum.Sample.SupervisorCount,
 			AgentCount:       sum.Sample.AgentCount,
 			AlignedCount:     sum.Sample.AlignedCount,
-			SampleSufficient: sum.Sample.SessionCount >= s.cfg.MinSampleSize,
+			SampleSufficient: sum.Sample.EvaluatedCount >= s.cfg.MinSampleSize,
 		},
 		Flags:          flags,
 		Weights:        dto.ScoreWeights{Supervisor: s.cfg.SupervisorWeight, Agent: s.cfg.AgentWeight},

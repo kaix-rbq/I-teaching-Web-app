@@ -96,7 +96,7 @@ INSERT INTO `teaching_sessions`
 INSERT INTO `evaluations`
   (`session_id`,`evaluator_type`,`evaluator_id`,`objective_score`,`content_score`,
    `interaction_score`,`organization_score`,`frontier_score`,`total_score`,
-   `comment`,`highlights`,`improvements`) VALUES
+   `comment`,`highlights`,`improvements`,`suggestions`) VALUES
 (1,'supervisor',5, 4,3,2,3,2, 52.50, '开篇结构完整，但互动偏少。',
    '课程框架清晰','提问后等待时间不足','增加案例讨论环节'),
 (2,'supervisor',5, 4,4,3,4,3, 70.00, '用户故事讲解透彻，小组讨论有效。',

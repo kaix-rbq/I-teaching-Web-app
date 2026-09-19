@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"time"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -18,22 +19,29 @@ type EvaluationRow struct {
 // SessionDimRow 是 §2.5.4 聚合 SQL 的输出：每场次每侧的维度均分（1-5 原始标度）。
 // SQL 只负责按侧取均分；(v−1)/4×100 换算、权重加权与 α 融合在 service 层的
 // pkg/scoring.Aggregate 完成（线性等价，开发计划 §2.5.4 口径约定）。
+// 同时带上场次/课程展示列，供「历次评价时间线」直接复用，避免二次查询。
 type SessionDimRow struct {
-	SessionID       uint64   `gorm:"column:session_id"`
-	TeacherID       uint64   `gorm:"column:teacher_id"`
-	CourseID        uint64   `gorm:"column:course_id"`
-	HasSupervisor   bool     `gorm:"column:has_supervisor"`
-	HasAgent        bool     `gorm:"column:has_agent"`
-	SupObjective    *float64 `gorm:"column:sup_objective"`
-	SupContent      *float64 `gorm:"column:sup_content"`
-	SupInteraction  *float64 `gorm:"column:sup_interaction"`
-	SupOrganization *float64 `gorm:"column:sup_organization"`
-	SupFrontier     *float64 `gorm:"column:sup_frontier"`
-	AiObjective     *float64 `gorm:"column:ai_objective"`
-	AiContent       *float64 `gorm:"column:ai_content"`
-	AiInteraction   *float64 `gorm:"column:ai_interaction"`
-	AiOrganization  *float64 `gorm:"column:ai_organization"`
-	AiFrontier      *float64 `gorm:"column:ai_frontier"`
+	SessionID       uint64    `gorm:"column:session_id"`
+	TeacherID       uint64    `gorm:"column:teacher_id"`
+	CourseID        uint64    `gorm:"column:course_id"`
+	SessionDate     time.Time `gorm:"column:session_date"`
+	Period          string    `gorm:"column:period"`
+	Topic           string    `gorm:"column:topic"`
+	Status          string    `gorm:"column:status"`
+	CourseCode      string    `gorm:"column:course_code"`
+	CourseName      string    `gorm:"column:course_name"`
+	HasSupervisor   bool      `gorm:"column:has_supervisor"`
+	HasAgent        bool      `gorm:"column:has_agent"`
+	SupObjective    *float64  `gorm:"column:sup_objective"`
+	SupContent      *float64  `gorm:"column:sup_content"`
+	SupInteraction  *float64  `gorm:"column:sup_interaction"`
+	SupOrganization *float64  `gorm:"column:sup_organization"`
+	SupFrontier     *float64  `gorm:"column:sup_frontier"`
+	AiObjective     *float64  `gorm:"column:ai_objective"`
+	AiContent       *float64  `gorm:"column:ai_content"`
+	AiInteraction   *float64  `gorm:"column:ai_interaction"`
+	AiOrganization  *float64  `gorm:"column:ai_organization"`
+	AiFrontier      *float64  `gorm:"column:ai_frontier"`
 }
 
 // SessionDimFilter 是聚合范围：零值字段表示不限制。
@@ -50,6 +58,7 @@ type SessionDimFilter struct {
 type EvaluationRepository interface {
 	Upsert(ctx context.Context, e *model.Evaluation) error
 	ListBySession(ctx context.Context, sessionID uint64) ([]EvaluationRow, error)
+	ListBySessionIDs(ctx context.Context, sessionIDs []uint64) ([]EvaluationRow, error)
 	ListSessionDimRows(ctx context.Context, f SessionDimFilter) ([]SessionDimRow, error)
 }
 
@@ -95,6 +104,26 @@ func (r *evaluationRepository) ListBySession(ctx context.Context, sessionID uint
 	return rows, nil
 }
 
+// ListBySessionIDs 批量返回多个场次的全部评价（避免时间线逐场 N+1 查询）。
+// 入参为空时直接返回空切片，不发起查询。
+func (r *evaluationRepository) ListBySessionIDs(ctx context.Context, sessionIDs []uint64) ([]EvaluationRow, error) {
+	if len(sessionIDs) == 0 {
+		return []EvaluationRow{}, nil
+	}
+	var rows []EvaluationRow
+	err := r.db.WithContext(ctx).
+		Table("evaluations AS e").
+		Select("e.*, COALESCE(u.name, '') AS evaluator_name").
+		Joins("LEFT JOIN users AS u ON u.id = e.evaluator_id").
+		Where("e.session_id IN ?", sessionIDs).
+		Order("e.session_id ASC, e.evaluator_type DESC, e.created_at ASC, e.id ASC").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
 // ListSessionDimRows 是教师级/课程级聚合的数据出口（§2.5.4）。
 // 三处易错点均已按计划处理：
 //  1. 侧别计数用 MAX(CASE...THEN 1 ELSE 0)，不能 COUNT(列)——agent 的 objective 恒为 NULL；
@@ -122,6 +151,8 @@ func (r *evaluationRepository) ListSessionDimRows(ctx context.Context, f Session
 
 	var rows []SessionDimRow
 	err := tx.Select(`ts.id AS session_id, ts.teacher_id, ts.course_id,
+			ts.session_date, ts.period, ts.topic, ts.status,
+			c.code AS course_code, c.name AS course_name,
 			MAX(CASE WHEN e.evaluator_type = 'supervisor' THEN 1 ELSE 0 END) = 1 AS has_supervisor,
 			MAX(CASE WHEN e.evaluator_type = 'agent'      THEN 1 ELSE 0 END) = 1 AS has_agent,
 			AVG(CASE WHEN e.evaluator_type = 'supervisor' THEN e.objective_score    END) AS sup_objective,

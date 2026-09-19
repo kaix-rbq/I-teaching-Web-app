@@ -101,6 +101,9 @@ func (r *sessionRepository) GetDetail(ctx context.Context, id uint64) (*SessionD
 }
 
 // ExistsDuplicate 校验 uk_session 唯一键：同课程 + 同班级 + 同日 + 同节次。
+// session_date 是 DATE 列，必须按 YYYY-MM-DD 绑定：若直接传 time.Time，驱动会带上
+// 时区换算后的时分秒（如 2026-09-12 08:00:00），与 DATE 值比较不相等，导致唯一性
+// 预检漏判、最终由数据库抛 1062（表现为 50001 而非 40901）。
 // excludeID 用于更新场景排除自身（当前无更新接口，恒传 0）。
 func (r *sessionRepository) ExistsDuplicate(
 	ctx context.Context, courseID, classID uint64, date time.Time, period string, excludeID uint64,
@@ -108,7 +111,8 @@ func (r *sessionRepository) ExistsDuplicate(
 	var count int64
 	err := r.db.WithContext(ctx).
 		Model(&model.TeachingSession{}).
-		Where("course_id = ? AND class_id = ? AND session_date = ? AND period = ?", courseID, classID, date, period).
+		Where("course_id = ? AND class_id = ? AND session_date = ? AND period = ?",
+			courseID, classID, date.Format("2006-01-02"), period).
 		Where("id <> ?", excludeID).
 		Count(&count).Error
 	if err != nil {

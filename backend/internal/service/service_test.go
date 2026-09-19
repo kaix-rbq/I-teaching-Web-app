@@ -460,6 +460,66 @@ func TestSubmitSupervisorEvaluationRules(t *testing.T) {
 	assert.Equal(t, errcode.BizRule, errcode.From(err).Code)
 }
 
+// TestSubmitSupervisorEvaluationRequiresAllDims 覆盖 F4：督导五个维度必须全部录入，
+// 任一缺失返回 40002（开发计划 §2.1 / §4 错误码表）。
+func TestSubmitSupervisorEvaluationRequiresAllDims(t *testing.T) {
+	svc := NewSessionService(&fakeSessionRepo{
+		getDetail: func(ctx context.Context, id uint64) (*repository.SessionDetailRow, error) {
+			return sessionRow(), nil
+		},
+	}, &fakeEvalRepo{}, &fakeCourseRepo{}, &fakeUserRepo{}, evalCfg())
+
+	i := func(v int) *int { return &v }
+	cases := []struct {
+		name string
+		req  dto.SupervisorEvaluationReq
+	}{
+		{name: "缺 interaction/organization/frontier", req: dto.SupervisorEvaluationReq{Objective: i(4), Content: i(3)}},
+		{name: "只缺 frontier", req: dto.SupervisorEvaluationReq{Objective: i(4), Content: i(3), Interaction: i(2), Organization: i(3)}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := svc.SubmitSupervisorEvaluation(context.Background(), 5, 7, tc.req)
+			require.Error(t, err)
+			assert.Equal(t, errcode.BizRule, errcode.From(err).Code)
+		})
+	}
+}
+
+// TestTeacherSummarySampleUsesEvaluated 覆盖 F5：样本充足性以「已评价场次」为准，
+// 未评价场次不得把样本量撑到达标（§2.5.5）。
+func TestTeacherSummarySampleUsesEvaluated(t *testing.T) {
+	dept := uint64(1)
+	users := &fakeUserRepo{getByID: func(_ context.Context, id uint64) (*model.User, error) {
+		return &model.User{ID: id, Name: "李明", Role: model.RoleTeacher, DepartmentID: &dept}, nil
+	}}
+	f := func(v float64) *float64 { return &v }
+	rows := []repository.SessionDimRow{
+		{SessionID: 1, TeacherID: 2, CourseID: 1, HasSupervisor: true,
+			SupObjective: f(4), SupContent: f(4), SupInteraction: f(4), SupOrganization: f(4), SupFrontier: f(4)},
+		{SessionID: 2, TeacherID: 2, CourseID: 1},
+		{SessionID: 3, TeacherID: 2, CourseID: 1},
+	}
+	evals := &fakeEvalRepo{listSessionDimRows: func(
+		context.Context, repository.SessionDimFilter,
+	) ([]repository.SessionDimRow, error) {
+		return rows, nil
+	}}
+	courses := &fakeCourseRepo{getDetail: func(_ context.Context, id uint64) (*repository.CourseRow, error) {
+		return &repository.CourseRow{ID: id, Code: "SE3101", Name: "软件项目管理", TeacherID: 2, DepartmentID: 1}, nil
+	}}
+	svc := NewTeacherScoreService(users, courses, evals, evalCfg())
+
+	sum, err := svc.TeacherSummary(context.Background(), RoleDirector, 1, 1, 2, "")
+	require.NoError(t, err)
+	assert.Equal(t, 3, sum.Sample.SessionCount, "总会话数=3")
+	assert.Equal(t, 1, sum.Sample.EvaluatedCount, "已评价场次=1")
+	assert.False(t, sum.Sample.SampleSufficient, "已评价场次 1<3，必须标记样本不足")
+	assert.Contains(t, sum.Flags, "sample_insufficient")
+	require.NotNil(t, sum.CompositeScore)
+	assert.Equal(t, 75.00, *sum.CompositeScore)
+}
+
 // TestSubmitSupervisorEvaluationIdempotent 验证 T1.6 验收：重复提交整行覆盖而非报错。
 func TestSubmitSupervisorEvaluationIdempotent(t *testing.T) {
 	stored := map[uint64]*model.Evaluation{}
@@ -501,4 +561,112 @@ func TestSubmitSupervisorEvaluationIdempotent(t *testing.T) {
 	assert.Equal(t, 82.5, *second.TotalScore)
 	assert.Len(t, stored, 1)
 	assert.Equal(t, "陈静", second.EvaluatorName)
+}
+
+// teacherDimRow 构造一行场次维度均分（两侧均为 4 分，便于手算 75.00）。
+func teacherDimRow(sessionID, courseID uint64, date string, hasSup, hasAgent bool) repository.SessionDimRow {
+	d, _ := time.Parse("2006-01-02", date)
+	f := func(v float64) *float64 { return &v }
+	row := repository.SessionDimRow{
+		SessionID: sessionID, TeacherID: 2, CourseID: courseID,
+		SessionDate: d, Period: "3-4 节", Topic: "验收主题", Status: "evaluated",
+		CourseCode: "SE3101", CourseName: "软件项目管理",
+		HasSupervisor: hasSup, HasAgent: hasAgent,
+	}
+	if hasSup {
+		row.SupObjective, row.SupContent = f(4), f(4)
+		row.SupInteraction, row.SupOrganization, row.SupFrontier = f(4), f(4), f(4)
+	}
+	if hasAgent {
+		row.AiContent, row.AiInteraction = f(4), f(4)
+		row.AiOrganization, row.AiFrontier = f(4), f(4)
+	}
+	return row
+}
+
+// TestTeacherEvaluationsTimeline 覆盖 T1.13：历次评价时间线按课次倒序、
+// 只含有评价的场次，并带督导评语与智能体参考；同时覆盖分页与越权。
+func TestTeacherEvaluationsTimeline(t *testing.T) {
+	dept := uint64(1)
+	users := &fakeUserRepo{getByID: func(_ context.Context, id uint64) (*model.User, error) {
+		return &model.User{ID: id, Name: "李明", Role: model.RoleTeacher, DepartmentID: &dept}, nil
+	}}
+	f := func(v float64) *float64 { return &v }
+	rows := []repository.SessionDimRow{
+		teacherDimRow(1, 1, "2026-09-12", true, false),  // 仅督导
+		teacherDimRow(2, 1, "2026-09-19", true, true),   // 双侧
+		teacherDimRow(3, 1, "2026-09-26", false, false), // 未评价 → 不得进入时间线
+	}
+	evals := []repository.EvaluationRow{
+		{Evaluation: model.Evaluation{SessionID: 2, EvaluatorType: model.EvaluatorSupervisor, EvaluatorID: 5,
+			TotalScore: f(70), Comment: "讲解透彻", Highlights: "讨论有效"}, EvaluatorName: "陈静"},
+		{Evaluation: model.Evaluation{SessionID: 2, EvaluatorType: model.EvaluatorAgent, EvaluatorID: 0,
+			TotalScore: f(67.86), AIModelVersion: "qwen-audio-v1"}},
+		{Evaluation: model.Evaluation{SessionID: 1, EvaluatorType: model.EvaluatorSupervisor, EvaluatorID: 5,
+			TotalScore: f(52.5), Comment: "互动偏少"}, EvaluatorName: "陈静"},
+	}
+	repo := &fakeEvalRepo{
+		listSessionDimRows: func(
+			context.Context, repository.SessionDimFilter,
+		) ([]repository.SessionDimRow, error) {
+			return rows, nil
+		},
+		listBySessionIDs: func(_ context.Context, ids []uint64) ([]repository.EvaluationRow, error) {
+			out := make([]repository.EvaluationRow, 0, len(evals))
+			for _, e := range evals {
+				for _, id := range ids {
+					if e.SessionID == id {
+						out = append(out, e)
+						break
+					}
+				}
+			}
+			return out, nil
+		},
+	}
+	svc := NewTeacherScoreService(users, &fakeCourseRepo{}, repo, evalCfg())
+
+	res, err := svc.TeacherEvaluations(context.Background(), RoleDirector, 1, 1, 2, dto.TeacherEvaluationTimelineQuery{})
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), res.Total, "未评价场次不计入时间线")
+	require.Len(t, res.List, 2)
+	assert.Equal(t, uint64(2), res.List[0].SessionID, "必须按课次日期倒序")
+	assert.Equal(t, uint64(1), res.List[1].SessionID)
+	assert.Equal(t, "2026-09-19", res.List[0].SessionDate)
+	assert.Equal(t, "软件项目管理", res.List[0].CourseName)
+
+	// 场次 2：双侧全 4 分 → 融合后 75.00；督导/智能体单侧分取落库总分。
+	require.NotNil(t, res.List[0].CompositeScore)
+	assert.Equal(t, 75.00, *res.List[0].CompositeScore)
+	require.NotNil(t, res.List[0].SupervisorScore)
+	assert.Equal(t, 70.0, *res.List[0].SupervisorScore)
+	require.NotNil(t, res.List[0].AgentScore)
+	assert.Equal(t, 67.86, *res.List[0].AgentScore)
+	require.Len(t, res.List[0].SupervisorEvaluations, 1)
+	assert.Equal(t, "讲解透彻", res.List[0].SupervisorEvaluations[0].Comment)
+	assert.Equal(t, "讨论有效", res.List[0].SupervisorEvaluations[0].Highlights)
+	require.NotNil(t, res.List[0].AgentEvaluation)
+	assert.Equal(t, "qwen-audio-v1", res.List[0].AgentEvaluation.AIModelVersion)
+
+	// 场次 1：仅督导，智能体侧为空。
+	require.NotNil(t, res.List[1].CompositeScore)
+	assert.Equal(t, 75.00, *res.List[1].CompositeScore)
+	assert.Equal(t, 52.5, *res.List[1].SupervisorScore)
+	assert.Nil(t, res.List[1].AgentEvaluation)
+	assert.Empty(t, res.List[1].SupervisorEvaluations[0].Highlights)
+
+	t.Run("分页", func(t *testing.T) {
+		p, perr := svc.TeacherEvaluations(context.Background(), RoleDirector, 1, 1, 2,
+			dto.TeacherEvaluationTimelineQuery{Page: 1, PageSize: 1})
+		require.NoError(t, perr)
+		assert.Equal(t, int64(2), p.Total)
+		require.Len(t, p.List, 1)
+		assert.Equal(t, uint64(2), p.List[0].SessionID)
+	})
+
+	t.Run("教师查他人时间线返回 40302", func(t *testing.T) {
+		_, aerr := svc.TeacherEvaluations(context.Background(), RoleTeacher, 1, 2, 3, dto.TeacherEvaluationTimelineQuery{})
+		require.Error(t, aerr)
+		assert.Equal(t, errcode.ForbiddenData, errcode.From(aerr).Code)
+	})
 }

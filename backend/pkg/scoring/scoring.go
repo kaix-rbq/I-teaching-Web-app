@@ -4,8 +4,10 @@
 // 口径（变更需先改开发计划 §2，契约先行）：
 //   - 维度分：dim = (v−1)/4×100，v∈{1..5}，值域完整覆盖 [0,100]；
 //   - 单侧总分：Σ w×dim，该侧缺维度时权重在其余维度上重新归一化；
-//   - 聚合一律在维度层完成：先按侧求均、按维度 α 融合（单侧缺失取另一侧），
-//     再加权求和；教师级综合分恒等于其各次课综合分的算术平均（线性恒等式）；
+//   - 维度展示分：先按侧求均、再按维度 α 融合（单侧缺失取另一侧）；
+//   - 综合分：取「综合均值」口径——各场次综合分（场次内逐维度融合后加权）的算术平均，
+//     因此教师级综合分恒等于其各次课综合分的算术平均（§2.5.2 恒等式，恒定成立）；
+//     默认数据双侧对齐时，综合均值与「维度融合后加权」逐位相同；
 //   - frontier 为观测项（权重 0），不计入加权总分。
 package scoring
 
@@ -86,8 +88,10 @@ type SessionScore struct {
 }
 
 // Sample 是样本量与覆盖度计数（§2.5.3：必须暴露 alignedCount，让使用者知道数字代表几次课）。
+// EvaluatedCount 是「已评价场次」数（至少有一侧评价），样本充足性以此为准（§2.5.5）。
 type Sample struct {
 	SessionCount    int
+	EvaluatedCount  int
 	SupervisorCount int
 	AgentCount      int
 	AlignedCount    int
@@ -106,7 +110,7 @@ type DimensionSummary struct {
 
 // Summary 是聚合结果：课程级与教师级共用同一结构。
 type Summary struct {
-	Composite  *float64 // 综合分 = Σ w×dim（维度层融合后加权；无任何评价时为 nil
+	Composite  *float64 // 综合分 = 各场次综合分的算术平均（综合均值口径）；无任何评价时为 nil
 	Supervisor *float64 // 督导侧单侧分（缺维度时权重重新归一化）
 	Agent      *float64 // 智能体侧单侧分
 	Dimensions []DimensionSummary
@@ -134,6 +138,9 @@ func Aggregate(items []SessionScore, weights Weights, alpha float64) Summary {
 		}
 		if item.Agent != nil {
 			s.Sample.AgentCount++
+		}
+		if item.Supervisor != nil || item.Agent != nil {
+			s.Sample.EvaluatedCount++
 		}
 		if item.Supervisor != nil && item.Agent != nil {
 			s.Sample.AlignedCount++
@@ -178,9 +185,30 @@ func Aggregate(items []SessionScore, weights Weights, alpha float64) Summary {
 
 	s.Supervisor = weightedSide(weights, &supMeans)
 	s.Agent = weightedSide(weights, &aiMeans)
-	s.Composite = composite(weights, s.Dimensions)
+	// 综合均值口径：综合分 = 各场次综合分的算术平均（§2.5.2 恒等式恒定成立）。
+	// 默认数据双侧对齐时，它与「维度展示分加权求和」逐位一致。
+	s.Composite = meanSessionComposite(items, weights, alpha)
 	s.Flags = missingFlags(s.Sample)
 	return s
+}
+
+// meanSessionComposite 计算各场次综合分的算术平均（综合均值口径）。
+// 仅统计有评价、可算出综合分的场次（SessionComposite 为 nil 的场次不计入分母），
+// 避免未评价场次被当作 0 分拉低综合分（§2.5.5 硬约定 8）。
+func meanSessionComposite(items []SessionScore, weights Weights, alpha float64) *float64 {
+	var sum float64
+	var n int
+	for _, item := range items {
+		if c := SessionComposite(item, weights, alpha); c != nil {
+			sum += *c
+			n++
+		}
+	}
+	if n == 0 {
+		return nil
+	}
+	v := sum / float64(n)
+	return &v
 }
 
 // SideTotal 计算单次评价某一侧的总分：Σ w×dim，缺维度时权重在其余维度上重新归一化。
@@ -257,8 +285,8 @@ func weightedSide(weights Weights, vals *[dimCount]*float64) *float64 {
 	return &v
 }
 
-// composite 综合分 = Σ w×dim，对可评价维度直接加权，不做重新归一化
-// （单侧缺失已在维度层回退补齐；恒等式依赖此处不归一化）。
+// composite 由传入的维度分计算加权和 Σ w×dim，对可评价维度直接加权、不做重新归一化。
+// 当前仅用于 SessionComposite（单场次综合分）；单侧缺失已在维度层回退补齐。
 func composite(weights Weights, dims []DimensionSummary) *float64 {
 	total, has := 0.0, false
 	for d := range dims {

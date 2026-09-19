@@ -49,7 +49,7 @@ func (c Code) HTTPStatus() int {
 	switch c {
 	case OK:
 		return http.StatusOK
-	case Params:
+	case Params, BizRule:
 		return http.StatusBadRequest
 	case Unauthorized:
 		return http.StatusUnauthorized

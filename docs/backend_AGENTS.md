@@ -3,7 +3,11 @@
 > **文档用途**：本文件是写给 AI 智能体（编码助手 GLM 5.3 + OpenCode、架构助手 DeepSeek V4 Pro）的后端编码工作宪法。
 > 智能体在为本项目编写任何后端代码之前，**必须先完整阅读本文件**，并严格遵守其中的技术栈、目录结构、分层架构、接口契约与编码规则。
 > **使用方式**：后端仓库 `aijiaoxue-api` 初始化后，本文件应置于仓库根目录。
-> **配套文档**：《MySQL数据库创建指导.md》（同目录）——建库、建表与种子数据；前端《AGENTS.md》——页面与组件设计，接口契约以本文第 8 节为准。
+> **配套文档**：《MySQL数据库创建指导.md》（同目录）——建库、建表与种子数据；[`Sprint2-3-教学评价与提优-开发计划.md`](./Sprint2-3-教学评价与提优-开发计划.md)——Sprint 2/3 的算法、DDL 与接口契约；前端《AGENTS.md》——页面与组件设计。接口契约以本文第 8 节为准。
+
+> 🔴 **文档同步要求（强制）**：本手册是后端开发的事实源之一。任何改动若涉及**路由 / 接口字段、数据模型或表结构、错误码、权限与数据范围、计分口径、Sprint 范围**，
+> 必须在**同一个 PR** 内同步更新本文件，以及 `docs/Sprint2-3-教学评价与提优-开发计划.md` 中对应的契约章节。
+> **契约先行：先改文档，再改代码。只改代码不改文档，视为未完成。**
 
 ---
 
@@ -11,11 +15,19 @@
 
 「爱教学」是面向高校的教学质量全链路数字化管理平台，走三阶进化路线：**查课程（Sprint 1）→ 看课堂（Sprint 2）→ 帮教师（Sprint 3）**。
 
-当前为 Sprint 1「查课程」：全量课程信息透明可查、用户间数据打通、Web 整体框架可无误运作。后端使命是**保障数据链路连通无误**（成员四职责）：登录鉴权 → 角色化数据裁剪 → 课程/资源/督导数据的可靠读写。
+| 阶段 | 主题 | 一句话目标 | 状态 |
+|------|------|-----------|------|
+| Sprint 1 | 查课程 | 课程信息透明可查、三角色数据打通、Web 框架稳定运行 | ✅ 已交付 |
+| Sprint 2 | 看课堂 | 授课记录 + 督导/智能体课堂评价闭环；课堂录音、异步转写与智能体接入 | 🚧 **当前阶段**（阶段① 评价闭环已落地，阶段② 智能体接入待开发） |
+| Sprint 3 | 帮教师 | 教学提优：评语与提优建议、趋势折线、智能体对话、申诉复核、质量报告 | ⏳ 待排期 |
 
-## 2. Sprint 1 目标与范围
+后端使命始终是**保障数据链路连通无误**：登录鉴权 → 角色化数据裁剪 → 领域数据（课程 / 资源 / 督导 / 授课 / 评价）的可靠读写。
 
-### 2.1 必须支撑的故事（来自用户故事地图）
+## 2. 三次 Sprint 的目标与范围
+
+> 三个阶段同等重要，本节均衡说明；**当前处于 Sprint 2**（见 §1 状态表）。详细契约与 DDL 见 [`Sprint2-3-教学评价与提优-开发计划.md`](./Sprint2-3-教学评价与提优-开发计划.md)。
+
+### 2.1 Sprint 1「查课程」（已交付）：必须支撑的故事
 
 | 编号 | 角色 | 故事 | 优先级 | 后端落点 |
 |------|------|------|--------|---------|
@@ -29,7 +41,38 @@
 | S4.2 | 教师 | 上传/维护课程资源 | S | multipart 上传 · 本地存储 · 删除 |
 | S5.1 | 督导 | 查看督导覆盖率与听评课安排 | M | `/supervision/coverage` · `/supervision/plans` |
 
-### 2.2 范围边界
+### 2.2 Sprint 2「看课堂」（当前阶段）：目标与范围
+
+Sprint 2 分两阶段推进，任务编号见开发计划 §7.1 / §7.2，简短清单见 [`Sprint2-3-任务清单.md`](./Sprint2-3-任务清单.md)。
+
+**阶段① 评价闭环（Sprint 2.1，后端已落地）**
+
+| 能力 | 后端落点 |
+|------|---------|
+| 授课记录 | `POST /sessions`（督导建课）、`GET /courses/:id/sessions`、`GET /sessions/:id` |
+| 督导评分 | `PUT /sessions/:id/supervisor-evaluation`：**五维必填**、幂等覆盖、写 `formula_version` |
+| 评分计算 | `pkg/scoring`：维度权重、单次总分、综合均值聚合（纯函数 + 表驱动单测） |
+| 评分聚合 | 教师级 / 课程级共用 `scoring.Aggregate`：`GET /teacher-scores`、`GET /teachers/:id/evaluation-summary`、`GET /courses/:id/evaluation-summary` |
+| 评价时间线 | `GET /teachers/:id/evaluations`：按课次倒序的历次评价（含督导结构化评语与智能体参考），供教师面板一次拉取渲染 |
+| 当堂课评估 | `GET /sessions/:id/evaluation`（场次 + 双侧评分 + 评语；录音/转写位在阶段②填充） |
+| 数据迁移 | `golang-migrate`，`migrations/2_teaching_sessions_and_evaluations.*.sql`（§13） |
+
+**阶段② 智能体接入（Sprint 2.2，待开发）**
+
+- 课堂录音上传与流式播放（Range）、播放审计日志；
+- 异步语音转写任务：`transcripts.status` 状态机（`pending→running→done/failed`）+ 失败重试 + 学生姓名脱敏；
+- 智能体评分写入 `evaluations` 的 agent 行（无法观测的维度写 `NULL`，附 `evidence` 与 `ai_confidence`）；
+- 聚合纳入 agent 侧并**全量返回 `flags`**（`no_data/sup_only/ai_only/disjoint/sample_insufficient/agent_not_calibrated/formula_mixed`）；
+- 智能体故障不得影响督导评分主流程（降级返回 50003）。
+
+### 2.3 Sprint 3「帮教师」（待排期）：目标与范围
+
+- 督导评语（仅本人可见，时间倒序，标注对应课次）与智能体提优建议；
+- 各维度分数历史趋势接口（`GET /teachers/:id/score-trend?semester=&dimension=`）；
+- 与智能体就课堂改进流式对话（SSE，断流可重连）；
+- 教师申诉 / 督导复核流程（留痕、状态可追溯）、督导间评分校准、质量报告导出。
+
+### 2.4 范围边界（Won't）
 
 > **⚠️ 范围更新（Sprint 2/3 已启动）**
 > 原 Sprint 1 Won't 清单中的「课堂录音上传 / ASR 语音转写接入」与「质量评估报告 / 教学优化建议」**已解除**，正式进入 Sprint 2「看课堂」与 Sprint 3「帮教师」。
@@ -67,6 +110,7 @@
 | Web 框架 | Gin | v1.10 | 唯一框架 |
 | ORM | GORM | v1.25 + `gorm.io/driver/mysql` | 参数化查询，防注入 |
 | 数据库 | MySQL | 8.0 | utf8mb4，见配套 MySQL 文档 |
+| 迁移 | golang-migrate/migrate | v4 | Sprint 2 起引入；文件命名 `<版本>_<名称>.up/down.sql` |
 | 认证 | golang-jwt/jwt | v5 | HS256，TTL 24h |
 | 密码 | golang.org/x/crypto/bcrypt | latest | cost 10 |
 | 配置 | spf13/viper | v1.18 | `config.yaml` + 环境变量覆盖 |
@@ -74,7 +118,7 @@
 | 校验 | gin 内置 validator | — | binding tag |
 | CORS | gin-contrib/cors | v1.7 | 白名单 origins |
 | 热重载 | air-verse/air | latest | 仅开发环境 |
-| 测试 | testing（标准库）+ testify | v2 | service 层单测 |
+| 测试 | testing（标准库）+ testify | v2 | service / scoring / errcode 单测 |
 
 ## 5. 目录结构（强制）
 
@@ -86,39 +130,38 @@ aijiaoxue-api/
 ├── config.yaml              # 本地配置（config.example.yaml 提交模板，config.yaml 不入库）
 ├── cmd/
 │   ├── server/main.go       # 唯一服务入口
+│   ├── migrate/main.go      # golang-migrate 执行器（up / down [N] / version）
 │   └── seed/main.go         # 种子数据工具（bcrypt 写入演示账号）
+├── migrations/              # 版本化迁移（embed 打包）；命名 <版本>_<名称>.up/down.sql
+│   ├── 1_baseline_sprint1.{up,down}.sql
+│   └── 2_teaching_sessions_and_evaluations.{up,down}.sql
 ├── internal/
-│   ├── config/config.go     # viper 加载与结构体
+│   ├── config/config.go     # viper 加载与结构体（含 evaluation 计分口径启动校验）
 │   ├── router/router.go     # 路由表 + 分组（唯一路由注册地）
 │   ├── middleware/          # recovery / logger / cors / auth / rbac
 │   ├── handler/             # HTTP 层：参数绑定、调用 service、组装响应
-│   │   ├── auth.go
-│   │   ├── course.go
-│   │   ├── resource.go
-│   │   ├── supervision.go
-│   │   └── dict.go
-│   ├── service/             # 业务层：权限判断、业务校验、事务边界
-│   │   ├── auth.go
-│   │   ├── course.go
-│   │   ├── resource.go
-│   │   ├── supervision.go
-│   │   └── dashboard.go
+│   │   ├── auth.go course.go resource.go supervision.go dict.go
+│   │   └── session.go teacherscore.go     # Sprint 2.1
+│   ├── service/             # 业务层：权限判断、业务校验、事务边界、聚合
+│   │   ├── auth.go course.go resource.go supervision.go dashboard.go
+│   │   └── session.go teacherscore.go     # Sprint 2.1
 │   ├── repository/          # 数据层：GORM 查询，无业务逻辑
-│   │   ├── user.go
-│   │   ├── course.go
-│   │   ├── resource.go
-│   │   └── supervision.go
+│   │   ├── user.go course.go resource.go supervision.go
+│   │   └── session.go evaluation.go       # Sprint 2.1
 │   ├── model/               # GORM 模型，与表一一对应
 │   └── dto/                 # 请求/响应结构体（json tag 与前端 types 对齐）
 ├── pkg/
 │   ├── response/            # OK / Fail 统一响应
-│   ├── errcode/             # 错误码常量
+│   ├── errcode/             # 错误码常量 + HTTP 映射（含单测）
+│   ├── scoring/             # 评分纯函数：权重 / 单次总分 / 综合均值聚合
 │   └── jwtutil/             # 签发与解析
 ├── database/
-│   ├── schema.sql           # 建表脚本（与 MySQL 文档一致）
-│   └── seed.sql             # 种子数据（密码哈希占位，由 cmd/seed 覆写）
+│   ├── schema.sql           # Sprint 1 存量表建表脚本（新表以 migrations/ 为准）
+│   └── seed.sql             # 种子数据（含 §3.4 授课/评价）；密码哈希由 cmd/seed 覆写
 ├── uploads/                 # 课程资源文件存储（.gitignore）
 └── scripts/
+    ├── init_db.sh           # 建库 → migrate up → seed.sql → cmd/seed
+    └── verify.sh            # 端到端验收（Sprint 1 + 2.1 断言）
 ```
 
 **目录铁律**：
@@ -162,24 +205,30 @@ cors:
 |------|------|------|---------|
 | 0 | 200 | 成功 | — |
 | 40001 | 400 | 参数校验失败 | 缺少必填字段、格式错误 |
+| 40002 | 400 | 业务规则校验失败 | 授课日期晚于今天、督导评分五维未录全 |
 | 40101 | 401 | 未登录 / token 失效 | 无 Authorization、token 过期 |
 | 40301 | 403 | 无角色权限 | 教师调用 `POST /courses` |
 | 40302 | 403 | 无数据操作权限 | 教师上传他人课程资源 |
 | 40401 | 404 | 资源不存在 | 课程 id 无效 |
-| 40901 | 409 | 数据冲突 | 课程编码+学期重复 |
+| 40901 | 409 | 数据已存在 | 课程编码+学期重复、同课程同日同节次重复建课 |
 | 50001 | 500 | 服务器内部错误 | 数据库异常 |
+| 50002 | 501 | 功能未实现（Sprint 2.2 起） | 阶段一调用智能体接口 |
+| 50003 | 503 | 依赖服务不可用（Sprint 2.2 起） | ASR 引擎未配置或转写失败 |
+
+> 🔴 **新增错误码必须三处同步**：`Code` 常量、`messages` 文案、`HTTPStatus()` 映射，并补 `pkg/errcode/errcode_test.go` 的表驱动用例。
+> 历史回归：`40002` 曾漏配 `HTTPStatus()`，落 `default → 500`——响应体 code 正确但 HTTP 500，日志被记为服务端错误。
+> `40902` 为「同一督导重复评分」保留码；因 `PUT` 幂等覆盖，**不会实际返回**。
 
 - 鉴权失败返回 **HTTP 401 + code 40101**，前端 axios 拦截器据此清 token 跳登录页（与前端 AGENTS.md §10.3 对齐）；
 - `message` 面向用户可读（中文），内部细节写日志不外泄；
 - 实现：`pkg/response.OK(c, data)` / `pkg/response.Fail(c, errcode.Params)`，handler 中**禁止手写 `c.JSON` 拼信封**。
 
-## 8. 接口契约（15 个业务接口 + 1 个运维接口）
+## 8. 接口契约（Sprint 1 的 15 个业务接口 + Sprint 2.1 新增 9 个 + 1 个运维接口）
 
 前缀 `/api/v1`。**字段名与前端 `src/types/` 逐字对齐，本节是前后端联调的唯一事实源。**
 
-> **Sprint 2/3 新增接口**（授课记录、当堂课评估、评价聚合、录音转写、智能体）见
-> [`Sprint2-3-教学评价与提优-开发计划.md`](./Sprint2-3-教学评价与提优-开发计划.md) §5，
-> 新增错误码 40002 / 40902 / 50002 / 50003 见该文件同节。
+> **Sprint 2.1 已实现接口**见本文 §8.8；Sprint 2.2 / Sprint 3 的接口（录音转写、智能体、趋势）见
+> [`Sprint2-3-教学评价与提优-开发计划.md`](./Sprint2-3-教学评价与提优-开发计划.md) §4.3 / §4.4，本文件随实现进度同步。
 
 ### 8.1 认证 auth
 
@@ -363,6 +412,49 @@ type PlanItem struct {
 
 `GET /healthz`（无鉴权）返回 `{"code":0,"data":{"status":"up"}}`，供部署探活与 S1.1 验收。
 
+### 8.8 授课记录与评价聚合（Sprint 2.1，已实现）
+
+> 契约细节与示例响应见 [`Sprint2-3-教学评价与提优-开发计划.md`](./Sprint2-3-教学评价与提优-开发计划.md) §4.1 / §4.2。
+
+| 方法 路径 | 权限 | 说明 |
+|-----------|------|------|
+| GET `/courses/:id/sessions?semester=&page=&pageSize=` | 登录（数据裁剪） | 课程历史授课记录，含每场双侧评分摘要 |
+| POST `/sessions` | supervisor | 创建授课记录（日期不得晚于今天，`uk_session` 唯一） |
+| GET `/sessions/:id` | 登录（数据裁剪） | 单场次基本信息 |
+| GET `/sessions/:id/evaluation` | 登录（数据裁剪） | 当堂课评估页聚合：场次 + 督导评分 + 智能体参考 + 评语 |
+| PUT `/sessions/:id/supervisor-evaluation` | supervisor | 提交/覆盖督导评分（幂等）；**五维必填**，缺失 40002 |
+| GET `/teacher-scores?departmentId=&semester=&page=&pageSize=` | director（本室）/ supervisor（全校） | 教师评分列表 |
+| GET `/teachers/:id/evaluation-summary?semester=` | director（本室）/ teacher（仅自己）/ supervisor | 教师级评分面板 |
+| GET `/teachers/:id/evaluations?semester=&page=&pageSize=` | director（本室）/ teacher（仅自己）/ supervisor | 教师历次评价时间线：按课次倒序，含督导结构化评语 + 智能体参考 + 场次综合分 |
+| GET `/courses/:id/evaluation-summary?semester=` | 登录（数据裁剪） | 课程级评分，与教师级共用同一聚合函数 |
+
+```go
+// 五维必填：objective/content/interaction/organization/frontier，均为 1-5 整数
+type SupervisorEvaluationReq struct {
+    Objective    *int   `json:"objective" binding:"omitempty,min=1,max=5"`
+    Content      *int   `json:"content" binding:"omitempty,min=1,max=5"`
+    Interaction  *int   `json:"interaction" binding:"omitempty,min=1,max=5"`
+    Organization *int   `json:"organization" binding:"omitempty,min=1,max=5"`
+    Frontier     *int   `json:"frontier" binding:"omitempty,min=1,max=5"`
+    Comment      string `json:"comment" binding:"max=2000"`
+    Highlights   string `json:"highlights" binding:"max=1000"`
+    Improvements string `json:"improvements" binding:"max=1000"`
+    Suggestions  string `json:"suggestions" binding:"max=1000"`
+}
+type SampleDTO struct { // 响应内嵌，聚合接口共用
+    SessionCount     int  `json:"sessionCount"`
+    EvaluatedCount   int  `json:"evaluatedCount"`   // 已评价场次；sampleSufficient 以此为准
+    SupervisorCount  int  `json:"supervisorCount"`
+    AgentCount       int  `json:"agentCount"`
+    AlignedCount     int  `json:"alignedCount"`
+    SampleSufficient bool `json:"sampleSufficient"`
+}
+```
+
+- 🔴 **路由命名**：教师评分列表是 `GET /teacher-scores`；`GET /teachers` 永远是 Sprint 1 的**教师字典**（前端课程表单依赖）。二者不得混用。
+- 唯一聚合出口：教师级与课程级都调用 `pkg/scoring.Aggregate`，禁止"先算课程级再对课程取平均"。
+- 综合分取**综合均值**口径（各场次综合分的算术平均）；默认数据双侧对齐时与维度加权求和自洽。详见开发计划 §2.5.2。
+
 ## 9. 中间件规范（`internal/middleware/`）
 
 注册顺序（`router.go` 中唯一生效顺序）：
@@ -393,7 +485,15 @@ authed.GET("/courses", h.Course.List)
 authed.GET("/courses/:id", h.Course.Detail)
 authed.GET("/courses/:id/resources", h.Resource.List)
 authed.GET("/departments", h.Dict.Departments)
-authed.GET("/teachers", h.Dict.Teachers)
+authed.GET("/teachers", h.Dict.Teachers)          // 教师字典（Sprint 1，勿改语义）
+
+// —— Sprint 2.1：评价闭环（数据裁剪仍在 service 层）——
+authed.GET("/courses/:id/sessions", h.Session.ListByCourse)
+authed.GET("/courses/:id/evaluation-summary", h.TeacherScore.CourseSummary)
+authed.GET("/sessions/:id", h.Session.Detail)
+authed.GET("/sessions/:id/evaluation", h.Session.Evaluation)
+authed.GET("/teachers/:id/evaluation-summary", h.TeacherScore.TeacherSummary)
+authed.GET("/teachers/:id/evaluations", h.TeacherScore.TeacherEvaluations)
 
 authed.Group("", mw.RequireRoles("director")).
     POST("/courses", h.Course.Create).
@@ -405,7 +505,12 @@ authed.Group("", mw.RequireRoles("teacher")).
 
 authed.Group("", mw.RequireRoles("supervisor")).
     GET("/supervision/coverage", h.Super.Coverage).
-    GET("/supervision/plans", h.Super.Plans)
+    GET("/supervision/plans", h.Super.Plans).
+    POST("/sessions", h.Session.Create).
+    PUT("/sessions/:id/supervisor-evaluation", h.Session.Submit)
+
+authed.Group("", mw.RequireRoles("director", "supervisor")).
+    GET("/teacher-scores", h.TeacherScore.List)
 ```
 
 ## 10. 分层架构与数据流
@@ -442,6 +547,10 @@ HTTP 请求
 | 教师删除资源 | 资源所属课程 `teacher_id == user.id` | 40302 |
 | 上传文件 | 扩展名 ∈ 白名单；大小 ≤ 100MB | 40001 |
 | 督导接口 | 仅 supervisor（路由组已守卫） | 40301 |
+| 督导建课 | 日期不得晚于今天；同课程+班级+日期+节次唯一（`uk_session`；日期按 `YYYY-MM-DD` 比较） | 40002 / 40901 |
+| 督导评分 | **五维全部必填**（1-5 整数）；`PUT` 幂等覆盖；写 `formula_version`；`evidence` 为 NULL | 40002 / 40001 |
+| 评分读取 | teacher 仅本人 / director 本室 / supervisor 全校 | 40302 |
+| 评分维度 | 仅智能体侧允许 `NULL`；督导侧不得落 NULL 维度 | — |
 
 课程编码正则在 validator 中注册自定义规则 `coursecode`（`RegisterValidation`），禁止在 handler 里手写正则 if。
 
@@ -475,10 +584,15 @@ HTTP 请求
 | Transcript | transcripts | **Sprint 2.2 新增**：课堂转写（异步任务产物） |
 
 > Sprint 2/3 的建表 DDL、迁移脚本与评分算法见
-> [`Sprint2-3-教学评价与提优-开发计划.md`](./Sprint2-3-教学评价与提优-开发计划.md) §3、§4。
+> [`Sprint2-3-教学评价与提优-开发计划.md`](./Sprint2-3-教学评价与提优-开发计划.md) §3、§2。
 > 新增表**只新增、不改存量表**（`supervision_plans` 不动，由 `teaching_sessions.plan_id` 反向关联）。
 
-- 迁移策略：开发期以 `database/schema.sql` 为唯一事实源手工执行；GORM **不使用 AutoMigrate**（避免双源漂移）；表结构变更 = 修改 schema.sql + 更新 model + 在 PR 说明列明变更；
+- **事实源分工**：`database/schema.sql` 只管 Sprint 1 存量表；**Sprint 2 起的新表以 `migrations/` 下的迁移脚本为唯一事实源**，二者不重复维护；
+- **迁移策略**：从 Sprint 2 起引入 `golang-migrate`（`cmd/migrate` + `migrations/` embed）。GORM **不使用 AutoMigrate**（避免双源漂移）；
+  新增表 = 新建迁移脚本 + 更新 `internal/model` + 在 PR 说明列明变更。初始化流程见 `scripts/init_db.sh`：`schema.sql → migrate up → seed.sql → cmd/seed`；
+- 🔴 **迁移文件命名**：`<版本>_<名称>.up.sql` / `.down.sql`（如 `2_teaching_sessions_and_evaluations.up.sql`）。
+  Flyway 风格 `V2__xxx.up.sql` **不被 golang-migrate 识别**，会让 `migrate up` 报 `first .: file does not exist`——禁止使用；
+- **实现陷阱**：JSON 列（`evaluations.evidence`）的 Go 字段必须用指针，禁止用零值 `''` 写入（MySQL 8 报 3140）；DATE 列比较必须按 `YYYY-MM-DD` 绑定，否则唯一性预检漏判；
 - 连接池：`SetMaxOpenConns/SetMaxIdleConns` 来自配置；启动时 `db.Ping()` 失败直接 fatal 退出。
 
 ## 14. 编码规范（Go）
@@ -489,17 +603,21 @@ HTTP 请求
 4. **context**：全链路传递，禁止 `context.Background()` 出现在请求路径中；
 5. **常量**：角色、状态、类型枚举一律 `internal/service/consts.go` 定义（`RoleDirector = "director"`...），禁止散落字符串字面量；
 6. **注释**：默认不写；仅在非显而易见的业务口径（如覆盖率计算）处写一行说明；
-7. **测试**：service 层关键函数（覆盖率计算、数据范围裁剪、资源归属校验）须有表驱动单测，表驱动用例覆盖三角色；
-8. **Makefile**：`make run`（air 热重载）、`make seed`、`make test`、`make lint`（go vet + gofmt -l）、`make build`；
+7. **测试**：关键逻辑须有表驱动单测——`pkg/scoring`（权重/单次总分/缺失矩阵/恒等式）、`pkg/errcode`（错误码→HTTP 映射）、service 层（数据范围裁剪、资源归属、评分五维必填、幂等覆盖）；表驱动用例覆盖三角色；
+8. **Makefile**：`make run`（air 热重载）、`make migrate`/`migrate-down`/`migrate-version`、`make seed`、`make test`、`make lint`（go vet + gofmt -l）、`make build`、`make verify`；
 9. **Git**：Conventional Commits（`feat(course): 新增课程列表接口`）；分支 `feature/S2.1-course-list`（与前端同名故事对齐）。
 
 ## 15. 验收标准（DoD）与数据链路打通脚本
 
-每个故事 DoD = 接口可用 + 权限正确 + 数据范围正确 + `go build`/`go vet` 零错误。
+每个故事 DoD = 接口可用 + 权限正确 + 数据范围正确 + `go build` / `go vet` / `gofmt` / `go test` 零错误。
 
-**数据链路一键验收**（`scripts/verify.sh`，Sprint 1 评审演示用）：
+**数据链路一键验收**（`scripts/verify.sh`，覆盖 **Sprint 1 + Sprint 2.1**，共 140+ 条断言）：
 
 ```bash
+# 一键执行（需已启动 MySQL 与后端服务）
+cd backend && MYSQL_PORT=3307 bash scripts/verify.sh
+
+# 也可手工逐条核对：
 BASE=http://localhost:8080/api/v1
 
 # 0. 技术基线（S1.1）
@@ -543,3 +661,25 @@ curl -s $BASE/supervision/coverage -H "Authorization: Bearer $TOK_S"
 | S4.1 | 详情聚合 classes/studentCount/resourceCount 数值正确（对种子数据可核算） |
 | S4.2 | 上传白名单与大小校验生效；教师仅能操作本人课程；删除同步清文件 |
 | S5.1 | 覆盖率数值与 MySQL 文档 §7 推算一致；plans 分页与状态筛选可用 |
+
+**Sprint 2.1 后端 DoD**（详见开发计划 §8.1）：
+
+| 项 | 后端验收要点 |
+|----|-------------|
+| 迁移 | 空库 `make migrate` 建成 2 张新表；`migrate down 1` 可回滚；文件命名符合工具约定 |
+| 评分算法 | §2.4 验算例 82.50；§2.5.5 缺失矩阵 5 行；教师级综合分 ≡ 各次课综合分均值（非对齐数据亦成立） |
+| 一致性 | 主任端与教师端综合分 / 各维度分逐位相同（单一 `scoring.Aggregate`） |
+| 数据范围 | 教师访问他人面板 40302；主任访问他室 40302 |
+| 写路径 | 督导评分五维必填（缺失 40002）；重复提交幂等覆盖；`formula_version` 落库；同课同日同节次 40901 |
+| 样本量 | `sampleSufficient` 以 `evaluatedCount` 为准；无评价综合分 `null` 且不显示 0 |
+| 端到端 | `verify.sh` 全绿；请求日志无 HTTP 5xx |
+
+---
+
+## 更新记录
+
+| 版本 | 日期 | 变更 |
+|------|------|------|
+| v2.0 | 2026-09 | 均衡覆盖三次 Sprint；注明当前处于 Sprint 2；新增 Sprint 2.1 接口契约（§8.8）、错误码 HTTP 映射与回归说明、`golang-migrate` 迁移规范、文档同步要求（页首）|
+
+*本文档与 [`Sprint2-3-教学评价与提优-开发计划.md`](./Sprint2-3-教学评价与提优-开发计划.md)、[`MySQL数据库创建指导.md`](./MySQL数据库创建指导.md)、[`frontend_AGENTS.md`](./frontend_AGENTS.md) 互为配套，任何契约变更须四者同步。*

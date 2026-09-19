@@ -47,7 +47,8 @@ type SessionListItem struct {
 }
 
 // SupervisorEvaluationReq 是 PUT /sessions/:id/supervisor-evaluation 的请求体。
-// 维度分 1-5 整数、逐维可空（该源无法评价时留 null）；至少一个维度必填（40002）。
+// 督导评分强制 5 个维度全部录入：维度分 1-5 整数，任一维度缺失返回 40002，越界返回 40001。
+// （仅智能体侧允许维度为 null，见开发计划 §2.1。）
 type SupervisorEvaluationReq struct {
 	Objective    *int   `json:"objective" binding:"omitempty,min=1,max=5"`
 	Content      *int   `json:"content" binding:"omitempty,min=1,max=5"`
@@ -108,8 +109,10 @@ type DimensionScoreDTO struct {
 }
 
 // SampleDTO 是样本量与覆盖度（alignedCount 必须暴露，§2.5.3）。
+// sampleSufficient 以 evaluatedCount（已评价场次）为准（§2.5.5）。
 type SampleDTO struct {
 	SessionCount     int  `json:"sessionCount"`
+	EvaluatedCount   int  `json:"evaluatedCount"`
 	SupervisorCount  int  `json:"supervisorCount"`
 	AgentCount       int  `json:"agentCount"`
 	AlignedCount     int  `json:"alignedCount"`
@@ -170,4 +173,32 @@ type CourseEvaluationSummary struct {
 	TeacherName string `json:"teacherName"`
 	Semester    string `json:"semester"`
 	ScoreSummary
+}
+
+// TeacherEvaluationTimelineQuery 是 GET /teachers/:id/evaluations 的查询参数。
+type TeacherEvaluationTimelineQuery struct {
+	Semester string `form:"semester"`
+	Page     int    `form:"page"`
+	PageSize int    `form:"pageSize"`
+}
+
+// TeacherEvaluationTimelineItem 是教师「历次评价时间线」的一行（一场课）。
+// 一次拉取即可渲染「时间 / 课程·课次 / 督导评语 / 分数」，无需前端逐场拼装。
+type TeacherEvaluationTimelineItem struct {
+	SessionID   uint64 `json:"sessionId"`
+	SessionDate string `json:"sessionDate"` // YYYY-MM-DD，时间线倒序依据
+	Period      string `json:"period"`
+	Topic       string `json:"topic"`
+	CourseID    uint64 `json:"courseId"`
+	CourseCode  string `json:"courseCode"`
+	CourseName  string `json:"courseName"`
+	Status      string `json:"status"`
+	// 场次综合分（双侧融合后加权，口径与教师级聚合一致；无评价为 null）
+	CompositeScore *float64 `json:"compositeScore"`
+	// 该场督导单次总分均值（同场多督导取 AVG）与该场智能体总分
+	SupervisorScore *float64 `json:"supervisorScore"`
+	AgentScore      *float64 `json:"agentScore"`
+	// 结构化评语明细（督导可能多人；阶段一智能体至多一条）
+	SupervisorEvaluations []EvaluationDTO `json:"supervisorEvaluations"`
+	AgentEvaluation       *EvaluationDTO  `json:"agentEvaluation"`
 }
