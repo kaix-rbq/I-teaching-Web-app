@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# 「爱教学」Sprint 1 数据链路一键验收（后端 AGENTS.md §15）
+# 「爱教学」Sprint 1 + Sprint 2.1 数据链路一键验收（后端 AGENTS.md §15）
 #
-# 前置：MySQL 已按 database/schema.sql + database/seed.sql 初始化，且已执行 make seed。
-# 设计：只读校验（对照 MySQL 文档 §6 速查表）先执行，写操作（建课/上传）后执行，
-#       避免写操作污染种子数据的期望值。
+# 前置：MySQL 已按 database/schema.sql + migrations（V2）+ database/seed.sql 初始化，
+#       且已执行 make seed。Sprint 2.1 断言对照开发计划 §3.4 对账基准与 §4.2 响应示例。
+# 设计：只读校验先执行，写操作（建课/上传/建场次/提交评分）后执行，
+#       避免写操作污染种子数据的期望值；写操作产生的新增数据在脚本尾部清理。
 # 用法：BASE=http://localhost:8080/api/v1 bash scripts/verify.sh
 set -uo pipefail
 
@@ -158,6 +159,104 @@ if [ -n "$RES_ID" ]; then
   want "删除后课程 1 资源数=3" "3" "$(req "$BASE/courses/1/resources" "${AUTH_T[@]}")" "len(d['data'])"
 fi
 
+echo
+echo "${c_dim}== 10. Sprint 2.1 授课记录与双侧评分摘要（对照开发计划 §3.4 对账基准）==${c_reset}"
+C1SESS="$(req "$BASE/courses/1/sessions?page=1&pageSize=10" "${AUTH_S[@]}")"
+want "课程 1 授课记录总数=3"          "3"     "$C1SESS" "d['data']['total']"
+want "最新一场主题=迭代计划与估点"     "迭代计划与估点" "$C1SESS" "d['data']['list'][0]['topic']"
+want "最新一场督导摘要分=82.5"        "82.5"  "$C1SESS" "d['data']['list'][0]['supervisorScore']"
+want "最新一场智能体摘要分=75"        "75"    "$C1SESS" "d['data']['list'][0]['agentScore']"
+want "最早一场督导摘要分=52.5"        "52.5"  "$C1SESS" "d['data']['list'][2]['supervisorScore']"
+want "最早一场智能体摘要分=60.71"     "60.71" "$C1SESS" "d['data']['list'][2]['agentScore']"
+want "最早一场评价条数=2"             "2"     "$C1SESS" "d['data']['list'][2]['evaluationCount']"
+want "学期切片不匹配返回空"           "0"     "$(req "$BASE/courses/1/sessions?semester=2025-2026-2" "${AUTH_S[@]}")" "d['data']['total']"
+
+S1="$(req "$BASE/sessions/1" "${AUTH_S[@]}")"
+want "场次 1 课程名=软件项目管理"      "软件项目管理" "$S1" "d['data']['courseName']"
+want "场次 1 教师名=李明"             "李明"   "$S1" "d['data']['teacherName']"
+want "场次 1 状态=evaluated"          "evaluated" "$S1" "d['data']['status']"
+
+E1="$(req "$BASE/sessions/1/evaluation" "${AUTH_S[@]}")"
+want "场次 1 督导评分条数=1"           "1"     "$E1" "len(d['data']['supervisorScores'])"
+want "场次 1 督导评分人=陈静"          "陈静"   "$E1" "d['data']['supervisorScores'][0]['evaluatorName']"
+want "场次 1 督导 objective=4"        "4"     "$E1" "d['data']['supervisorScores'][0]['objective']"
+want "场次 1 督导总分=52.5"           "52.5"  "$E1" "d['data']['supervisorScores'][0]['totalScore']"
+want "场次 1 智能体参考=qwen-audio-v1" "qwen-audio-v1" "$E1" "d['data']['agentScore']['aiModelVersion']"
+want "场次 1 智能体 objective=null"   "None"  "$E1" "d['data']['agentScore']['objective']"
+want "场次 1 智能体置信度=0.72"        "0.72"  "$E1" "d['data']['agentScore']['aiConfidence']"
+
+echo
+echo "${c_dim}== 11. 教师级/课程级聚合（§4.2 响应示例逐位对账）==${c_reset}"
+TS="$(req "$BASE/teachers/2/evaluation-summary" "${AUTH_D[@]}")"
+want "李明综合分=70.42"                "70.42" "$TS" "d['data']['compositeScore']"
+want "李明督导侧=68.33"               "68.33" "$TS" "d['data']['supervisorScore']"
+want "李明智能体侧=67.86"             "67.86" "$TS" "d['data']['agentScore']"
+want "objective 维度分=83.33"         "83.33" "$TS" "[x['score'] for x in d['data']['dimensions'] if x['key']=='objective'][0]"
+want "objective 无智能体分"           "None"  "$TS" "[x['agentScore'] for x in d['data']['dimensions'] if x['key']=='objective'][0]"
+want "interaction 维度分=54.17"       "54.17" "$TS" "[x['score'] for x in d['data']['dimensions'] if x['key']=='interaction'][0]"
+want "frontier 维度分=50"             "50"    "$TS" "[x['score'] for x in d['data']['dimensions'] if x['key']=='frontier'][0]"
+want "frontier 权重=0"                "0"     "$TS" "[x['weight'] for x in d['data']['dimensions'] if x['key']=='frontier'][0]"
+want "frontier 标记为观测项"          "True"  "$TS" "[x['isObservation'] for x in d['data']['dimensions'] if x['key']=='frontier'][0]"
+want "样本量场次=3"                   "3"     "$TS" "d['data']['sample']['sessionCount']"
+want "双侧对齐场次=3"                 "3"     "$TS" "d['data']['sample']['alignedCount']"
+want "样本充足"                       "True"  "$TS" "d['data']['sample']['sampleSufficient']"
+want "无 flags"                       "[]"    "$TS" "d['data']['flags']"
+want "计分口径=v1"                    "v1"    "$TS" "d['data']['formulaVersion']"
+want "按课程明细 1 条"                "1"     "$TS" "len(d['data']['courses'])"
+
+CS="$(req "$BASE/courses/1/evaluation-summary" "${AUTH_T[@]}")"
+want "课程级综合分=70.42（与教师级逐位一致）" "70.42" "$CS" "d['data']['compositeScore']"
+want "课程级督导侧=68.33"             "68.33" "$CS" "d['data']['supervisorScore']"
+want "课程级样本场次=3"               "3"     "$CS" "d['data']['sample']['sessionCount']"
+
+echo
+echo "${c_dim}== 12. 教师评分列表与权限矩阵（§5.1）==${c_reset}"
+want "主任见本室教师评分 total=2"      "2"     "$(req "$BASE/teacher-scores" "${AUTH_D[@]}")" "d['data']['total']"
+want "督导见全校教师评分 total=4"      "4"     "$(req "$BASE/teacher-scores" "${AUTH_S[@]}")" "d['data']['total']"
+want "督导按教研室筛选 dept=2 命中 1"  "1"     "$(req "$BASE/teacher-scores?departmentId=2" "${AUTH_S[@]}")" "d['data']['total']"
+want "列表中李明综合分=70.42"          "70.42" "$(req "$BASE/teacher-scores" "${AUTH_D[@]}")" "[x['compositeScore'] for x in d['data']['list'] if x['teacherName']=='李明'][0]"
+want "未知学期返回 40001"             "40001" "$(req "$BASE/teacher-scores?semester=2099-2100-1" "${AUTH_S[@]}")" "d['code']"
+want "教师访问评分列表返回 40301"     "40301" "$(req "$BASE/teacher-scores" "${AUTH_T[@]}")" "d['code']"
+want "李明查本人面板=70.42"           "70.42" "$(req "$BASE/teachers/2/evaluation-summary" "${AUTH_T[@]}")" "d['data']['compositeScore']"
+want "教师查同事面板返回 40302"       "40302" "$(req "$BASE/teachers/3/evaluation-summary" "${AUTH_T[@]}")" "d['code']"
+ZH="$(req "$BASE/teachers/3/evaluation-summary" "${AUTH_D[@]}")"
+want "张华无评分 flags 含 no_data"     "True"  "$ZH" "'no_data' in d['data']['flags']"
+want "张华综合分为 null"              "None"  "$ZH" "d['data']['compositeScore']"
+want "教师查他室课程授课记录 40302"   "40302" "$(req "$BASE/courses/3/sessions" "${AUTH_T[@]}")" "d['code']"
+want "主任查他室课程授课记录 40302"   "40302" "$(req "$BASE/courses/3/sessions" "${AUTH_D[@]}")" "d['code']"
+
+echo
+echo "${c_dim}== 13. 督导创建授课记录与评分提交（写操作，S6.1/S6.3）==${c_reset}"
+want "主任创建授课记录返回 40301"     "40301" "$(req -X POST "$BASE/sessions" "${AUTH_D[@]}" -H 'Content-Type: application/json' -d '{"courseId":1,"sessionDate":"2026-09-16","period":"验收节次"}')" "d['code']"
+want "未来日期返回 40002"             "40002" "$(req -X POST "$BASE/sessions" "${AUTH_S[@]}" -H 'Content-Type: application/json' -d '{"courseId":1,"sessionDate":"2099-01-01","period":"1-2 节"}')" "d['code']"
+want "课程不存在返回 40401"           "40401" "$(req -X POST "$BASE/sessions" "${AUTH_S[@]}" -H 'Content-Type: application/json' -d '{"courseId":9999,"sessionDate":"2026-09-16","period":"1-2 节"}')" "d['code']"
+want "同日同节次重复返回 40901"       "40901" "$(req -X POST "$BASE/sessions" "${AUTH_S[@]}" -H 'Content-Type: application/json' -d '{"courseId":1,"sessionDate":"2026-09-12","period":"3-4 节"}')" "d['code']"
+
+SESS="$(req -X POST "$BASE/sessions" "${AUTH_S[@]}" -H 'Content-Type: application/json' \
+  -d '{"courseId":1,"sessionDate":"2026-09-16","period":"验收节次","topic":"验收脚本创建"}')"
+SESS_ID="$(json "$SESS" "d['data']['id']")"
+want "督导创建授课记录成功"           "0"        "$SESS" "d['code']"
+want "新场次初始状态=scheduled"       "scheduled" "$SESS" "d['data']['status']"
+want "新场次教师随课程落库=李明"      "李明"      "$SESS" "d['data']['teacherName']"
+
+EV="$(req -X PUT "$BASE/sessions/$SESS_ID/supervisor-evaluation" "${AUTH_S[@]}" -H 'Content-Type: application/json' \
+  -d '{"objective":5,"content":5,"interaction":4,"organization":5,"frontier":4,"comment":"verify.sh"}')"
+want "督导提交评分成功"               "0"   "$EV" "d['code']"
+want "单次总分=95"                    "95"  "$EV" "d['data']['totalScore']"
+want "评分写入口径版本=v1"            "v1"  "$EV" "d['data']['formulaVersion']"
+want "评分后场次状态=evaluated"       "evaluated" "$(req "$BASE/sessions/$SESS_ID" "${AUTH_S[@]}")" "d['data']['status']"
+want "空维度提交返回 40002"           "40002" "$(req -X PUT "$BASE/sessions/$SESS_ID/supervisor-evaluation" "${AUTH_S[@]}" -H 'Content-Type: application/json' -d '{"comment":"无维度"}')" "d['code']"
+want "维度越界返回 40001"             "40001" "$(req -X PUT "$BASE/sessions/$SESS_ID/supervisor-evaluation" "${AUTH_S[@]}" -H 'Content-Type: application/json' -d '{"objective":6}')" "d['code']"
+want "教师提交督导评分返回 40301"     "40301" "$(req -X PUT "$BASE/sessions/$SESS_ID/supervisor-evaluation" "${AUTH_T[@]}" -H 'Content-Type: application/json' -d '{"objective":5}')" "d['code']"
+
+EV2="$(req -X PUT "$BASE/sessions/$SESS_ID/supervisor-evaluation" "${AUTH_S[@]}" -H 'Content-Type: application/json' \
+  -d '{"objective":5,"content":5,"interaction":4,"organization":5,"frontier":4,"comment":"verify.sh 重提"}')"
+want "重复提交幂等覆盖总分不变"       "95"  "$EV2" "d['data']['totalScore']"
+want "幂等覆盖后评价仍为 1 条"        "1"   "$(req "$BASE/sessions/$SESS_ID/evaluation" "${AUTH_S[@]}")" "len(d['data']['supervisorScores'])"
+want "新增后课程 1 授课记录总数=4"    "4"   "$(req "$BASE/courses/1/sessions" "${AUTH_S[@]}")" "d['data']['total']"
+
+rm -f "$TMPFILE"
+
 # 清理本次验收新增的课程，保持种子数据纯净
 if [ -n "$NEW_ID" ]; then
   mysql -h 127.0.0.1 -P "${MYSQL_PORT:-3306}" -u aijiaoxue -paijiaoxue_dev aijiaoxue \
@@ -166,7 +265,13 @@ if [ -n "$NEW_ID" ]; then
     || echo "${c_dim}请手工清理验收课程：DELETE FROM courses WHERE id=$NEW_ID;${c_reset}"
 fi
 
-rm -f "$TMPFILE"
+# 清理本次验收新增的授课记录与评分，保持 §3.4 对账基准纯净
+if [ -n "$SESS_ID" ]; then
+  mysql -h 127.0.0.1 -P "${MYSQL_PORT:-3306}" -u aijiaoxue -paijiaoxue_dev aijiaoxue \
+    -e "DELETE FROM evaluations WHERE session_id=$SESS_ID; DELETE FROM teaching_sessions WHERE id=$SESS_ID;" >/dev/null 2>&1 \
+    && echo "${c_dim}已清理验收场次 id=$SESS_ID${c_reset}" \
+    || echo "${c_dim}请手工清理验收场次：DELETE FROM evaluations WHERE session_id=$SESS_ID; DELETE FROM teaching_sessions WHERE id=$SESS_ID;${c_reset}"
+fi
 
 echo
 printf '验收结果：%s%d 通过%s / %s%d 失败%s\n' "$c_green" "$PASS" "$c_reset" "$c_red" "$FAIL" "$c_reset"

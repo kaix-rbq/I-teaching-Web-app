@@ -1,12 +1,14 @@
--- 「爱教学」Sprint 1 种子数据
--- 事实源：docs/MySQL数据库创建指导.md §5
--- 执行顺序：schema.sql → seed.sql → make seed（make seed 用 bcrypt 覆写 password_hash）
+-- 「爱教学」Sprint 1 + Sprint 2.1 种子数据
+-- 事实源：docs/MySQL数据库创建指导.md §5；授课记录与评价见开发计划 §3.4
+-- 执行顺序：schema.sql → migrations（V2）→ seed.sql → make seed（make seed 用 bcrypt 覆写 password_hash）
 -- 演示账号密码统一为 123456；password_hash 占位串必须由 cmd/seed 覆写，否则登录返回 40101。
 
 USE `aijiaoxue`;
 
 -- 幂等：重复执行先清空（注意外键顺序）
 SET FOREIGN_KEY_CHECKS = 0;
+TRUNCATE TABLE `evaluations`;
+TRUNCATE TABLE `teaching_sessions`;
 TRUNCATE TABLE `supervision_plans`;
 TRUNCATE TABLE `resources`;
 TRUNCATE TABLE `course_classes`;
@@ -74,3 +76,39 @@ INSERT INTO `supervision_plans` (`course_id`, `supervisor_id`, `planned_date`, `
 (3, 5, '2026-09-08', 'completed'),
 (5, 5, '2026-09-10', 'completed'),
 (6, 5, '2026-09-22', 'planned');
+
+-- ============================================================
+-- Sprint 2.1：授课记录与课堂评价（开发计划 §3.4）
+-- 表结构由 migrations/V2 建；此处数据与 §3.4 对账基准一一对应：
+--   第 1/2/3 次课督导总分 52.50 / 70.00 / 82.50，教师级 68.33；
+--   智能体总分 60.71 / 67.86 / 75.00（objective 恒 NULL，验证维度可空融合）；
+--   综合分 58.75 / 70.00 / 82.50，教师级 70.42（= 三次综合分的算术平均）。
+-- ============================================================
+
+-- 为 c1（软件项目管理，教师李明 id=2）补 3 次授课记录与评价
+INSERT INTO `teaching_sessions`
+  (`course_id`,`class_id`,`teacher_id`,`session_date`,`period`,`topic`,`status`) VALUES
+(1, 0, 2, '2026-09-12', '3-4 节', '项目立项与章程',     'evaluated'),
+(1, 0, 2, '2026-09-19', '3-4 节', '需求调研与用户故事', 'evaluated'),
+(1, 0, 2, '2026-09-26', '3-4 节', '迭代计划与估点',     'evaluated');
+
+-- 督导（陈静 id=5）评价：3 次，逐次提升以演示"趋势"
+INSERT INTO `evaluations`
+  (`session_id`,`evaluator_type`,`evaluator_id`,`objective_score`,`content_score`,
+   `interaction_score`,`organization_score`,`frontier_score`,`total_score`,
+   `comment`,`highlights`,`improvements`) VALUES
+(1,'supervisor',5, 4,3,2,3,2, 52.50, '开篇结构完整，但互动偏少。',
+   '课程框架清晰','提问后等待时间不足','增加案例讨论环节'),
+(2,'supervisor',5, 4,4,3,4,3, 70.00, '用户故事讲解透彻，小组讨论有效。',
+   '小组讨论组织得当','个别小组偏离主题','为每组设定明确产出物'),
+(3,'supervisor',5, 5,4,4,4,3, 82.50, '估点练习设计巧妙，学生参与度高。',
+   '练习设计贴近实战','时间略紧','预留 5 分钟总结');
+
+-- 智能体评价（阶段二启用；objective 恒为 NULL，用于验收"维度可空"的融合逻辑）
+INSERT INTO `evaluations`
+  (`session_id`,`evaluator_type`,`evaluator_id`,`ai_model_version`,
+   `objective_score`,`content_score`,`interaction_score`,`organization_score`,`frontier_score`,
+   `total_score`,`ai_confidence`) VALUES
+(1,'agent',0,'qwen-audio-v1', NULL,4,3,3,3, 60.71, 0.72),
+(2,'agent',0,'qwen-audio-v1', NULL,4,3,4,3, 67.86, 0.68),
+(3,'agent',0,'qwen-audio-v1', NULL,4,4,4,4, 75.00, 0.75);
