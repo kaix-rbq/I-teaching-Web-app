@@ -24,6 +24,8 @@ func New(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) *gin.Engine {
 	courseRepo := repository.NewCourseRepository(db)
 	resourceRepo := repository.NewResourceRepository(db)
 	supervisionRepo := repository.NewSupervisionRepository(db)
+	sessionRepo := repository.NewSessionRepository(db)
+	evaluationRepo := repository.NewEvaluationRepository(db)
 
 	authSvc := service.NewAuthService(userRepo, jwt)
 	courseSvc := service.NewCourseService(courseRepo, userRepo)
@@ -31,6 +33,8 @@ func New(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) *gin.Engine {
 	supervisionSvc := service.NewSupervisionService(supervisionRepo)
 	dashboardSvc := service.NewDashboardService(courseRepo, userRepo, resourceRepo, supervisionRepo)
 	dictSvc := service.NewDictService(userRepo)
+	sessionSvc := service.NewSessionService(sessionRepo, evaluationRepo, courseRepo, userRepo, cfg.Evaluation)
+	teacherScoreSvc := service.NewTeacherScoreService(userRepo, courseRepo, evaluationRepo, cfg.Evaluation)
 
 	authH := handler.NewAuthHandler(authSvc)
 	courseH := handler.NewCourseHandler(courseSvc)
@@ -38,6 +42,8 @@ func New(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) *gin.Engine {
 	supervisionH := handler.NewSupervisionHandler(supervisionSvc)
 	dashboardH := handler.NewDashboardHandler(dashboardSvc)
 	dictH := handler.NewDictHandler(dictSvc)
+	sessionH := handler.NewSessionHandler(sessionSvc)
+	teacherScoreH := handler.NewTeacherScoreHandler(teacherScoreSvc)
 
 	gin.SetMode(cfg.Server.Mode)
 	r := gin.New()
@@ -61,6 +67,13 @@ func New(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) *gin.Engine {
 	authed.GET("/departments", dictH.Departments)
 	authed.GET("/teachers", dictH.Teachers)
 
+	// Sprint 2.1：评价闭环（数据裁剪在 service 层，铁律见后端 AGENTS.md §3）。
+	authed.GET("/courses/:id/sessions", sessionH.ListByCourse)
+	authed.GET("/courses/:id/evaluation-summary", teacherScoreH.CourseSummary)
+	authed.GET("/sessions/:id", sessionH.Detail)
+	authed.GET("/sessions/:id/evaluation", sessionH.Evaluation)
+	authed.GET("/teachers/:id/evaluation-summary", teacherScoreH.TeacherSummary)
+
 	authed.Group("", middleware.RequireRoles(service.RoleDirector)).
 		POST("/courses", courseH.Create).
 		PUT("/courses/:id", courseH.Update)
@@ -71,7 +84,12 @@ func New(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) *gin.Engine {
 
 	authed.Group("", middleware.RequireRoles(service.RoleSupervisor)).
 		GET("/supervision/coverage", supervisionH.Coverage).
-		GET("/supervision/plans", supervisionH.Plans)
+		GET("/supervision/plans", supervisionH.Plans).
+		POST("/sessions", sessionH.Create).
+		PUT("/sessions/:id/supervisor-evaluation", sessionH.Submit)
+
+	authed.Group("", middleware.RequireRoles(service.RoleDirector, service.RoleSupervisor)).
+		GET("/teacher-scores", teacherScoreH.List)
 
 	return r
 }
