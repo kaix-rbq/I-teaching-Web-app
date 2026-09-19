@@ -108,7 +108,7 @@ git push origin --delete feature/S6.3-session-evaluation
 | 你改了什么 | 必须先改 | 再改 |
 |-----------|---------|------|
 | 接口路径 / 请求响应字段 | `docs/backend_AGENTS.md` §8 或开发计划 §4 | `internal/dto/` → `handler/` → `frontend/src/types/` → `frontend/src/api/` |
-| 表结构 / 字段 | `docs/MySQL数据库创建指导.md` 或开发计划 §3 | `backend/database/schema.sql` → `internal/model/` → `repository/` |
+| 表结构 / 字段 | `docs/MySQL数据库创建指导.md` §9 或开发计划 §3 | 新增表：`backend/migrations/<版本>_<名称>.up.sql` → `internal/model/` → `repository/`；存量表：`database/schema.sql` → 同上 |
 | 评分维度 / 权重 / 聚合口径 | 开发计划 §2 | `pkg/scoring` → `service/` |
 | 权限 / 数据范围 | 开发计划 §5 | `middleware/` → `service/` |
 | 路由 / 页面跳转 | `docs/frontend_AGENTS.md` §6 或开发计划 §6 | `router/index.ts` → `views/` |
@@ -238,4 +238,4 @@ git rebase --abort
 
 ---
 
-*维护：随协作方式变更同步更新 · 参考 `docs/backend_AGENTS.md` §16、`docs/frontend_AGENTS.md` §14*
+*维护：随协作方式变更同步更新 · 参考 `docs/backend_AGENTS.md` §15、`docs/frontend_AGENTS.md` 验收标准一节*

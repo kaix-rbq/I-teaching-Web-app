@@ -184,7 +184,7 @@ func Aggregate(items []SessionScore, weights Weights, alpha float64) Summary
 
 > 🔴 **教师级不得"先算课程级、再对课程取平均"**——会引入二次偏差（带 1 门课×10 次 与 带 5 门课×2 次 不可比）。**同一个函数，喂不同数据集**，这是保证「主任页与教师页数字完全一致」的唯一可靠做法。
 
-#### 2.5.2 聚合口径：全部在「维度层」完成
+#### 2.5.2 聚合口径：综合均值（当前实现）
 
 ```
 ① 单次评价的维度分（0-100 百分制）
@@ -197,19 +197,19 @@ func Aggregate(items []SessionScore, weights Weights, alpha float64) Summary
    dim_i^session = α × dim_i^sup + (1−α) × dim_i^agent
    某一侧该维度为 NULL 时，该维度直接取另一侧的值
 
-④ 课程级 / 教师级
+④ 课程级 / 教师级综合分（综合均值口径，当前实现）
+   composite = mean over sessions( composite(场次级) )
+   仅统计有评价、可算出综合分的场次；未评价场次不计入分母（不得当作 0 分）
+
+⑤ 课程级 / 教师级维度展示分
    dim_i^level = α × mean(dim_i^sup over sessions) + (1−α) × mean(dim_i^agent over sessions)
-   composite   = Σ w_i × dim_i^level                  w 取 §2.1 生效权重，frontier 为 0
+   单侧缺失时该维度直接取另一侧（§2.5.4 SQL 的 COALESCE 三级回退）
 ```
 
-> 🔴 **为什么融合必须放在维度层（易错点）**：加权是线性运算，**"先融合再加权"与"先加权再融合"等价**，因此
->
-> ```
-> composite(教师级) ≡ mean over sessions( composite(场次级) )
-> ```
->
-> 即**教师面板的总分恒等于其各次课总分的平均值**。用 §3.4 种子数据验证：三次课综合分 58.75 / 70.00 / 82.50，教师级为 **70.42**。
-> 若改成在"总分"层先融合、再对智能体缺失的维度做归一化，该恒等式会被破坏——页面会出现"总分 70.42、各次课平均却是 68.10"这类无法解释的差异（数值随数据而变，此处仅示意）。
+> 🔴 **口径取舍（2026-09 决议）**：**教师级 / 课程级综合分取「综合均值」**——各场次综合分的算术平均。
+> 这保证**教师面板的总分恒等于其各次课总分的平均值**（§8.1 恒等式在任意数据下恒定成立）。用 §3.4 种子数据验证：三次课综合分 58.75 / 70.00 / 82.50，教师级为 **70.42**。
+> **默认前提是数据双侧对齐**（每节课督导与智能体都有评价，或缺失模式在各场次一致）：此时维度展示分的加权求和 `Σ w_i × dim_i^level` 与综合均值逐位相等，页面数字自洽。
+> 非对齐数据（部分场次仅单侧评价）下的通用算法本轮**不实现**，后续单独立项；届时必须同时更新本节与 `pkg/scoring`，不得只改代码。
 
 #### 2.5.3 综合分的样本对齐
 
@@ -231,6 +231,10 @@ func Aggregate(items []SessionScore, weights Weights, alpha float64) Summary
 #### 2.5.4 聚合 SQL（MySQL 8.0 CTE，维度层）
 
 SQL 只负责把**原始 1-5 维度分**按侧取均分；`(v−1)/4×100` 换算与权重加权在 Go service 层完成（线性等价，放哪层结果相同）。
+
+> **当前实现说明**：`evaluation.go` 的 `ListSessionDimRows` 按 §2.5.4 取「每场次每侧维度均分」（1-5 原始标度），
+> 再交给 `pkg/scoring`：维度展示分按 ⑤ 的 COALESCE 回退融合；**综合分按 ④ 的综合均值口径**，即对 `SessionComposite` 求算术平均。
+> 下面 SQL 中 `dim_*` 列即 ⑤ 的维度展示分；综合分不在 SQL 内计算（避免与 Go 口径不一致）。
 
 **教师级**（课程级把 `ts.teacher_id = :teacher_id` 换成 `ts.course_id = :course_id`、`GROUP BY course_id` 即可）：
 
@@ -295,10 +299,12 @@ GROUP BY teacher_id;
 | n>0 | m>0 | k>0 | 共同场次融合后取均值 | `ok`，附 `coverage: k/n` |
 | n>0 | m>0 | **0** | 退化为各自均值加权 | `disjoint: true`，**必须显式提示** |
 
-**样本量规则**：
+**样本量规则**（样本充足性以「已评价场次」`evaluatedCount` 为准，避免"有课但没评"被误判为样本充足）：
 
-- `sessionCount = 0` → 综合分 `null`，不参与排序
-- `sessionCount < minSampleSize(默认3)` → 置 `sampleSufficient: false`，前端标注"样本不足（n=x）"
+- `sessionCount = 0`（无授课记录）→ 综合分 `null`，不参与排序
+- `evaluatedCount = 0`（有课但一次都没评）→ 综合分 `null`、`flags` 含 `no_data`，**不得显示 0**
+- `evaluatedCount < minSampleSize(默认3)` → 置 `sampleSufficient: false`，前端标注"样本不足（n=x）"
+- 响应同时返回 `sessionCount / evaluatedCount / supervisorCount / agentCount / alignedCount`，覆盖度一目了然
 
 #### 2.5.6 口径版本与学期切片
 
@@ -312,8 +318,11 @@ GROUP BY teacher_id;
 ## 3. 数据模型与建表 DDL
 
 > **迁移方式**：按 MySQL 文档 §9，从 Sprint 2 起引入 `golang-migrate`。新增表全部**只新增、不改存量表**（`supervision_plans` 完全不动，关联通过 `teaching_sessions.plan_id` 反向指回）。
+>
+> 🔴 **文件命名必须遵循 golang-migrate 默认约定**：`<版本>_<名称>.up.sql` / `.down.sql`（正则 `^([0-9]+)_(.*)\.(up|down)\.(.*)$`），例如 `1_baseline_sprint1.up.sql`、`2_teaching_sessions_and_evaluations.up.sql`。
+> **Flyway 风格的 `V2__xxx.up.sql` 不被识别为迁移**，会让 `migrate up` 直接报 `first .: file does not exist`（工具能加载目录但没有可用迁移）。历史上本项目曾用该命名，修复时已改名——**不得改回**。
 
-### 3.1 `migrations/V2__teaching_sessions_and_evaluations.sql`（阶段一）
+### 3.1 `migrations/2_teaching_sessions_and_evaluations.up.sql`（阶段一）
 
 ```sql
 -- ① 授课记录：一切评价的落点
@@ -371,7 +380,7 @@ CREATE TABLE `evaluations` (
 
 > **无草稿态**：`evaluations` 不设 `status` / `submitted_at`——写入即生效，`created_at` 即提交时间。督导评分通过 `PUT /sessions/:id/supervisor-evaluation` 幂等覆盖，不产生中间态。
 
-### 3.2 `migrations/V3__recordings_and_transcripts.sql`（阶段二）
+### 3.2 `migrations/3_recordings_and_transcripts.up.sql`（阶段二）
 
 ```sql
 -- ③ 课堂录音
@@ -409,11 +418,14 @@ CREATE TABLE `transcripts` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='课堂转写';
 ```
 
-### 3.3 三个必须写进迁移说明的实现陷阱
+### 3.3 必须写进迁移说明的实现陷阱
 
 1. **`class_id` 必须 `NOT NULL DEFAULT 0`。** MySQL 唯一索引**对 NULL 不去重**——若 `class_id` 可空，`uk_session` 形同虚设，同一节课能建出无数条记录。此坑只会在线上暴露。
 2. **转写必须异步。** 45 分钟音频的 ASR 需数分钟，同步 HTTP 必然超时。`transcripts.status` 即为此设计，前端轮询；`failed` 状态必须可重试。
 3. **为什么用列式而非 EAV**（`evaluation_scores(evaluation_id, dimension_key, score)`）：维度已冻结 → 列式可直接 `AVG(content_score)`、类型安全、索引友好；EAV 每次聚合都要 PIVOT，SQL 复杂且极易出错。代价是新增维度需 `ALTER TABLE`，在"维度冻结"前提下可接受。
+4. **JSON 列禁止写入空串。** `evaluations.evidence` 是 `JSON` 列，MySQL 8 严格模式对 `''` 抛 `ERROR 3140 Invalid JSON text: "The document is empty"`。Go 模型字段必须用指针（`*string`），督导行写 `NULL`，不能依赖零值 `""`。
+5. **DATE 列比较必须按 `YYYY-MM-DD` 绑定。** 直接把 `time.Time` 交给驱动会被带上时区换算后的时分秒（`2026-09-12 08:00:00`），与 `DATE` 值不相等 → 唯一性预检漏判，最后由数据库 1062 兜底（用户看到 50001 而不是 40901）。仓储层比较 `session_date` 时先 `Format("2006-01-02")`。
+6. **种子 `INSERT` 的列数与值数必须逐行核对。** §3.4 督导评价曾漏 `suggestions` 列，导致 `ERROR 1136 Column count doesn't match value count`，种子数据整体加载失败。
 
 ### 3.4 演示种子数据（阶段一联调用）
 
@@ -429,7 +441,7 @@ INSERT INTO `teaching_sessions`
 INSERT INTO `evaluations`
   (`session_id`,`evaluator_type`,`evaluator_id`,`objective_score`,`content_score`,
    `interaction_score`,`organization_score`,`frontier_score`,`total_score`,
-   `comment`,`highlights`,`improvements`) VALUES
+   `comment`,`highlights`,`improvements`,`suggestions`) VALUES
 (1,'supervisor',5, 4,3,2,3,2, 52.50, '开篇结构完整，但互动偏少。',
    '课程框架清晰','提问后等待时间不足','增加案例讨论环节'),
 (2,'supervisor',5, 4,4,3,4,3, 70.00, '用户故事讲解透彻，小组讨论有效。',
@@ -467,12 +479,16 @@ INSERT INTO `evaluations`
 
 前缀 `/api/v1`，沿用 Sprint 1 统一响应信封与错误码。新增错误码：
 
-| code | HTTP | 含义 | 触发示例 |
-|------|------|------|---------|
-| 40002 | 400 | 业务规则校验失败 | 授课记录日期晚于今天、评分维度缺失 |
-| 40902 | 409 | 重复提交 | 同一督导对同一场次重复评分（可用 `PUT` 幂等覆盖） |
-| 50002 | 501 | 功能未实现 | 智能体接口在阶段一返回 |
-| 50003 | 503 | 依赖服务不可用 | ASR 引擎未配置或转写任务失败 |
+| code | HTTP | 含义 | 触发示例 | 实现状态 |
+|------|------|------|---------|---------|
+| 40002 | 400 | 业务规则校验失败 | 授课记录日期晚于今天、**督导评分五维未录全** | 阶段一 ✅ |
+| 40901 | 409 | 数据已存在 | 同课程同班级同日同节次重复建课（`uk_session`） | 阶段一 ✅ |
+| 40902 | 409 | 重复提交 | 同一督导对同一场次重复评分 | 保留：`PUT` 幂等覆盖，**不返回**该码 |
+| 50002 | 501 | 功能未实现 | 智能体接口在阶段一返回 | 阶段二 |
+| 50003 | 503 | 依赖服务不可用 | ASR 引擎未配置或转写任务失败 | 阶段二 |
+
+> ⚠️ `40002` 的 HTTP 状态必须是 **400**（`pkg/errcode` 的 `HTTPStatus()` 已覆盖 `BizRule`）。
+> 该映射曾漏配而落 `default → 500`：响应体 code 正确但 HTTP 500，日志被记为服务端错误——回归测试见 `pkg/errcode/errcode_test.go`。
 
 ### 4.1 授课记录
 
@@ -482,16 +498,21 @@ INSERT INTO `evaluations`
 | `POST /sessions` | supervisor | 创建授课记录 |
 | `GET /sessions/:id` | 登录（数据裁剪） | 单场次基本信息 |
 | `GET /sessions/:id/evaluation` | 登录（数据裁剪） | **当堂课评估页聚合接口**：场次信息 + 音频 + 转写 + 督导评分 + 智能体评分 + 评语 |
-| `PUT /sessions/:id/supervisor-evaluation` | supervisor | 提交/覆盖督导评分与评语（幂等） |
+| `PUT /sessions/:id/supervisor-evaluation` | supervisor | 提交/覆盖督导评分与评语（幂等）；**5 个维度全部必填**，缺失返回 40002 |
 
 ### 4.2 评价聚合（主任页与教师页的唯一事实源）
 
 | 方法 路径 | 权限 | 说明 |
 |-----------|------|------|
-| `GET /teachers?departmentId=&semester=&page=&pageSize=` | director（本室）/ supervisor（全校） | 教师评分列表：综合分、双侧分、分维度、样本量 |
+| `GET /teacher-scores?departmentId=&semester=&page=&pageSize=` | director（本室）/ supervisor（全校） | 教师评分列表：综合分、双侧分、分维度、样本量 |
 | `GET /teachers/:id/evaluation-summary?semester=` | director（本室）/ teacher（仅自己）/ supervisor | 教师级评分面板 |
+| `GET /teachers/:id/evaluations?semester=&page=&pageSize=` | director（本室）/ teacher（仅自己）/ supervisor | **教师历次评价时间线**（T1.13）：按课次倒序，含课次信息 + 督导结构化评语 + 智能体参考 + 场次综合分 |
 | `GET /courses/:id/evaluation-summary?semester=` | 登录（数据裁剪） | **课程级**评分（教学提优页用），与教师级共用聚合函数 |
-| `GET /teachers/:id/score-trend?semester=&dimension=` | director（本室）/ teacher（仅自己）/ supervisor | 阶段三：趋势序列 |
+| `GET /teachers/:id/score-trend?semester=&dimension=` | director（本室）/ teacher（仅自己）/ supervisor | 阶段三：趋势序列（未实现） |
+
+> 🔴 **路由变更（2026-09，已在 `backend_AGENTS.md` §8 同步）**：教师评分列表为 **`GET /teacher-scores`**，不是本文早期版本的 `GET /teachers`。
+> 原因：Sprint 1 的 `GET /teachers` 已用于「教师字典」（前端课程表单依赖，返回数组），不能改成带分页的评分列表，否则破坏「Sprint 1 接口无回归」验收线。
+> 两者并存：`GET /teachers` = 教师字典；`GET /teacher-scores` = 评分列表。**新增接口不得复用二者，也不得再改路径而不更新本节。**
 
 **`GET /teachers/:id/evaluation-summary` 响应**：
 
@@ -510,7 +531,7 @@ INSERT INTO `evaluations`
     { "key": "frontier",     "name": "前沿与交叉学科",       "score": 50.00, "supervisorScore": 41.67, "agentScore": 58.33, "weight": 0.00, "isObservation": true }
   ],
   "sample": {
-    "sessionCount": 3, "supervisorCount": 3, "agentCount": 3,
+    "sessionCount": 3, "evaluatedCount": 3, "supervisorCount": 3, "agentCount": 3,
     "alignedCount": 3, "sampleSufficient": true
   },
   "flags": [],
@@ -518,11 +539,44 @@ INSERT INTO `evaluations`
 }
 ```
 
-> 该响应与 §3.4 种子数据一一对应，可直接作为联调断言：`compositeScore` 应等于
-> `0.30×83.33 + 0.30×70.83 + 0.20×54.17 + 0.20×66.67 = 70.42`，也等于三次课综合分 `58.75/70.00/82.50` 的平均。
+> 该响应与 §3.4 种子数据一一对应，可直接作为联调断言：`compositeScore` = 三次课综合分 `58.75/70.00/82.50` 的算术平均 = **70.42**。
+> 数据双侧对齐时，它也等于维度展示分加权求和 `0.30×83.33 + 0.30×70.83 + 0.20×54.17 + 0.20×66.67 = 70.42`（§2.5.2 的默认前提）。
+> `sampleSufficient` 以 `evaluatedCount`（已评价场次）为准，不以 `sessionCount` 为准。
 > `frontier` 返回 `weight: 0` 与 `isObservation: true`，前端据此把它渲染为"亮点标记"而非计分维度。
 
 > `flags` 是**必须让使用者知道的状态**，由后端显式传给前端，不让前端猜：`no_data` / `sup_only` / `ai_only` / `disjoint` / `sample_insufficient` / `agent_not_calibrated` / `formula_mixed`。
+
+**`GET /teachers/:id/evaluations` 响应**（历次评价时间线，T1.13；`pageSize` 默认 10、上限 50）：
+
+```json
+{
+  "list": [
+    {
+      "sessionId": 3, "sessionDate": "2026-09-26", "period": "3-4 节",
+      "topic": "迭代计划与估点", "courseId": 1, "courseCode": "SE3101",
+      "courseName": "软件项目管理", "status": "evaluated",
+      "compositeScore": 82.50, "supervisorScore": 82.50, "agentScore": 75.00,
+      "supervisorEvaluations": [
+        { "evaluatorId": 5, "evaluatorName": "陈静", "evaluatorType": "supervisor",
+          "formulaVersion": "v1", "objective": 5, "content": 4, "interaction": 4,
+          "organization": 4, "frontier": 3, "totalScore": 82.50,
+          "comment": "估点练习设计巧妙，学生参与度高。", "highlights": "练习设计贴近实战",
+          "improvements": "时间略紧", "suggestions": "预留 5 分钟总结",
+          "createdAt": "2026-09-26T10:00:00+08:00", "updatedAt": "2026-09-26T10:00:00+08:00" }
+      ],
+      "agentEvaluation": { "evaluatorType": "agent", "aiModelVersion": "qwen-audio-v1",
+                           "aiConfidence": 0.75, "totalScore": 75.00 }
+    }
+  ],
+  "total": 3, "page": 1, "pageSize": 10
+}
+```
+
+> - **只返回有评价的场次**（`has_supervisor || has_agent`），未评价课次不进时间线；
+> - 倒序规则 `session_date DESC, session_id DESC`；
+> - 一次拉取即可渲染「时间 / 课程·课次 / 督导评语 / 分数」，**前端不得再逐场调 `/sessions/:id/evaluation` 拼时间线（N+1）**；
+> - `compositeScore` 为该场次综合分（§2.5.2 场次级口径，与教师级聚合同源）；`supervisorScore` 为同场多督导 `total_score` 均值（§2.5.4）；`agentScore` 为智能体行总分；无侧为 `null`；
+> - 权限与 `/teachers/:id/evaluation-summary` 完全一致（同一 `checkTeacherAccess` 实现），越权 40302。
 
 ### 4.3 录音与转写（阶段二）
 
@@ -694,12 +748,12 @@ src/
 
 | 编号 | 任务 | 负责 | 依赖 | 验收 |
 |------|------|------|------|------|
-| T1.1 | 引入 `golang-migrate`，编写 `V2` 迁移脚本（§3.1） | 成员四 | — | 空库执行迁移可建成 2 张表 |
+| T1.1 | 引入 `golang-migrate`，编写 `2_teaching_sessions_and_evaluations` 迁移脚本（§3.1） | 成员四 | — | 空库执行 `migrate up` 可建成 2 张表；文件命名符合同工具约定 |
 | T1.2 | 扩展 `model`：`TeachingSession`、`Evaluation` | 成员四 | T1.1 | `go build` 通过，字段与 DDL 一一对应 |
-| T1.3 | `pkg/scoring`：维度权重、单次总分、`Aggregate()` 纯函数 | 成员四 | — | 表驱动单测覆盖 §2.4 验算例与 §2.5.5 缺失矩阵全部 5 行 |
+| T1.3 | `pkg/scoring`：维度权重、单次总分、`Aggregate()` 纯函数 | 成员四 | — | 表驱动单测覆盖 §2.4 验算例与 §2.5.5 缺失矩阵全部 5 行；恒等式（综合均值）在非对齐数据下亦成立 |
 | T1.4 | repository：`session.go`、`evaluation.go`（含 §2.5.4 聚合 SQL） | 成员三 | T1.2 | `go test` 通过；聚合结果与手算一致 |
 | T1.5 | service：`session.go`（授课记录 CRUD + 归属校验） | 成员三 | T1.4 | 越权用例返回 40302 |
-| T1.6 | service：`evaluation.go`（提交评分、幂等覆盖、`formula_version` 写入） | 成员三 | T1.5 | 重复提交覆盖而非报错 |
+| T1.6 | service：`evaluation.go`（提交评分、幂等覆盖、`formula_version` 写入） | 成员三 | T1.5 | 五维必填（缺失 40002）；重复提交覆盖而非报错 |
 | T1.7 | service：`teacherscore.go`（教师级/课程级聚合，单一事实源） | 成员四 | T1.3 T1.4 | 主任视角与教师视角数字**完全一致** |
 | T1.8 | handler + router：§4.1 / §4.2 全部接口 | 成员三 | T1.5–T1.7 | `/healthz` 与 Sprint 1 接口无回归 |
 | T1.9 | 前端 `types/` + `api/`：session / teacher 接口层 | 成员二 | T1.8 | `vue-tsc` 零错误 |
@@ -716,7 +770,7 @@ src/
 
 | 编号 | 任务 | 负责 | 依赖 | 验收 |
 |------|------|------|------|------|
-| T2.1 | `V3` 迁移脚本（§3.2） | 成员四 | T1.1 | 迁移可重复执行 |
+| T2.1 | `3_recordings_and_transcripts` 迁移脚本（§3.2） | 成员四 | T1.1 | 迁移可重复执行 |
 | T2.2 | 音频上传（白名单 + 大小限制 + 时长解析） | 成员三 | T2.1 | 非法扩展名返回 40001 |
 | T2.3 | 异步转写任务框架（worker + 状态机 + 重试） | 成员四 | T2.2 | 任务失败不影响主流程；`failed` 可重试 |
 | T2.4 | ASR 适配层（Qwen-Audio 接入，接口先行、实现可后补） | 成员四 | T2.3 | 未配置引擎时返回 50003 而非崩溃 |
@@ -750,9 +804,13 @@ src/
 | **一致性** | 同一教师，主任端与教师端综合分、各维度分**逐位相同**（由单一聚合函数保证） |
 | 数据范围 | 教师访问 `/teachers/3/evaluation-summary` 返回 40302；主任访问他室教师同样 40302 |
 | 算法 | §2.4 验算例返回 **82.50**；§2.5.5 五种缺失组合全部有断言 |
-| 恒等式 | 教师级综合分 ≡ 其各次课综合分的算术平均（§2.5.2）；用 §3.4 种子数据对账应为 **70.42** |
+| 恒等式 | 教师级综合分 ≡ 其各次课综合分的算术平均（§2.5.2 综合均值口径，**任意数据下恒定成立**）；用 §3.4 种子数据对账应为 **70.42** |
+| 维度必填 | 督导 `PUT /sessions/:id/supervisor-evaluation` 五维缺一返回 **40002**；缺维度不得落库 |
+| 样本量 | `sampleSufficient` 以 `evaluatedCount`（已评价场次）为准；有课未评时综合分为 `null` 且 `no_data` |
+| 错误码 | `40002` 的 HTTP 状态必须是 **400**（不得落 500）；`pkg/errcode` 表驱动单测锁定 |
 | 空数据 | 无评价教师综合分为 `null`、列表置底，**不得显示 0** |
-| 构建 | `go build` / `go vet` / `gofmt` 零告警；`vue-tsc` 零错误；`npm run build` 通过 |
+| 构建 | `go build` / `go vet` / `gofmt` / `go test` 零告警；`vue-tsc` 零错误；`npm run build` 通过 |
+| 端到端 | `scripts/verify.sh` 全绿；响应日志无 HTTP 5xx |
 
 ### 8.2 阶段二
 
@@ -804,7 +862,7 @@ src/
 | 2 | 5 个维度冻结；`frontier` 为观测项，权重 0，不计入加权总分 | §2.1 · §2.2 |
 | 3 | 维度权重非零项合计必须为 1.00，服务启动时校验 | §2.2 |
 | 4 | 综合分 α 默认 0.5（督导 : 智能体），可配置 | §2.2 |
-| 5 | 聚合一律在**维度层**完成；教师级综合分 ≡ 各次课综合分的算术平均 | §2.5.2 |
+| 5 | 综合分取**综合均值**口径（各场次综合分算术平均）；教师级综合分 ≡ 各次课综合分的算术平均，任意数据下恒定成立；维度展示分按 α 融合，默认双侧对齐时二者自洽 | §2.5.2 |
 | 6 | 单次评价落库必须同时写 `formula_version`；跨表聚合不落库 | §2.5.6 |
 | 7 | 所有聚合接口必须支持 `?semester=`，默认当前学期 | §2.5.6 |
 | 8 | 无评价教师综合分为 `null` 且不参与排序，不得显示 0 | §2.5.5 |
@@ -814,6 +872,12 @@ src/
 | 12 | 教师评分列表默认按姓名排序，必须展示评价次数 n，标注"不作为考核依据" | §5.3 |
 | 13 | 新增表只新增、不改存量表；`supervision_plans` 保持不动 | §3 |
 | 14 | 转写必须异步且可重试；智能体故障不得影响督导评分主流程 | §4.4 |
+| 15 | 督导评分**五维全部必填**（缺失 40002）；仅智能体侧允许维度为 `NULL` | §2.1 · §4.1 |
+| 16 | 样本充足性以 `evaluatedCount`（已评价场次）为准，不以 `sessionCount` | §2.5.5 |
+| 17 | 迁移文件命名 `<版本>_<名称>.up.sql` / `.down.sql`；**禁止** Flyway 风格 `V2__xxx` | §3 |
+| 18 | 教师评分列表路由为 `GET /teacher-scores`；`GET /teachers` 永远是教师字典 | §4.2 |
+| 19 | 新增错误码必须同步 `pkg/errcode` 的 code / 文案 / **HTTP 映射**三处，并补表驱动单测 | §4 |
+| 20 | JSON 列（如 `evaluations.evidence`）的 Go 字段必须用指针，禁止以零值 `''` 写入 | §3.1 |
 
 ### 10.1 遗留待观察项（不阻塞开发，阶段三复盘）
 
@@ -822,7 +886,8 @@ src/
 | 督导间评分校准 | 当前无法消除 rater bias，阶段三 T3.5 引入示范课基线偏移校准 |
 | 智能体评分效力 | α=0.5 是未经校准的等权假设，积累 ≥50 条双侧样本后应重新评估 |
 | 样本量阈值 | `minSampleSize=3` 为经验值，首个学期结束后按实际分布调整 |
+| 非对齐聚合算法 | 当前采用「综合均值」并默认数据双侧对齐；部分场次仅单侧评价时的通用算法待单独立项（§2.5.2） |
 
 ---
 
-*文档版本：v1.2 *
+*文档版本：v1.3（2026-09 阶段一联调修订：综合均值口径、五维必填、evaluatedCount 样本量、`/teacher-scores` 路由、golang-migrate 命名、错误码 HTTP 映射）*

@@ -1,7 +1,7 @@
-# MySQL 数据库创建指导文档 — aijiaoxue（Sprint 1 · 查课程）
+# MySQL 数据库创建指导文档 — aijiaoxue（Sprint 1 基线 + Sprint 2 增量）
 
-> **文档用途**：指导完成「爱教学」Sprint 1 后端数据库的创建、建表与种子数据初始化，并给出各用户故事的验证 SQL，确保**基础数据链路打通**（数据库 → GORM → API → 前端页面）。
-> **配套文档**：后端《AGENTS.md》（Go + Gin 编码规范与接口契约）。两文档中的表结构以本文 DDL 为唯一事实源。
+> **文档用途**：指导完成「爱教学」后端数据库的创建、建表与种子数据初始化，并给出各用户故事的验证 SQL，确保**基础数据链路打通**（数据库 → GORM → API → 前端页面）。
+> **配套文档**：后端 [`backend_AGENTS.md`](./backend_AGENTS.md)（Go + Gin 编码规范与接口契约）；Sprint 2/3 的评分体系、新表 DDL 与接口契约以 [`Sprint2-3-教学评价与提优-开发计划.md`](./Sprint2-3-教学评价与提优-开发计划.md) §2/§3 为准。
 > **执行环境**：MySQL 8.0+（依赖 `utf8mb4_0900_ai_ci` 排序规则，5.7 不适用）、任意 MySQL 客户端（CLI / Navicat / DataGrip 均可）。
 
 ---
@@ -37,6 +37,9 @@ USE `aijiaoxue`;
 > 后端 `config.yaml` 中的 DSN 与此对应：
 > `aijiaoxue:aijiaoxue_dev@tcp(127.0.0.1:3306)/aijiaoxue?charset=utf8mb4&parseTime=True&loc=Local`
 > **`parseTime=True` 必须携带**，否则 GORM 扫描 DATETIME 报错。
+>
+> 🪟 **Windows 首次搭建**（MySQL Installer 安装 + 服务启动 + Git Bash 初始化 + 无 make 等价命令）见 [`README.md`](../README.md) 附录 C。
+> 本文 `§2` 的 SQL 假定机器上已有一个可用的 MySQL 8.0 服务——附录 C 覆盖了"从零装 MySQL 并启动"这一步。
 
 ## 3. 数据模型总览（ER 图）
 
@@ -435,16 +438,20 @@ func (Course) TableName() string { return "courses" }
 
 ## 9. 迁移与演进策略
 
+> **事实源分工（2026-09 修订）**：`database/schema.sql` 只负责 **Sprint 1 存量表**（`departments` / `users` / `courses` / `course_classes` / `resources` / `supervision_plans`）；
+> **Sprint 2 起的新表以 `migrations/` 下的迁移脚本为唯一事实源**，`schema.sql` 不再重复维护它们。
+> 初始化流程见 `backend/scripts/init_db.sh`：`schema.sql → migrate up → seed.sql → cmd/seed`。
+
 | 阶段 | 动作 |
 |------|------|
-| Sprint 1 | schema.sql + seed.sql 手工执行（本文档）；表结构变更 = 更新 schema.sql + 后端 model + PR 说明列明 |
-| Sprint 2（看课堂） | 新增 `teaching_sessions`（**授课记录**，核心实体）、`evaluations`（督导 + 智能体同表，靠 `evaluator_type` 区分）→ `migrations/V2__teaching_sessions_and_evaluations.sql`；阶段二再新增 `recordings`（课堂录音）、`transcripts`（转写文本，异步任务产物）→ `migrations/V3__recordings_and_transcripts.sql`。均**只新增、不改存量表** |
+| Sprint 1 | schema.sql + seed.sql 手工执行（本文档）；V1 基线已固化为 `migrations/1_baseline_sprint1.up.sql`（内容与 schema.sql 一致，`IF NOT EXISTS` 幂等） |
+| Sprint 2（看课堂） | `migrations/2_teaching_sessions_and_evaluations.up.sql`：新增 `teaching_sessions`（**授课记录**，核心实体）、`evaluations`（督导 + 智能体同表，靠 `evaluator_type` 区分）；阶段二再新增 `recordings`（课堂录音）、`transcripts`（转写文本，异步任务产物）→ `migrations/3_recordings_and_transcripts.up.sql`。均**只新增、不改存量表** |
 | Sprint 3（帮教师） | 新增 `quality_reports`（质量报告）、申诉复核相关表（`evaluation_appeals`）；`knowledge_base`（教学知识库条目） |
-| 版本化时机 | 从 Sprint 2 起引入 `golang-migrate`（`migrations/V2__xxx.sql`），Sprint 1 不引入以保持简单 |
+| 版本化时机 | 从 Sprint 2 起引入 `golang-migrate`。**文件名必须是 `<版本>_<名称>.up.sql` / `.down.sql`**（如 `2_teaching_sessions_and_evaluations.up.sql`）；Flyway 风格 `V2__xxx.up.sql` 不被识别，会让 `migrate up` 报 `first .: file does not exist` |
 
-> **完整 DDL、字段说明与三个实现陷阱**（`class_id` 唯一索引 NULL 不去重、转写必须异步、列式优于 EAV）见
-> [`Sprint2-3-教学评价与提优-开发计划.md`](./Sprint2-3-教学评价与提优-开发计划.md) §4。
-> 该文件同时给出评分维度、计分公式与聚合 SQL（§3）。
+> **完整 DDL、字段说明与实现陷阱**（`class_id` 唯一索引 NULL 不去重、转写必须异步、列式优于 EAV、JSON 列禁写空串、DATE 列按 `YYYY-MM-DD` 比较）见
+> [`Sprint2-3-教学评价与提优-开发计划.md`](./Sprint2-3-教学评价与提优-开发计划.md) §3。
+> 该文件同时给出评分维度、计分公式与聚合 SQL（§2）。
 
 ## 10. 备份与恢复
 

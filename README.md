@@ -2,7 +2,8 @@
 
 面向高校的教学质量全链路数字化管理平台，三阶进化路线：**查课程（Sprint 1）→ 看课堂（Sprint 2）→ 帮教师（Sprint 3）**。
 
-当前处于 **Sprint 1「查课程」**：全量课程信息透明可查、用户间数据打通、Web 整体框架可无误运作。
+当前处于 **Sprint 2「看课堂」**：Sprint 1（查课程）已交付；Sprint 2 阶段①「评价闭环」后端已落地，阶段②「智能体接入」（录音、异步转写、智能体评分）开发中；Sprint 3「帮教师」待排期。
+各阶段范围见 [`docs/backend_AGENTS.md`](./docs/backend_AGENTS.md) §2 与 [`docs/Sprint2-3-教学评价与提优-开发计划.md`](./docs/Sprint2-3-教学评价与提优-开发计划.md)。
 
 ## 仓库结构
 
@@ -13,7 +14,7 @@ ITmanage/
 ├── docs/                 # 团队设计文档（编码前必读）
 │   ├── backend_AGENTS.md          # 后端编码宪法：技术栈 / 目录 / 分层 / 接口契约
 │   ├── frontend_AGENTS.md         # 前端编码宪法：页面 / 组件 / 设计令牌 / 接口约定
-│   ├── MySQL数据库创建指导.md      # 建库建表 DDL 与种子数据的唯一事实源
+│   ├── MySQL数据库创建指导.md      # Sprint 1 存量表 DDL、种子数据与迁移策略
 │   ├── Sprint2-3-教学评价与提优-开发计划.md   # Sprint 2/3 功能与规范（评分体系、建表、接口、权限、路由）
 │   └── Sprint2-3-任务清单.md       # 按模块分发的简短任务清单（详细信息指向开发计划）
 ├── backend/              # Go + Gin + GORM 后端服务（aijiaoxue-api）
@@ -44,7 +45,11 @@ ITmanage/
 | Go | 1.22+ | `go version` |
 | Node.js | 18+ | `node -v` / `npm -v` |
 | MySQL | 8.0+（需 `utf8mb4_0900_ai_ci`，5.7 不可用） | `mysql --version` |
+| Git Bash / WSL（运行 `scripts/*.sh` 与 `make`） | 任意 | `bash --version` |
+| Python 3（`scripts/verify.sh` 解析 JSON 用） | 3.x | `python3 --version` |
 | air（可选） | latest，后端热重载 | `go install github.com/air-verse/air@latest` |
+
+> 🪟 **Windows 成员**：本仓库的初始化/验收脚本是 bash + make，**请先看文末「附录 C：Windows 首次环境搭建（Git Bash + 原生 MySQL）」**，按它走可一次跑通；`.devtools/mysql/` 是 Linux 开发容器专用，Windows 无法使用（见附录 A 说明）。
 
 ```bash
 # 前端依赖（仅首次 / package.json 变更后）
@@ -81,22 +86,25 @@ cd backend
 cp config.example.yaml config.yaml
 #    至少确认 mysql.dsn 指向本机 MySQL、端口与账号正确
 
-# ② 建库 + 建表 + 种子数据 + 写入 bcrypt 密码哈希（一条命令走完）
+# ② 建库 + 建表 + 迁移 + 种子数据 + 写入 bcrypt 密码哈希（一条命令走完）
 bash scripts/init_db.sh
-#    等价的四步手工方式：
-#    make db-init                                  # schema.sql：建库 / 建用户 / 六张表
-#    make db-seed                                  # seed.sql：⚠️ 先 TRUNCATE 全部 6 张表再写入，只对本地库执行
+#    等价的五步手工方式（顺序不可调换）：
+#    make db-init                                  # schema.sql：建库 / 建用户 / Sprint 1 六张表
+#    make migrate                                  # golang-migrate：V1 基线幂等 + V2 建 teaching_sessions / evaluations
+#    make db-seed                                  # seed.sql：⚠️ 先 TRUNCATE 全部 8 张表再写入，只对本地库执行
 #    make seed                                     # cmd/seed：bcrypt 覆写演示账号密码（密码 123456）
 #    mysql -u aijiaoxue -paijiaoxue_dev aijiaoxue -e "SELECT ..."   # 见下方 ③ 自查
 
-# ③ 自查（期望 departments=3 users=6 courses=8 classes=14 resources=6 plans=5）
+# ③ 自查（期望 departments=3 users=6 courses=8 classes=14 resources=6 plans=5 sessions=3 evaluations=6）
 mysql -u aijiaoxue -paijiaoxue_dev aijiaoxue -e "
 SELECT (SELECT COUNT(*) FROM departments) departments,
        (SELECT COUNT(*) FROM users) users,
        (SELECT COUNT(*) FROM courses) courses,
        (SELECT COUNT(*) FROM course_classes) classes,
        (SELECT COUNT(*) FROM resources) resources,
-       (SELECT COUNT(*) FROM supervision_plans) plans;"
+       (SELECT COUNT(*) FROM supervision_plans) plans,
+       (SELECT COUNT(*) FROM teaching_sessions) sessions,
+       (SELECT COUNT(*) FROM evaluations) evaluations;"
 ```
 
 演示账号（密码统一 `123456`）：`director`（王建国·主任）、`teacher`（李明·教师）、`supervisor`（陈静·督导）。
@@ -108,13 +116,18 @@ SELECT (SELECT COUNT(*) FROM departments) departments,
 #### 3.1 MySQL
 
 ```bash
-# macOS (Homebrew)            # Ubuntu / Debian (systemd)      # 本仓库沙箱容器（无需 root）
+# macOS (Homebrew)            # Ubuntu / Debian (systemd)      # 本仓库沙箱容器（无需 root，仅 Linux 容器）
 brew services start mysql     sudo systemctl start mysql        bash .devtools/mysql/start.sh
 brew services stop  mysql     sudo systemctl stop  mysql        bash .devtools/mysql/stop.sh
 brew services restart mysql   sudo systemctl restart mysql      bash .devtools/mysql/stop.sh && bash .devtools/mysql/start.sh
+
+# Windows（原生 MySQL Installer 安装，服务名默认 MySQL80）—— 详见附录 C
+# PowerShell（管理员）：Start-Service MySQL80   /   Stop-Service MySQL80   /   Restart-Service MySQL80
+# 或：net start MySQL80
 ```
 
-> 沙箱容器内的 MySQL 8.0 实例说明见文末「附录 A」。
+> 沙箱容器内的 MySQL 8.0 实例说明见文末「附录 A」（**仅限本 Linux 开发容器；非容器环境请用本机 MySQL**）。
+> Windows 首次搭建见文末「附录 C」。
 
 #### 3.2 后端（默认 `http://127.0.0.1:8080`）
 
@@ -163,9 +176,10 @@ npm run preview      # 本地预览构建产物
 | 终止全部 | ① 前端 `Ctrl+C` ② 后端 `Ctrl+C` ③ `bash .devtools/mysql/stop.sh` |
 | 只重启后端 | 后端窗口 `Ctrl+C` → `make run`（改用 air 时改 service/repo 会自动重启） |
 | 只重启前端 | 一般无需重启（HMR）；**改 `.env.development` / `vite.config.ts` 必须重启** |
-| 重新灌种子数据 ⚠️ | `cd backend && make db-seed && make seed` —— **`seed.sql` 会先 `TRUNCATE` 全部 6 张表**，仅用于本地开发库 |
+| 重新灌种子数据 ⚠️ | `cd backend && make migrate && make db-seed && make seed` —— **`seed.sql` 会先 `TRUNCATE` 全部 8 张表**，仅用于本地开发库 |
 
-> ⚠️ **`make db-seed` 是破坏性操作**：`backend/database/seed.sql` 开头执行 `SET FOREIGN_KEY_CHECKS=0` + 对全部 6 张表 `TRUNCATE`，会清空既有数据后重新写入种子。
+> ⚠️ **`make db-seed` 是破坏性操作**：`backend/database/seed.sql` 开头执行 `SET FOREIGN_KEY_CHECKS=0` + 对全部 8 张表（含 `teaching_sessions` / `evaluations`）`TRUNCATE`，会清空既有数据后重新写入种子。
+> 新库必须先 `make migrate` 建出 V2 的两张表，否则 `seed.sql` 会因表不存在而报错。
 > 只对**本地开发库**执行；**绝不要对共享库或他人正在使用的库执行**。只想重置密码哈希时用 `make seed`（只 UPDATE `users.password_hash`，不清数据）。
 
 ### 4. 验证方式（按改动范围选择）
@@ -177,7 +191,7 @@ make lint            # go vet + gofmt -l，零告警才算过
 make test            # service 层表驱动单测（数据裁剪 / 覆盖率 / 资源归属 / 登录）
 make build           # 编译通过
 
-# 端到端验收：57 项断言，覆盖三故事线 + 越权负例 + 覆盖率对账
+# 端到端验收：143 项断言，覆盖 Sprint 1 三故事线 + Sprint 2.1 评价闭环 + 越权负例 + 覆盖率/评分对账
 BASE=http://127.0.0.1:8080/api/v1 MYSQL_PORT=3306 bash scripts/verify.sh
 
 cd ../frontend
@@ -267,15 +281,20 @@ HTTP → middleware（鉴权/角色守卫）
 
 #### 6.3 场景 B：新增表 / 修改表结构
 
-1. 改 `docs/MySQL数据库创建指导.md` §4 的 DDL（文档是唯一事实源），同步改 `backend/database/schema.sql`。
+> **事实源分工**：`backend/database/schema.sql` 只负责 Sprint 1 存量表；**Sprint 2 起的新表以 `backend/migrations/` 下的迁移脚本为唯一事实源**（内容须与 `docs/Sprint2-3-教学评价与提优-开发计划.md` §3 的 DDL 一致）。
+
+1. 新增表：在 `backend/migrations/` 新建 `<版本>_<名称>.up.sql` / `.down.sql`。**必须用 golang-migrate 命名**（如 `2_teaching_sessions_and_evaluations.up.sql`）；Flyway 风格 `V2__xxx.up.sql` **不被识别**，会让 `make migrate` 报 `first .: file does not exist`。
 2. 改 `backend/internal/model/<table>.go`：字段与列一一对应，写 `TableName()`。**禁止使用 GORM `AutoMigrate`**（避免代码与数据库双源漂移）。
-3. 在数据库执行变更（开发期手工执行；Sprint 2 起引入 `golang-migrate`）：
+3. 执行迁移：
    ```bash
-   mysql -u root -p aijiaoxue < database/schema.sql   # CREATE TABLE IF NOT EXISTS，可重复执行
-   # 已存在的表加列请手写 ALTER TABLE，并在 PR 说明中列明
+   cd backend
+   make migrate           # go run ./cmd/migrate up（V1 基线幂等 + 增量）
+   make migrate-version   # 查看当前版本
+   make migrate-down      # 回滚一个版本
    ```
-4. 若是 Sprint 2/3 的新表（`recordings` / `transcripts` / `quality_reports`），**只新增、不动存量结构**，外键以 `course_id` 挂接。
-5. 在 PR 说明中列明「表结构变更清单」，并由成员四 + 成员一复核。
+4. 存量表（Sprint 1）加列：同步更新 `database/schema.sql` 与 `docs/MySQL数据库创建指导.md`，并新增一条 `ALTER TABLE` 迁移脚本，在 PR 说明中列明。
+5. 新表**只新增、不动存量结构**，外键以 `course_id` 挂接。
+6. 在 PR 说明中列明「表结构变更清单」，并由成员四 + 成员一复核。
 
 #### 6.4 场景 C：接口契约变更（前后端联调返工的高发区）
 
@@ -370,6 +389,150 @@ mysql:
 | `courses.objective` / `courses.major` | **未实现** | 前端详情页「培养目标 / 适用专业」在 Sprint 1 DDL 中无对应列，页面已做空值降级；若需启用须按 §6.3 新增列 |
 
 > 前端原 `src/mocks/` 临时数据与 `VITE_USE_MOCK` 开关已删除，前端全部数据来自后端 API（开发期经 Vite proxy）。接口 id 统一使用后端 `uint64` 对应的 `number` 类型。
+
+### 10. 附录 C：Windows 首次环境搭建（Git Bash + 原生 MySQL）
+
+> **适用**：Windows 10/11，本机**从未配置过 MySQL**。目标：把「库 + 种子数据 + 后端 + 前端」跑通，并能执行 143 项验收。
+> **路线**：**Git for Windows（Git Bash） + MySQL Installer 原生安装**（服务名默认 `MySQL80`，端口 `3306`）。
+> ⚠️ 本仓库 `.devtools/mysql/`（附录 A）是 **Linux 开发容器专用**（ELF 二进制 + bash + `LD_LIBRARY_PATH`），且已 `.gitignore`，Windows 上既拿不到也跑不了，**请忽略它**。
+
+#### C.1 安装四件套
+
+| 依赖 | 下载 | 安装要点 | 校验（Git Bash，装完请重开） |
+|------|------|---------|------------------------------|
+| Git for Windows | git-scm.com | 默认选项，自带 **Git Bash** | `git --version` |
+| Go 1.22+ | go.dev/dl | msi 默认安装 | `go version` |
+| Node.js 18+ | nodejs.org（LTS） | msi 默认安装 | `node -v && npm -v` |
+| MySQL 8.0 | dev.mysql.com/downloads/installer | 选 **Server only**；**记住 root 密码**；端口保持 **3306**；把 `C:\Program Files\MySQL\MySQL Server 8.0\bin` 加入 PATH | `mysql --version` |
+| Python 3 | python.org | 勾选 **Add python.exe to PATH** | `python3 --version`（兜底见 C.7） |
+
+> 版本红线：MySQL 必须是 **8.0+**（排序规则 `utf8mb4_0900_ai_ci`，5.7 不可用）。
+
+#### C.2 配置 Go 模块代理（国内网络必需）
+
+```bash
+go env -w GOPROXY=https://goproxy.cn,direct
+go env GOPROXY
+```
+
+> `go env -w` 跨 shell 生效；仅走本机代理时才需要 `$env:HTTP_PROXY="http://127.0.0.1:7897"`（PowerShell）。
+
+#### C.3 启动 MySQL 服务
+
+PowerShell（**管理员**）：
+
+```powershell
+Get-Service MySQL80        # 确认服务存在
+Start-Service MySQL80      # 启动；停止用 Stop-Service MySQL80
+mysql -u root -p -e "SELECT VERSION();"
+```
+
+或 `net start MySQL80`。MySQL 8 安装后通常已设为开机自启。
+
+#### C.4 拉取依赖
+
+```bash
+cd frontend && npm install
+cd ../backend && go mod tidy
+```
+
+#### C.5 初始化数据库（Git Bash）
+
+```bash
+cd backend
+cp config.example.yaml config.yaml     # 复制模板
+# 打开 config.yaml，确认 DSN = 127.0.0.1:3306、账号 aijiaoxue / aijiaoxue_dev
+
+# 一条命令走完：建库建账号 → 迁移 → 种子 → 密码哈希 → 自查
+MYSQL_ADMIN_PASSWORD='你的root密码' bash scripts/init_db.sh
+```
+
+> **为什么用 `MYSQL_ADMIN_PASSWORD`**：Git Bash（mintty）里 MySQL 的交互式密码输入可能卡住；用环境变量传入可绕开。想先验证客户端，可执行 `winpty mysql -u root -p`。
+
+**不想用脚本时的手工五步**（顺序不可调换；请在 Git Bash 中执行）：
+
+```bash
+cd backend
+
+# 1) 建库 / 建账号 / 建 Sprint 1 六张表（用 root 执行 schema.sql）
+MYSQL_PWD='你的root密码' mysql -h 127.0.0.1 -P 3306 -u root < database/schema.sql
+
+# 2) 版本化迁移：V1 基线幂等 + V2 建 teaching_sessions / evaluations
+go run ./cmd/migrate -config config.yaml up
+
+# 3) 种子数据（⚠️ 破坏性：先 TRUNCATE 全部 8 张表，仅本地库）
+MYSQL_PWD=aijiaoxue_dev mysql -h 127.0.0.1 -P 3306 -u aijiaoxue aijiaoxue < database/seed.sql
+
+# 4) 覆写 bcrypt 密码哈希（不执行则登录一律 40101）
+go run ./cmd/seed -config config.yaml
+
+# 5) 自查（期望 3 / 6 / 8 / 14 / 6 / 5 / 3 / 6）
+MYSQL_PWD=aijiaoxue_dev mysql -h 127.0.0.1 -P 3306 -u aijiaoxue aijiaoxue -e "
+SELECT (SELECT COUNT(*) FROM departments) departments,
+       (SELECT COUNT(*) FROM users) users,
+       (SELECT COUNT(*) FROM courses) courses,
+       (SELECT COUNT(*) FROM course_classes) classes,
+       (SELECT COUNT(*) FROM resources) resources,
+       (SELECT COUNT(*) FROM supervision_plans) plans,
+       (SELECT COUNT(*) FROM teaching_sessions) sessions,
+       (SELECT COUNT(*) FROM evaluations) evaluations;"
+```
+
+> 第 2 步不能省：`teaching_sessions` / `evaluations` 由迁移创建，缺失时第 3 步会因表不存在报错。
+> `MYSQL_PWD` 只为避开 Git Bash 交互提示，它会在进程环境中短暂可见；生产环境请改用 `mysql_config_editor` 或 `[client]` 配置段。
+
+#### C.6 启动服务（两个 Git Bash 窗口）
+
+```bash
+# 窗口 1：后端（不依赖 make）
+cd backend && go run ./cmd/server -config config.yaml
+
+# 窗口 2：前端
+cd frontend && npm run dev
+```
+
+看到 `{"level":"INFO","msg":"mysql connected"}` 与 `server started` 即成功，浏览器打开 http://127.0.0.1:5173 。
+
+#### C.7 跑验收
+
+```bash
+cd backend
+BASE=http://127.0.0.1:8080/api/v1 MYSQL_PORT=3306 bash scripts/verify.sh
+# 期望：143 通过 / 0 失败
+```
+
+> **`verify.sh` 依赖 `python3`**。若 Git Bash 中 `python3 --version` 不可用（Windows 版 Python 常只提供 `python`），在当前 Git Bash 会话执行 `alias python3=python` 即可（写进 `~/.bashrc` 可持久）。
+> 脚本尾部的清理命令还依赖 `mysql` 在 PATH 中。
+
+#### C.8 `make` 不是必需的
+
+Git Bash 默认不带 `make`；需要可 `choco install make`（或 MSYS2）。不做也行，等价命令如下（均在 `backend/` 下）：
+
+| make 目标 | 等价命令 |
+|-----------|---------|
+| `make run` | `go run ./cmd/server -config config.yaml` |
+| `make test` | `go test ./... -count=1` |
+| `make lint` | `go vet ./... && gofmt -l .` |
+| `make build` | `go build -o bin/aijiaoxue-api ./cmd/server` |
+| `make migrate` | `go run ./cmd/migrate -config config.yaml up` |
+| `make migrate-down` | `go run ./cmd/migrate -config config.yaml down 1` |
+| `make migrate-version` | `go run ./cmd/migrate -config config.yaml version` |
+| `make seed` | `go run ./cmd/seed -config config.yaml` |
+| `make db-init` | `mysql -u root -p < database/schema.sql`（Git Bash 可加 `winpty`） |
+| `make db-seed` | `mysql -u aijiaoxue -paijiaoxue_dev aijiaoxue < database/seed.sql` |
+| `make verify` | `MYSQL_PORT=3306 bash scripts/verify.sh` |
+
+#### C.9 Windows 常见坑
+
+| 现象 | 原因 / 处置 |
+|------|------------|
+| `mysql: command not found` | MySQL `bin` 未加入 PATH；重开 Git Bash |
+| 输入 root 密码后无响应 | Git Bash(mintty) TTY 问题；改用 `MYSQL_ADMIN_PASSWORD=... bash scripts/init_db.sh` 或 `winpty mysql -u root -p` |
+| 时间差 8 小时 / GORM 扫描 DATETIME 报错 | DSN 缺 `loc=Local` 或 `parseTime=True`（见 MySQL 文档 §11） |
+| `python3: command not found` | 见 C.7 |
+| `Error 1045 Access denied` | 账号/密码与 `config.yaml` 不一致；重跑 C.5 第 1 步建账号 |
+| 端口 3306 被占用 | `netstat -ano \| findstr :3306`（PowerShell 用 `Get-NetTCPConnection -LocalPort 3306`）；改 MySQL 端口后同步 `config.yaml` 的 DSN 与 `MYSQL_PORT` |
+| `make: command not found` | 见 C.8（用等价命令或 `choco install make`） |
 
 ---
 
