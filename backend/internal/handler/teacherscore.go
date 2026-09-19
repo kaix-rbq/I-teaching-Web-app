@@ -76,3 +76,27 @@ func (h *TeacherScoreHandler) CourseSummary(c *gin.Context) {
 	}
 	response.OK(c, data)
 }
+
+// TeacherEvaluations 处理 GET /api/v1/teachers/:id/evaluations（历次评价时间线，S6.5 / T1.13）。
+// 权限与 /teachers/:id/evaluation-summary 一致：director 本室 / teacher 仅自己 / supervisor 全校。
+func (h *TeacherScoreHandler) TeacherEvaluations(c *gin.Context) {
+	id, err := pathID(c)
+	if err != nil {
+		response.Fail(c, err)
+		return
+	}
+	var q dto.TeacherEvaluationTimelineQuery
+	if err := bindQuery(c, &q); err != nil {
+		response.Fail(c, err)
+		return
+	}
+	role, _ := middleware.Role(c)
+	userID, _ := middleware.UserID(c)
+
+	data, err := h.teacherScores.TeacherEvaluations(c.Request.Context(), role, middleware.DeptID(c), userID, id, q)
+	if err != nil {
+		response.Fail(c, err)
+		return
+	}
+	response.OK(c, data)
+}

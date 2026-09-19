@@ -306,6 +306,7 @@ func (f *fakeSessionRepo) PlanExists(ctx context.Context, planID uint64) (bool, 
 type fakeEvalRepo struct {
 	upsert             func(ctx context.Context, e *model.Evaluation) error
 	listBySession      func(ctx context.Context, sessionID uint64) ([]repository.EvaluationRow, error)
+	listBySessionIDs   func(ctx context.Context, sessionIDs []uint64) ([]repository.EvaluationRow, error)
 	listSessionDimRows func(ctx context.Context, flt repository.SessionDimFilter) ([]repository.SessionDimRow, error)
 }
 
@@ -321,6 +322,13 @@ func (f *fakeEvalRepo) ListBySession(ctx context.Context, sessionID uint64) ([]r
 		return nil, nil
 	}
 	return f.listBySession(ctx, sessionID)
+}
+
+func (f *fakeEvalRepo) ListBySessionIDs(ctx context.Context, sessionIDs []uint64) ([]repository.EvaluationRow, error) {
+	if f.listBySessionIDs == nil {
+		return nil, nil
+	}
+	return f.listBySessionIDs(ctx, sessionIDs)
 }
 
 func (f *fakeEvalRepo) ListSessionDimRows(
