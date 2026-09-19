@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"time"
 
 	"aijiaoxue-api/internal/model"
 	"aijiaoxue-api/internal/repository"
@@ -235,4 +236,98 @@ func (f *fakeSupervisionRepo) CountPlans(ctx context.Context, status string) (in
 		return 0, nil
 	}
 	return f.countPlans(ctx, status)
+}
+
+type fakeSessionRepo struct {
+	create          func(ctx context.Context, s *model.TeachingSession) error
+	getByID         func(ctx context.Context, id uint64) (*model.TeachingSession, error)
+	getDetail       func(ctx context.Context, id uint64) (*repository.SessionDetailRow, error)
+	existsDuplicate func(ctx context.Context, courseID, classID uint64, date time.Time, period string, excludeID uint64) (bool, error)
+	listByCourse    func(ctx context.Context, p repository.SessionListParams) ([]repository.SessionListRow, int64, error)
+	updateStatus    func(ctx context.Context, id uint64, status string) error
+	planExists      func(ctx context.Context, planID uint64) (bool, error)
+	lastStatus      string
+}
+
+func (f *fakeSessionRepo) Create(ctx context.Context, s *model.TeachingSession) error {
+	if f.create == nil {
+		return nil
+	}
+	return f.create(ctx, s)
+}
+
+func (f *fakeSessionRepo) GetByID(ctx context.Context, id uint64) (*model.TeachingSession, error) {
+	if f.getByID == nil {
+		return nil, repository.ErrNotImplemented
+	}
+	return f.getByID(ctx, id)
+}
+
+func (f *fakeSessionRepo) GetDetail(ctx context.Context, id uint64) (*repository.SessionDetailRow, error) {
+	if f.getDetail == nil {
+		return nil, repository.ErrNotImplemented
+	}
+	return f.getDetail(ctx, id)
+}
+
+func (f *fakeSessionRepo) ExistsDuplicate(
+	ctx context.Context, courseID, classID uint64, date time.Time, period string, excludeID uint64,
+) (bool, error) {
+	if f.existsDuplicate == nil {
+		return false, nil
+	}
+	return f.existsDuplicate(ctx, courseID, classID, date, period, excludeID)
+}
+
+func (f *fakeSessionRepo) ListByCourse(
+	ctx context.Context, p repository.SessionListParams,
+) ([]repository.SessionListRow, int64, error) {
+	if f.listByCourse == nil {
+		return nil, 0, nil
+	}
+	return f.listByCourse(ctx, p)
+}
+
+func (f *fakeSessionRepo) UpdateStatus(ctx context.Context, id uint64, status string) error {
+	f.lastStatus = status
+	if f.updateStatus == nil {
+		return nil
+	}
+	return f.updateStatus(ctx, id, status)
+}
+
+func (f *fakeSessionRepo) PlanExists(ctx context.Context, planID uint64) (bool, error) {
+	if f.planExists == nil {
+		return false, nil
+	}
+	return f.planExists(ctx, planID)
+}
+
+type fakeEvalRepo struct {
+	upsert             func(ctx context.Context, e *model.Evaluation) error
+	listBySession      func(ctx context.Context, sessionID uint64) ([]repository.EvaluationRow, error)
+	listSessionDimRows func(ctx context.Context, flt repository.SessionDimFilter) ([]repository.SessionDimRow, error)
+}
+
+func (f *fakeEvalRepo) Upsert(ctx context.Context, e *model.Evaluation) error {
+	if f.upsert == nil {
+		return nil
+	}
+	return f.upsert(ctx, e)
+}
+
+func (f *fakeEvalRepo) ListBySession(ctx context.Context, sessionID uint64) ([]repository.EvaluationRow, error) {
+	if f.listBySession == nil {
+		return nil, nil
+	}
+	return f.listBySession(ctx, sessionID)
+}
+
+func (f *fakeEvalRepo) ListSessionDimRows(
+	ctx context.Context, flt repository.SessionDimFilter,
+) ([]repository.SessionDimRow, error) {
+	if f.listSessionDimRows == nil {
+		return nil, nil
+	}
+	return f.listSessionDimRows(ctx, flt)
 }
