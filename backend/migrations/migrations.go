@@ -1,5 +1,8 @@
 // Package migrations 以 embed 方式打包全部 SQL 迁移脚本，供 golang-migrate 执行。
-// 目录内文件命名遵循 golang-migrate 约定：V<版本>__<名称>.up.sql / .down.sql。
+// 目录内文件命名遵循 golang-migrate 默认约定：<版本>_<名称>.up.sql / .down.sql
+// （正则 ^([0-9]+)_(.*)\.(up|down)\.(.*)$）。
+// 注意：Flyway 风格的 V1__xxx.up.sql 不被标识为迁移，会导致 migrate up 报
+// "first .: file does not exist"，禁止改回该命名。
 package migrations
 
 import "embed"

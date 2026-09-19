@@ -151,7 +151,7 @@ func TestAggregateSeed(t *testing.T) {
 	require.NotNil(t, s.Agent)
 	assert.Equal(t, 67.86, round2(*s.Agent), "智能体侧（缺 objective 时再归一化）")
 
-	assert.Equal(t, Sample{SessionCount: 3, SupervisorCount: 3, AgentCount: 3, AlignedCount: 3}, s.Sample)
+	assert.Equal(t, Sample{SessionCount: 3, EvaluatedCount: 3, SupervisorCount: 3, AgentCount: 3, AlignedCount: 3}, s.Sample)
 	assert.Empty(t, s.Flags)
 
 	wantDims := []struct {
@@ -249,12 +249,12 @@ func TestAggregateMissingMatrix(t *testing.T) {
 			wantFlags:     []string{},
 		},
 		{
-			name: "双侧都有但场次不对齐 → disjoint（数值与对齐相同，差别只在 alignedCount）",
+			name: "双侧都有但场次不对齐 → disjoint（综合均值口径：两场次综合分 75/42.5 的均值）",
 			items: []SessionScore{
 				{SessionID: 1, Supervisor: supOnly},
 				{SessionID: 2, Agent: aiOnly},
 			},
-			wantComposite: f(70.00),
+			wantComposite: f(58.75),
 			wantAgent:     f(60.71),
 			wantFlags:     []string{"disjoint"},
 		},
@@ -275,6 +275,43 @@ func TestAggregateMissingMatrix(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestAggregateIdentityNonAligned 锁定 F3 修复：非全对齐数据下，
+// 教师级综合分仍恒等于各场次综合分的算术平均（综合均值口径）。
+func TestAggregateIdentityNonAligned(t *testing.T) {
+	w := defaultWeights()
+	items := []SessionScore{
+		{SessionID: 1,
+			Supervisor: NewDimensionScores(i(5), nil, nil, nil, nil),
+			Agent:      NewDimensionScores(i(5), nil, nil, nil, nil)},
+		{SessionID: 2,
+			Supervisor: NewDimensionScores(i(1), nil, nil, nil, nil)},
+	}
+	s := Aggregate(items, w, 0.5)
+	require.NotNil(t, s.Composite)
+	var sum float64
+	for _, it := range items {
+		c := SessionComposite(it, w, 0.5)
+		require.NotNil(t, c)
+		sum += *c
+	}
+	assert.InDelta(t, *s.Composite, sum/float64(len(items)), 1e-9)
+	assert.Equal(t, 15.00, round2(*s.Composite), "旧口径会得到 22.5，新口径必须是场次综合分的均值 15")
+	assert.Equal(t, 2, s.Sample.EvaluatedCount)
+}
+
+// TestAggregateEvaluatedCount 覆盖 F5：已评价场次只统计至少有一侧评价的场次。
+func TestAggregateEvaluatedCount(t *testing.T) {
+	items := []SessionScore{
+		{SessionID: 1},
+		{SessionID: 2},
+		{SessionID: 3, Supervisor: NewDimensionScores(i(4), i(4), i(4), i(4), i(4))},
+	}
+	s := Aggregate(items, defaultWeights(), 0.5)
+	assert.Equal(t, 3, s.Sample.SessionCount, "总会话数含未评价场次")
+	assert.Equal(t, 1, s.Sample.EvaluatedCount, "已评价场次只计有评价的")
+	assert.Contains(t, s.Flags, "sup_only")
 }
 
 // TestAggregateEmpty 无任何场次时综合分必须为 nil，不得按 0 分处理（§2.5.5 硬约定 8）。
