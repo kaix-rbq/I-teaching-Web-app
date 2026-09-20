@@ -52,10 +52,16 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '编辑课程', roles: ['director'] }
       },
       {
+        path: 'sessions/:id/evaluation',
+        name: 'session-evaluation',
+        component: () => import('@/views/SessionEvaluationView.vue'),
+        meta: { title: '当堂课质量评估' }
+      },
+      {
         path: 'supervision',
         name: 'supervision',
         component: () => import('@/views/SupervisionView.vue'),
-        meta: { title: '督导总览', roles: ['supervisor'] }
+        meta: { title: '听评课管理', roles: ['supervisor'] }
       },
       {
         path: 'profile',
