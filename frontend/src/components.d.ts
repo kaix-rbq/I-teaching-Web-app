@@ -7,10 +7,12 @@ export {}
 
 declare module 'vue' {
   export interface GlobalComponents {
+    CommentPanel: typeof import('./components/evaluation/CommentPanel.vue')['default']
     CourseCard: typeof import('./components/course/CourseCard.vue')['default']
     CourseInfoForm: typeof import('./components/course/CourseInfoForm.vue')['default']
     CourseTable: typeof import('./components/course/CourseTable.vue')['default']
     CoverageCard: typeof import('./components/supervision/CoverageCard.vue')['default']
+    ElAlert: typeof import('element-plus/es')['ElAlert']
     ElBreadcrumb: typeof import('element-plus/es')['ElBreadcrumb']
     ElBreadcrumbItem: typeof import('element-plus/es')['ElBreadcrumbItem']
     ElButton: typeof import('element-plus/es')['ElButton']
@@ -18,10 +20,12 @@ declare module 'vue' {
     ElDatePicker: typeof import('element-plus/es')['ElDatePicker']
     ElDescriptions: typeof import('element-plus/es')['ElDescriptions']
     ElDescriptionsItem: typeof import('element-plus/es')['ElDescriptionsItem']
+    ElDialog: typeof import('element-plus/es')['ElDialog']
     ElDivider: typeof import('element-plus/es')['ElDivider']
     ElDropdown: typeof import('element-plus/es')['ElDropdown']
     ElDropdownItem: typeof import('element-plus/es')['ElDropdownItem']
     ElDropdownMenu: typeof import('element-plus/es')['ElDropdownMenu']
+    ElEmpty: typeof import('element-plus/es')['ElEmpty']
     ElForm: typeof import('element-plus/es')['ElForm']
     ElFormItem: typeof import('element-plus/es')['ElFormItem']
     ElIcon: typeof import('element-plus/es')['ElIcon']
@@ -42,8 +46,11 @@ declare module 'vue' {
     ElTabPane: typeof import('element-plus/es')['ElTabPane']
     ElTabs: typeof import('element-plus/es')['ElTabs']
     ElTag: typeof import('element-plus/es')['ElTag']
+    ElTooltip: typeof import('element-plus/es')['ElTooltip']
     ElUpload: typeof import('element-plus/es')['ElUpload']
     EmptyState: typeof import('./components/common/EmptyState.vue')['default']
+    EvaluationCompare: typeof import('./components/evaluation/EvaluationCompare.vue')['default']
+    EvaluationForm: typeof import('./components/evaluation/EvaluationForm.vue')['default']
     FilterBar: typeof import('./components/common/FilterBar.vue')['default']
     PageHeader: typeof import('./components/common/PageHeader.vue')['default']
     ResourceList: typeof import('./components/course/ResourceList.vue')['default']
@@ -52,6 +59,8 @@ declare module 'vue' {
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
     ScheduleTable: typeof import('./components/supervision/ScheduleTable.vue')['default']
+    ScoreRadar: typeof import('./components/evaluation/ScoreRadar.vue')['default']
+    SessionTable: typeof import('./components/session/SessionTable.vue')['default']
     StatCard: typeof import('./components/common/StatCard.vue')['default']
   }
   export interface ComponentCustomProperties {

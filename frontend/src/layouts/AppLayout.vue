@@ -39,7 +39,7 @@ const menuItems = computed<MenuItem[]>(() => {
   ]
 
   if (role === 'supervisor') {
-    items.push({ index: 'supervision', label: '督导总览', icon: markRaw(DataAnalysis) })
+    items.push({ index: 'supervision', label: '听评课管理', icon: markRaw(DataAnalysis) })
   }
 
   items.push({ index: 'profile', label: '个人中心', icon: markRaw(User) })
@@ -48,7 +48,12 @@ const menuItems = computed<MenuItem[]>(() => {
 
 const activeMenu = computed(() => {
   const name = String(route.name ?? '')
-  if (name === 'course-detail' || name === 'course-new' || name === 'course-edit') {
+  if (
+    name === 'course-detail' ||
+    name === 'course-new' ||
+    name === 'course-edit' ||
+    name === 'session-evaluation'
+  ) {
     return 'course-list'
   }
   return name
