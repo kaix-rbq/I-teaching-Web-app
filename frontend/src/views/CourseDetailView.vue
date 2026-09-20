@@ -1,16 +1,19 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import PageHeader from '@/components/common/PageHeader.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import ResourceList from '@/components/course/ResourceList.vue'
 import ResourceUploader from '@/components/course/ResourceUploader.vue'
+import SessionTable from '@/components/session/SessionTable.vue'
 import { fetchCourseDetailApi } from '@/api/course'
 import { deleteResourceApi, downloadResourceApi, fetchResourcesApi, uploadResourceApi } from '@/api/resource'
-import { getCourseStatusMeta, RESOURCE_ACCEPT, MAX_RESOURCE_SIZE } from '@/constants'
+import { createSessionApi, fetchCourseSessionsApi } from '@/api/session'
+import { getCourseStatusMeta, RESOURCE_ACCEPT, MAX_RESOURCE_SIZE, PAGE_SIZES } from '@/constants'
 import { useAuthStore } from '@/stores/auth'
 import type { Course } from '@/types/course'
 import type { Resource } from '@/types/resource'
+import type { SessionListItem } from '@/types/evaluation'
 
 const route = useRoute()
 const router = useRouter()
@@ -25,13 +28,36 @@ const resourceLoading = ref(false)
 const uploading = ref(false)
 const uploadProgress = ref(0)
 
-const activeTab = ref<'basic' | 'classes' | 'resource'>('basic')
+const sessions = ref<SessionListItem[]>([])
+const sessionsLoading = ref(false)
+const sessionsError = ref(false)
+const sessionTotal = ref(0)
+const sessionPage = ref(1)
+const sessionPageSize = ref(10)
+
+const createVisible = ref(false)
+const createSubmitting = ref(false)
+const createForm = reactive<{
+  classId: number | ''
+  sessionDate: string
+  period: string
+  topic: string
+}>({
+  classId: '',
+  sessionDate: '',
+  period: '',
+  topic: ''
+})
+
+const activeTab = ref<'basic' | 'classes' | 'resource' | 'sessions'>('basic')
 
 const courseId = computed(() => String(route.params.id ?? ''))
 
 const canManageResources = computed(
   () => auth.role === 'teacher' && course.value?.teacherId === auth.user?.id
 )
+
+const canCreateSession = computed(() => auth.role === 'supervisor')
 
 const statusMeta = computed(() =>
   course.value ? getCourseStatusMeta(course.value.status) : null
@@ -69,6 +95,81 @@ async function loadResources(): Promise<void> {
     resources.value = []
   } finally {
     resourceLoading.value = false
+  }
+}
+
+async function loadSessions(): Promise<void> {
+  sessionsLoading.value = true
+  sessionsError.value = false
+  try {
+    const result = await fetchCourseSessionsApi(courseId.value, {
+      page: sessionPage.value,
+      pageSize: sessionPageSize.value
+    })
+    sessions.value = result.list
+    sessionTotal.value = result.total
+  } catch {
+    sessionsError.value = true
+    sessions.value = []
+    sessionTotal.value = 0
+  } finally {
+    sessionsLoading.value = false
+  }
+}
+
+function handleSessionPageChange(value: number): void {
+  sessionPage.value = value
+  void loadSessions()
+}
+
+function handleSessionPageSizeChange(value: number): void {
+  sessionPageSize.value = value
+  sessionPage.value = 1
+  void loadSessions()
+}
+
+function handleSessionView(session: SessionListItem): void {
+  void router.push({ name: 'session-evaluation', params: { id: session.id } })
+}
+
+function disabledFuture(date: Date): boolean {
+  return date.getTime() > Date.now()
+}
+
+function openCreateSession(): void {
+  createForm.classId = ''
+  createForm.sessionDate = ''
+  createForm.period = ''
+  createForm.topic = ''
+  createVisible.value = true
+}
+
+async function submitCreateSession(): Promise<void> {
+  if (!createForm.sessionDate) {
+    ElMessage.error('请选择授课日期')
+    return
+  }
+  if (!createForm.period.trim()) {
+    ElMessage.error('请填写节次')
+    return
+  }
+  createSubmitting.value = true
+  try {
+    await createSessionApi({
+      courseId: Number(courseId.value),
+      classId: createForm.classId === '' ? 0 : createForm.classId,
+      sessionDate: createForm.sessionDate,
+      period: createForm.period.trim(),
+      topic: createForm.topic.trim()
+    })
+    ElMessage.success('授课记录已创建')
+    createVisible.value = false
+    sessionPage.value = 1
+    await loadSessions()
+  } catch {
+    // 错误提示由 api/http.ts 拦截器统一处理
+  } finally {
+    createSubmitting.value = false
   }
 }
 
@@ -135,7 +236,7 @@ function goBack(): void {
 watch(
   () => route.query.tab,
   (tab) => {
-    if (tab === 'resource' || tab === 'classes' || tab === 'basic') {
+    if (tab === 'resource' || tab === 'classes' || tab === 'basic' || tab === 'sessions') {
       activeTab.value = tab
     }
   },
@@ -145,6 +246,7 @@ watch(
 onMounted(async () => {
   await loadCourse()
   await loadResources()
+  await loadSessions()
 })
 </script>
 
@@ -253,7 +355,115 @@ onMounted(async () => {
             />
           </div>
         </el-tab-pane>
+
+        <el-tab-pane :label="`历史授课记录（${sessionTotal}）`" name="sessions">
+          <div class="course-detail__session-head">
+            <span class="course-detail__session-hint">
+              点击任意记录进入当堂课质量评估；未评价侧显示「—」
+            </span>
+            <el-button
+              v-if="canCreateSession"
+              type="primary"
+              @click="openCreateSession"
+            >
+              新增授课记录
+            </el-button>
+          </div>
+
+          <div v-if="sessionsError" class="course-detail__session-state">
+            <EmptyState description="授课记录加载失败">
+              <template #action>
+                <el-button type="primary" @click="loadSessions">重新加载</el-button>
+              </template>
+            </EmptyState>
+          </div>
+          <template v-else>
+            <SessionTable
+              :rows="sessions"
+              :loading="sessionsLoading"
+              @view="handleSessionView"
+            />
+            <EmptyState
+              v-if="!sessionsLoading && sessions.length === 0 && canCreateSession"
+              description="还没有授课记录，去创建"
+            >
+              <template #action>
+                <el-button type="primary" @click="openCreateSession">
+                  新增授课记录
+                </el-button>
+              </template>
+            </EmptyState>
+            <EmptyState
+              v-else-if="!sessionsLoading && sessions.length === 0"
+              description="暂无授课记录"
+            />
+            <div class="course-detail__pagination">
+              <el-pagination
+                :current-page="sessionPage"
+                :page-size="sessionPageSize"
+                :page-sizes="PAGE_SIZES"
+                :total="sessionTotal"
+                layout="total, sizes, prev, pager, next"
+                background
+                @current-change="handleSessionPageChange"
+                @size-change="handleSessionPageSizeChange"
+              />
+            </div>
+          </template>
+        </el-tab-pane>
       </el-tabs>
+
+      <el-dialog v-model="createVisible" title="新增授课记录" width="480px">
+        <el-form label-width="88px">
+          <el-form-item label="授课日期" required>
+            <el-date-picker
+              v-model="createForm.sessionDate"
+              type="date"
+              placeholder="不得晚于今天"
+              value-format="YYYY-MM-DD"
+              :disabled-date="disabledFuture"
+              class="course-detail__dialog-field"
+            />
+          </el-form-item>
+          <el-form-item label="节次" required>
+            <el-input
+              v-model="createForm.period"
+              placeholder="如 3-4 节"
+              maxlength="32"
+              class="course-detail__dialog-field"
+            />
+          </el-form-item>
+          <el-form-item label="主题">
+            <el-input
+              v-model="createForm.topic"
+              placeholder="本次课主题（选填）"
+              maxlength="128"
+              class="course-detail__dialog-field"
+            />
+          </el-form-item>
+          <el-form-item label="班级">
+            <el-select
+              v-model="createForm.classId"
+              placeholder="不指定"
+              clearable
+              class="course-detail__dialog-field"
+            >
+              <el-option
+                v-for="item in course?.classes ?? []"
+                :key="item.id"
+                :label="item.className"
+                :value="item.id"
+              />
+            </el-select>
+          </el-form-item>
+        </el-form>
+        <template #footer>
+          <el-button @click="createVisible = false">取消</el-button>
+          <el-button type="primary" :loading="createSubmitting" @click="submitCreateSession">
+            创建
+          </el-button>
+        </template>
+      </el-dialog>
     </template>
   </div>
 </template>
@@ -360,6 +570,33 @@ onMounted(async () => {
 
   &__empty-text {
     color: var(--color-text-tertiary);
+  }
+
+  &__session-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--spacing-4);
+    margin-bottom: var(--spacing-4);
+  }
+
+  &__session-hint {
+    font-size: var(--font-size-sm);
+    color: var(--color-text-tertiary);
+  }
+
+  &__session-state {
+    padding: var(--spacing-6);
+  }
+
+  &__pagination {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: var(--spacing-4);
+  }
+
+  &__dialog-field {
+    width: 100%;
   }
 }
 </style>
