@@ -12,7 +12,7 @@ import { useAuthStore } from '@/stores/auth'
 import { getRoleMeta } from '@/constants'
 import { formatDateTime } from '@/utils/format'
 import type { Course } from '@/types/course'
-import type { DashboardData } from '@/types/supervision'
+import type { DashboardData, SupervisionPlan } from '@/types/supervision'
 
 const router = useRouter()
 const auth = useAuthStore()
@@ -59,6 +59,10 @@ function goNewCourse(): void {
 
 function goSupervision(): void {
   void router.push({ name: 'supervision' })
+}
+
+function handlePlanView(plan: SupervisionPlan): void {
+  void router.push({ name: 'course-detail', params: { id: plan.courseId } })
 }
 
 function goUploadResource(): void {
@@ -209,7 +213,7 @@ onMounted(() => {
             <h2 class="dashboard__panel-title">听评课安排</h2>
             <el-button link type="primary" @click="goSupervision">查看全部</el-button>
           </div>
-          <ScheduleTable :plans="data?.plans ?? []" :loading="loading" />
+          <ScheduleTable :plans="data?.plans ?? []" :loading="loading" @view="handlePlanView" />
         </section>
 
         <aside class="dashboard__side">
