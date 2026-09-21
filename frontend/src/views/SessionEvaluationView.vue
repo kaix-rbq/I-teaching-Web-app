@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import PageHeader from '@/components/common/PageHeader.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
@@ -11,6 +11,9 @@ import {
   fetchSessionEvaluationApi,
   submitSupervisorEvaluationApi
 } from '@/api/session'
+import { fetchSessionTranscriptApi, retrySessionTranscriptApi, uploadSessionRecordingApi } from '@/api/session'
+import AudioPlayer from '@/components/session/AudioPlayer.vue'
+import TranscriptViewer from '@/components/evaluation/TranscriptViewer.vue'
 import { useAuthStore } from '@/stores/auth'
 import { EVALUATION_DIMENSIONS, getScoreLevel, getSessionStatusMeta } from '@/constants'
 import { formatDate } from '@/utils/format'
@@ -132,6 +135,22 @@ const agentScore = computed(() => data.value?.agentScore ?? null)
 const formulaVersion = computed(
   () => displayedEvaluation.value?.formulaVersion ?? data.value?.supervisorScores[0]?.formulaVersion ?? 'v1'
 )
+const media = ref<Awaited<ReturnType<typeof fetchSessionTranscriptApi>>>({ recording: null, transcript: null })
+const mediaLoading = ref(false)
+const uploadProgress = ref(0)
+let pollTimer: ReturnType<typeof setTimeout> | undefined
+const recordingURL = computed(() => media.value.recording ? `${import.meta.env.VITE_API_BASE_URL || '/api/v1'}${media.value.recording.streamUrl}` : '')
+
+async function loadMedia(): Promise<void> {
+  mediaLoading.value = true
+  try { media.value = await fetchSessionTranscriptApi(sessionId.value) } finally { mediaLoading.value = false }
+  if (media.value.transcript && ['pending', 'running'].includes(media.value.transcript.status)) pollTimer = setTimeout(() => { void loadMedia() }, 2500)
+}
+async function handleRecording(file: File): Promise<boolean> {
+  try { await uploadSessionRecordingApi(sessionId.value, file, (v) => { uploadProgress.value = v }); ElMessage.success('录音上传成功'); await loadMedia() } catch { /* interceptor */ }
+  return false
+}
+async function retryTranscript(): Promise<void> { try { await retrySessionTranscriptApi(sessionId.value); await loadMedia() } catch { /* interceptor */ } }
 
 async function load(): Promise<void> {
   loading.value = true
@@ -150,6 +169,7 @@ async function load(): Promise<void> {
     } else {
       form.value = emptyForm()
     }
+    await loadMedia()
   } catch {
     error.value = true
     data.value = null
@@ -235,6 +255,7 @@ watch(sessionId, () => {
 onMounted(() => {
   void load()
 })
+onUnmounted(() => { if (pollTimer) clearTimeout(pollTimer) })
 </script>
 
 <template>
@@ -386,9 +407,20 @@ onMounted(() => {
 
           <section class="session-evaluation__card">
             <h2 class="session-evaluation__card-title">课堂录音与转写</h2>
-            <p class="session-evaluation__placeholder">
+            <p v-if="false" class="session-evaluation__placeholder">
               音频播放与语音转写将在阶段②接入，教师端不开放音频，仅可查看脱敏转写文本。
             </p>
+          </section>
+          <section class="session-evaluation__card">
+            <h2 class="session-evaluation__card-title">课堂录音与转写</h2>
+            <template v-if="isSupervisor">
+              <el-upload :show-file-list="false" accept=".mp3,.wav,.m4a" :before-upload="handleRecording">
+                <el-button type="primary" plain>上传课堂录音</el-button>
+              </el-upload>
+              <el-progress v-if="uploadProgress > 0 && uploadProgress < 100" :percentage="uploadProgress" />
+              <AudioPlayer v-if="media.recording" :src="recordingURL" :name="media.recording.originalName" />
+            </template>
+            <TranscriptViewer :transcript="media.transcript" :loading="mediaLoading" @retry="retryTranscript" />
           </section>
         </aside>
       </div>

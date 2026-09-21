@@ -21,6 +21,11 @@ upload:
   maxSize: 104857600 # 100MB
   allowExt: [".pdf", ".doc", ".docx", ".ppt", ".pptx", ".mp4", ".zip"]
 
+transcription:
+  enabled: false
+  engine: ""
+  engineVersion: ""
+
 cors:
   origins: ["http://localhost:5173", "http://127.0.0.1:5173"] # 前端 dev 地址
 

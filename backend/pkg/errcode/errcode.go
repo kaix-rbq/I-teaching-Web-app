@@ -13,15 +13,17 @@ type Code int
 
 // 业务错误码常量（0 表示成功，其余与 §7 表格一一对应）。
 const (
-	OK            Code = 0
-	Params        Code = 40001
-	BizRule       Code = 40002
-	Unauthorized  Code = 40101
-	ForbiddenRole Code = 40301
-	ForbiddenData Code = 40302
-	NotFound      Code = 40401
-	Conflict      Code = 40901
-	Internal      Code = 50001
+	OK                    Code = 0
+	Params                Code = 40001
+	BizRule               Code = 40002
+	Unauthorized          Code = 40101
+	ForbiddenRole         Code = 40301
+	ForbiddenData         Code = 40302
+	NotFound              Code = 40401
+	Conflict              Code = 40901
+	Internal              Code = 50001
+	NotImplemented        Code = 50002
+	DependencyUnavailable Code = 50003
 )
 
 var messages = map[Code]string{
@@ -34,6 +36,11 @@ var messages = map[Code]string{
 	NotFound:      "请求的资源不存在",
 	Conflict:      "数据已存在，请勿重复提交",
 	Internal:      "服务器内部错误，请稍后重试",
+}
+
+func init() {
+	messages[NotImplemented] = "功能尚未实现"
+	messages[DependencyUnavailable] = "转写服务不可用"
 }
 
 // Message 返回错误码对应的用户可读中文文案。
@@ -59,6 +66,10 @@ func (c Code) HTTPStatus() int {
 		return http.StatusNotFound
 	case Conflict:
 		return http.StatusConflict
+	case NotImplemented:
+		return http.StatusNotImplemented
+	case DependencyUnavailable:
+		return http.StatusServiceUnavailable
 	default:
 		return http.StatusInternalServerError
 	}

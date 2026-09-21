@@ -89,6 +89,34 @@ type SessionEvaluation struct {
 	Session          SessionDetail   `json:"session"`
 	SupervisorScores []EvaluationDTO `json:"supervisorScores"`
 	AgentScore       *EvaluationDTO  `json:"agentScore"`
+	Recording        *RecordingDTO   `json:"recording"`
+	Transcript       *TranscriptDTO  `json:"transcript"`
+}
+
+type RecordingDTO struct {
+	ID           uint64 `json:"id"`
+	OriginalName string `json:"originalName"`
+	Format       string `json:"format"`
+	Size         int64  `json:"size"`
+	DurationSec  int    `json:"durationSec"`
+	StreamURL    string `json:"streamUrl"`
+}
+
+type TranscriptSegment struct {
+	Start   float64 `json:"start"`
+	End     float64 `json:"end"`
+	Speaker string  `json:"speaker"`
+	Text    string  `json:"text"`
+}
+
+type TranscriptDTO struct {
+	ID            uint64              `json:"id"`
+	Status        string              `json:"status"`
+	Content       string              `json:"content"`
+	Segments      []TranscriptSegment `json:"segments"`
+	Engine        string              `json:"engine"`
+	EngineVersion string              `json:"engineVersion"`
+	ErrorMessage  string              `json:"errorMessage"`
 }
 
 // ScoreWeights 是综合分的双侧权重展示（α 与 1−α）。
