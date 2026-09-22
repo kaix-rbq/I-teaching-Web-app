@@ -143,8 +143,17 @@ const recordingURL = computed(() => media.value.recording ? `${import.meta.env.V
 
 async function loadMedia(): Promise<void> {
   mediaLoading.value = true
-  try { media.value = await fetchSessionTranscriptApi(sessionId.value) } finally { mediaLoading.value = false }
-  if (media.value.transcript && ['pending', 'running'].includes(media.value.transcript.status)) pollTimer = setTimeout(() => { void loadMedia() }, 2500)
+  try {
+    media.value = await fetchSessionTranscriptApi(sessionId.value)
+  } catch {
+    // 录音/转写为阶段②增强项，任何失败都不得阻断评估数据面板。
+    media.value = { recording: null, transcript: null }
+  } finally {
+    mediaLoading.value = false
+  }
+  if (media.value.transcript && ['pending', 'running'].includes(media.value.transcript.status)) {
+    pollTimer = setTimeout(() => { void loadMedia() }, 2500)
+  }
 }
 async function handleRecording(file: File): Promise<boolean> {
   try { await uploadSessionRecordingApi(sessionId.value, file, (v) => { uploadProgress.value = v }); ElMessage.success('录音上传成功'); await loadMedia() } catch { /* interceptor */ }
@@ -405,12 +414,6 @@ onUnmounted(() => { if (pollTimer) clearTimeout(pollTimer) })
             <EvaluationCompare :supervisor="displayedEvaluation" :agent="agentScore" />
           </section>
 
-          <section class="session-evaluation__card">
-            <h2 class="session-evaluation__card-title">课堂录音与转写</h2>
-            <p v-if="false" class="session-evaluation__placeholder">
-              音频播放与语音转写将在阶段②接入，教师端不开放音频，仅可查看脱敏转写文本。
-            </p>
-          </section>
           <section class="session-evaluation__card">
             <h2 class="session-evaluation__card-title">课堂录音与转写</h2>
             <template v-if="isSupervisor">
