@@ -39,6 +39,10 @@ const pageTitle = computed(() => {
 const canFilterTeacher = computed(() => auth.role === 'director' || auth.role === 'supervisor')
 
 function goDetail(course: Course): void {
+  if (auth.role === 'teacher') {
+    void router.push({ name: 'course-improve', params: { id: course.id } })
+    return
+  }
   void router.push({ name: 'course-detail', params: { id: course.id } })
 }
 
