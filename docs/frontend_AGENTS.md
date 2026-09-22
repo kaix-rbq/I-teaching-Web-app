@@ -627,23 +627,26 @@ PageHeader：返回 + 课程名 + 课次信息（日期/节次/主题/班级/教
 > **独立路由** `/courses/:id/improve`，与 `/courses/:id` 并列（见 §6.2 决策 3）。教师从「我的课程」点击课程条目直接进入本页。
 
 ```
-PageHeader：返回 + 课程名称 + 学期选择
-区块一：课程基本信息（学分/学时/学期/班级/学生人次）—— 保留
+PageHeader：返回 + 课程名称 + 课程编码/状态 + 学期选择
+地块（页面级）：伦理提示 el-alert「仅用于教学支持，不作为考核依据」
+区块一：课程基本信息（学分/学时/学期/班级/学生人次）+ 教研室/教师/学期
 区块二：资源区（ResourceList + ResourceUploader）—— 保留教师上传/删除能力
 区块三：评分区（阶段①）
-        综合分（大数字）+ 5 维分（ScoreRadar）+ 与上学期对比
-        样本量标注：已评价场次 evaluatedCount / 授课场次 sessionCount
-区块四：督导评语列表（阶段①，按时间倒序，标注对应课次）
-区块五：智能体提优建议（阶段③，按时间倒序）
-区块六：趋势折线（阶段③，ScoreTrendChart，可按维度切换）
-区块七：与智能体对话（阶段③，SSE 流式）
+        「本课程评分」+「我的教学表现」两个 ScoreSummaryPanel
+        综合分（大数字）+ 5 维分（ScoreRadar + 维度条）
+        样本量标注：已评价场次 evaluatedCount / 授课场次 sessionCount；样本不足有标记
+区块四：督导评语列表（阶段①，按课次倒序，标注对应课次）
+区块五：智能体提优建议（阶段③，AgentSuggestionList，按时间倒序）
+区块六：趋势折线（阶段③，ScoreTrendChart，radio 按维度切换）
+区块七：与智能体对话（阶段③，AgentChat + useAgentChat，流式）
 ```
 
-- 数据源：课程级评分 `GET /courses/:id/evaluation-summary?semester=`；本人教师级评分 `GET /teachers/:id/evaluation-summary?semester=`（`id` = 当前登录用户）；
+- 数据源：课程基本信息 `GET /courses/:id`；课程级评分 `GET /courses/:id/evaluation-summary?semester=`；本人教师级评分 `GET /teachers/:id/evaluation-summary?semester=`（`id` = 当前登录用户）；督导评语来自 `GET /teachers/:id/evaluations` 后按 `courseId` 过滤；
 - **只读**：教师**不能**修改分数或评语，页面不出现任何编辑态控件；
 - 综合分为 `null` 时显示「暂无评价」，**不得显示 0**；
 - 突出「**仅用于教学支持**」的语气：文案面向改进而非考核（如「本期共 3 次课被评价，互动维度是提升空间」）；
-- 资源上传沿用 Sprint 1 契约（`ResourceUploader`），**不得因为页面改造而丢失该能力**（T1.14 验收项）。
+- 资源上传沿用 Sprint 1 契约（`ResourceUploader`），**不得因为页面改造而丢失该能力**（T1.14 验收项）；
+- **阶段③智能体相关区块（五/六/七）的真实接口本次留空**：`fetchAgentSuggestionsApi` / `fetchScoreTrendApi` / `streamAgentChatApi`（`src/api/agent.ts`）暂不发起网络请求，改由前端临时演示数据 `src/mocks/teacherImprove.ts` 驱动；函数签名与未来后端一致，后端就绪后仅替换实现。趋势区块展示的维度为「综合分 + 5 维」，其中 `frontier` 为观测项。
 
 ### 7.12 ProfileView 个人中心（辅助，最低优先级）
 
@@ -687,12 +690,15 @@ PageHeader：返回 + 课程名称 + 学期选择
 
 | 组件 | Props（概要） | 职责 | 对应故事 | 阶段 |
 |------|--------------|------|---------|------|
-| ScoreRadar | `dimensions, loading` | 五维条形/雷达；`isObservation` 维度单独作亮点标记 | S6.5 / S6.6 | ① |
+| ScoreRadar | `items, max?, loading` | 五维条形/雷达；`isObservation` 维度单独作亮点标记 | S6.5 / S6.6 | ① |
 | EvaluationForm | `sessionId, modelValue, readonly, loading` | 5 维 1–5 分 + 锚点 tooltip + 三条结构化评语；`readonly` 时禁用 | S6.3 | ① |
 | CommentPanel | `items, loading` | 督导评语展示（亮点/待改进/建议） | S6.6 | ① |
+| ScoreSummaryPanel | `title, summary, loading, emptyText?, showCompareHint?` | 评分总览卡：综合分 + 督导/智能体分 + 权重 + 样本量 + flags + 雷达/维度条；主任端与教师端复用同一组件 | S6.5 / S6.6 | ① |
 | EvaluationCompare | `supervisor, agent, loading` | 督导 vs 智能体分维度对比；标注「AI 参考」与低置信度，展示 `evidence` 引用 | S7.2 | ② |
 | TranscriptViewer | `status, segments, text, loading` + `@retry` | 转写文本三态（pending/running/done/failed）与说话人区分 | S7.1 | ② |
-| ScoreTrendChart | `series, dimension, loading` | 按维度切换的历史趋势折线 | S8.3 | ③ |
+| ScoreTrendChart | `points, dimensionName?, max?, loading` | 单维度历史趋势折线；`value` 为 `null` 处断开、不补 0 | S8.3 | ③（演示） |
+| AgentSuggestionList | `items, loading` | 智能体提优建议列表（标「AI 参考」、对应课次、置信度、转写依据） | S8.1 | ③（演示） |
+| AgentChat | `messages, streaming?, disabled?` + `@send/@stop` | 与智能体流式对话（气泡、光标、建议提示词、Enter 发送） | S8.2 | ③（演示） |
 
 ### 8.5 授课记录域组件（`components/session/`，新增）
 
@@ -1119,8 +1125,8 @@ interface TeacherEvaluationTimelineItem {
 - 统一响应 `{ code, message, data }`：`code === 0` 成功；**HTTP 401**（后端返回 `40101`）清 token 跳登录；其余弹 `ElMessage.error(message)`；
 - 鉴权头：`Authorization: Bearer <token>`，token 存 `localStorage`（key：`aijiaoxue_token`，用户信息 key：`aijiaoxue_user`）；
 - 聚合接口**必须透传 `semester`**（开发计划 §2.5.6：跨学期平均会抹平改进），前端默认当前学期；
-- Mock 策略（预留）：`.env.development` 中 `VITE_USE_MOCK=true` 时由 `src/mocks/` 拦截，**接口函数签名与真实后端完全一致**，保证无缝切换联调。
-  > 当前仓库**尚未创建 `src/mocks/`**，前端直连真实后端；如需启用 mock，请新建该目录并保持本约定。
+- Mock 策略：`.env.development` 中 `VITE_USE_MOCK=true` 时由 `src/mocks/` 拦截，**接口函数签名与真实后端完全一致**，保证无缝切换联调。
+  > 当前 `src/mocks/` 仅包含 `teacherImprove.ts`：为「教学提优」页**阶段③智能体区块**（提优建议 / 趋势 / 对话）提供前端临时演示数据，因对应后端接口（`GET /teachers/:id/score-trend`、`POST /agent/chat`）尚未实现，`src/api/agent.ts` 暂直接返回该演示数据而不发请求。其余接口仍直连真实后端。后端就绪后删除 `teacherImprove.ts` 并令 `api/agent.ts` 改走真实请求即可，页面与组件无需改动。
 
 ## 11. 状态管理与数据流
 
@@ -1218,9 +1224,9 @@ views ──调用──> api/*（唯一请求出口）
 
 | 任务/故事 | 前端验收要点 |
 |-----------|-------------|
-| T3.1 / S8.1 | 教师端可见智能体提优建议，且与课堂记录对应、按时间倒序 |
-| T3.2 / S8.3 | 趋势折线可按维度切换；种子数据呈上升趋势 |
-| T3.3 / S8.2 | SSE 流式输出；中断可恢复；失败不阻塞页面 |
+| T3.1 / S8.1 | 教师端可见智能体提优建议，且与课堂记录对应、按时间倒序（当前前端演示数据驱动，真实接口留空） |
+| T3.2 / S8.3 | 趋势折线可按维度切换；种子数据呈上升趋势（当前前端演示数据驱动，真实接口留空） |
+| T3.3 / S8.2 | SSE 流式输出；中断可恢复；失败不阻塞页面（当前 mock 定时分包模拟流式，真实 SSE 留空） |
 | T3.4 / S8.4 | 教师可提交申诉、督导可复核，状态可追溯 |
 
 ---
@@ -1231,5 +1237,6 @@ views ──调用──> api/*（唯一请求出口）
 |------|------|------|
 | v1.0 | Sprint 1 | 初版：技术栈、目录结构、设计令牌、编码规范、Sprint 1 页面规格与验收 |
 | v2.0 | 2026-09 | 覆盖三个 Sprint：新增当前阶段横幅与三 Sprint 对等章节；补全 Sprint 2/3 页面、路由变更表、组件与目录（§5–§8）；接口层修正（`/teacher-scores` 与 `/teachers` 分离、`GET /courses/:id/sessions`、`/sessions/...`、两个 `evaluation-summary`、`evaluatedCount`、`40002` = HTTP 400）；新增评分展示规范（§9.6）；新增「文档同步要求（强制）」（§13）；补充阶段①②③验收标准（§14） |
+| v2.1 | 2026-09-22 | 交付「教学提优」页（任务五、六）：§7.11 补全七大区块与数据源；新增 `ScoreSummaryPanel` / `AgentSuggestionList` / `AgentChat` 组件规格，`ScoreTrendChart` Props 更新（§8.4）；更新 mock 约定（§10）——阶段③智能体区块真实接口留空，由 `src/mocks/teacherImprove.ts` 演示数据驱动；「我的课程」入口改跳 `/courses/:id/improve` |
 
 > **版本维护约定**：本手册的版本号随任一强制同步项（§13）的变更递增，并在上表登记。修改本文件时，请一并核对 [`Sprint2-3-教学评价与提优-开发计划.md`](./Sprint2-3-教学评价与提优-开发计划.md) 是否需同步更新。
