@@ -13,12 +13,13 @@ import (
 
 // Config 是应用的全部可配置项。
 type Config struct {
-	Server     ServerConfig     `mapstructure:"server"`
-	MySQL      MySQLConfig      `mapstructure:"mysql"`
-	JWT        JWTConfig        `mapstructure:"jwt"`
-	Upload     UploadConfig     `mapstructure:"upload"`
-	CORS       CORSConfig       `mapstructure:"cors"`
-	Evaluation EvaluationConfig `mapstructure:"evaluation"`
+	Server        ServerConfig        `mapstructure:"server"`
+	MySQL         MySQLConfig         `mapstructure:"mysql"`
+	JWT           JWTConfig           `mapstructure:"jwt"`
+	Upload        UploadConfig        `mapstructure:"upload"`
+	CORS          CORSConfig          `mapstructure:"cors"`
+	Evaluation    EvaluationConfig    `mapstructure:"evaluation"`
+	Transcription TranscriptionConfig `mapstructure:"transcription"`
 }
 
 // ServerConfig 描述 HTTP 服务监听参数。
@@ -45,6 +46,12 @@ type UploadConfig struct {
 	Dir      string   `mapstructure:"dir"`
 	MaxSize  int64    `mapstructure:"maxSize"`
 	AllowExt []string `mapstructure:"allowExt"`
+}
+
+type TranscriptionConfig struct {
+	Enabled       bool   `mapstructure:"enabled"`
+	Engine        string `mapstructure:"engine"`
+	EngineVersion string `mapstructure:"engineVersion"`
 }
 
 // CORSConfig 描述跨域白名单。
@@ -105,6 +112,9 @@ func Load(path string) (*Config, error) {
 	v.SetDefault("jwt.ttl", "24h")
 	v.SetDefault("upload.dir", "./uploads")
 	v.SetDefault("upload.maxSize", 100*1024*1024)
+	v.SetDefault("transcription.enabled", false)
+	v.SetDefault("transcription.engine", "")
+	v.SetDefault("transcription.engineVersion", "")
 
 	// 评分口径默认值 = 开发计划 §2.2（frontier 为观测项，权重 0）。
 	v.SetDefault("evaluation.weights.objective", 0.30)

@@ -11,12 +11,17 @@ import (
 
 // SessionHandler 处理授课记录与督导评分接口（开发计划 §4.1）。
 type SessionHandler struct {
-	sessions service.SessionService
+	sessions   service.SessionService
+	recordings service.RecordingService
 }
 
 // NewSessionHandler 构造授课记录 handler。
-func NewSessionHandler(sessions service.SessionService) *SessionHandler {
-	return &SessionHandler{sessions: sessions}
+func NewSessionHandler(sessions service.SessionService, recordings ...service.RecordingService) *SessionHandler {
+	h := &SessionHandler{sessions: sessions}
+	if len(recordings) > 0 {
+		h.recordings = recordings[0]
+	}
+	return h
 }
 
 // Create 处理 POST /api/v1/sessions（仅 supervisor，S6.1）。
@@ -89,6 +94,13 @@ func (h *SessionHandler) Evaluation(c *gin.Context) {
 	if err != nil {
 		response.Fail(c, err)
 		return
+	}
+	if h.recordings != nil {
+		data.Recording, data.Transcript, err = h.recordings.Media(c.Request.Context(), role, middleware.DeptID(c), userID, id)
+		if err != nil {
+			response.Fail(c, err)
+			return
+		}
 	}
 	response.OK(c, data)
 }

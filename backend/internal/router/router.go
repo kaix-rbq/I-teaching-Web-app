@@ -26,6 +26,7 @@ func New(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) *gin.Engine {
 	supervisionRepo := repository.NewSupervisionRepository(db)
 	sessionRepo := repository.NewSessionRepository(db)
 	evaluationRepo := repository.NewEvaluationRepository(db)
+	recordingRepo := repository.NewRecordingRepository(db)
 
 	authSvc := service.NewAuthService(userRepo, jwt)
 	courseSvc := service.NewCourseService(courseRepo, userRepo)
@@ -35,6 +36,7 @@ func New(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) *gin.Engine {
 	dictSvc := service.NewDictService(userRepo)
 	sessionSvc := service.NewSessionService(sessionRepo, evaluationRepo, courseRepo, userRepo, cfg.Evaluation)
 	teacherScoreSvc := service.NewTeacherScoreService(userRepo, courseRepo, evaluationRepo, cfg.Evaluation)
+	recordingSvc := service.NewRecordingService(recordingRepo, sessionRepo, cfg.Upload, cfg.Transcription)
 
 	authH := handler.NewAuthHandler(authSvc)
 	courseH := handler.NewCourseHandler(courseSvc)
@@ -42,8 +44,9 @@ func New(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) *gin.Engine {
 	supervisionH := handler.NewSupervisionHandler(supervisionSvc)
 	dashboardH := handler.NewDashboardHandler(dashboardSvc)
 	dictH := handler.NewDictHandler(dictSvc)
-	sessionH := handler.NewSessionHandler(sessionSvc)
+	sessionH := handler.NewSessionHandler(sessionSvc, recordingSvc)
 	teacherScoreH := handler.NewTeacherScoreHandler(teacherScoreSvc)
+	recordingH := handler.NewRecordingHandler(recordingSvc)
 
 	gin.SetMode(cfg.Server.Mode)
 	r := gin.New()
@@ -72,6 +75,9 @@ func New(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) *gin.Engine {
 	authed.GET("/courses/:id/evaluation-summary", teacherScoreH.CourseSummary)
 	authed.GET("/sessions/:id", sessionH.Detail)
 	authed.GET("/sessions/:id/evaluation", sessionH.Evaluation)
+	authed.GET("/sessions/:id/transcript", recordingH.Transcript)
+	authed.POST("/sessions/:id/transcript/retry", recordingH.Retry)
+	authed.GET("/recordings/:id/stream", recordingH.Stream)
 	authed.GET("/teachers/:id/evaluation-summary", teacherScoreH.TeacherSummary)
 	authed.GET("/teachers/:id/evaluations", teacherScoreH.TeacherEvaluations)
 
@@ -87,7 +93,8 @@ func New(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) *gin.Engine {
 		GET("/supervision/coverage", supervisionH.Coverage).
 		GET("/supervision/plans", supervisionH.Plans).
 		POST("/sessions", sessionH.Create).
-		PUT("/sessions/:id/supervisor-evaluation", sessionH.Submit)
+		PUT("/sessions/:id/supervisor-evaluation", sessionH.Submit).
+		POST("/sessions/:id/recording", recordingH.Upload)
 
 	authed.Group("", middleware.RequireRoles(service.RoleDirector, service.RoleSupervisor)).
 		GET("/teacher-scores", teacherScoreH.List)

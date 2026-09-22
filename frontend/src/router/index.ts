@@ -58,6 +58,24 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '当堂课质量评估' }
       },
       {
+        path: 'courses/:id/improve',
+        name: 'course-improve',
+        component: () => import('@/views/CourseImproveView.vue'),
+        meta: { title: '教学提优', roles: ['teacher'] }
+      },
+      {
+        path: 'teachers',
+        name: 'teacher-list',
+        component: () => import('@/views/TeacherListView.vue'),
+        meta: { title: '教师评价', roles: ['director', 'supervisor'] }
+      },
+      {
+        path: 'teachers/:id',
+        name: 'teacher-detail',
+        component: () => import('@/views/TeacherDetailView.vue'),
+        meta: { title: '教师详情', roles: ['director', 'teacher', 'supervisor'] }
+      },
+      {
         path: 'supervision',
         name: 'supervision',
         component: () => import('@/views/SupervisionView.vue'),

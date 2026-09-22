@@ -82,6 +82,32 @@ export interface SessionEvaluation {
   agentScore: EvaluationDTO | null
 }
 
+export interface RecordingDTO {
+  id: number
+  originalName: string
+  format: string
+  size: number
+  durationSec: number
+  streamUrl: string
+}
+
+export interface TranscriptSegment {
+  start: number
+  end: number
+  speaker: string
+  text: string
+}
+
+export interface TranscriptDTO {
+  id: number
+  status: 'pending' | 'running' | 'done' | 'failed'
+  content: string
+  segments: TranscriptSegment[]
+  engine: string
+  engineVersion: string
+  errorMessage: string
+}
+
 /** 督导评分提交体（PUT /sessions/:id/supervisor-evaluation，五维必填） */
 export interface SupervisorEvaluationPayload {
   objective: number

@@ -7,6 +7,7 @@ export {}
 
 declare module 'vue' {
   export interface GlobalComponents {
+    AudioPlayer: typeof import('./components/session/AudioPlayer.vue')['default']
     CommentPanel: typeof import('./components/evaluation/CommentPanel.vue')['default']
     CourseCard: typeof import('./components/course/CourseCard.vue')['default']
     CourseInfoForm: typeof import('./components/course/CourseInfoForm.vue')['default']
@@ -16,6 +17,7 @@ declare module 'vue' {
     ElBreadcrumb: typeof import('element-plus/es')['ElBreadcrumb']
     ElBreadcrumbItem: typeof import('element-plus/es')['ElBreadcrumbItem']
     ElButton: typeof import('element-plus/es')['ElButton']
+    ElCard: typeof import('element-plus/es')['ElCard']
     ElConfigProvider: typeof import('element-plus/es')['ElConfigProvider']
     ElDatePicker: typeof import('element-plus/es')['ElDatePicker']
     ElDescriptions: typeof import('element-plus/es')['ElDescriptions']
@@ -62,6 +64,7 @@ declare module 'vue' {
     ScoreRadar: typeof import('./components/evaluation/ScoreRadar.vue')['default']
     SessionTable: typeof import('./components/session/SessionTable.vue')['default']
     StatCard: typeof import('./components/common/StatCard.vue')['default']
+    TranscriptViewer: typeof import('./components/evaluation/TranscriptViewer.vue')['default']
   }
   export interface ComponentCustomProperties {
     vLoading: typeof import('element-plus/es')['ElLoadingDirective']

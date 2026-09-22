@@ -35,6 +35,13 @@ export interface Course {
   status: CourseStatus
 }
 
+export interface CourseEvaluationSummary {
+  courseId:number; courseCode:string; courseName:string; teacherId:number; teacherName:string; semester:string;
+  compositeScore:number|null; supervisorScore:number|null; agentScore:number|null;
+  dimensions:Array<{key:string;name:string;weight:number;isObservation:boolean;score:number|null;supervisorScore:number|null;agentScore:number|null}>;
+  sample:{sessionCount:number;evaluatedCount:number;supervisorCount:number;agentCount:number;alignedCount:number;sampleSufficient:boolean}; flags:string[]; weights:{supervisor:number;agent:number}; formulaVersion:string
+}
+
 export interface CourseQuery {
   semester?: string
   departmentId?: number
