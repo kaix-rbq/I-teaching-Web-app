@@ -2,7 +2,6 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import StatCard from '@/components/common/StatCard.vue'
-import CourseTable from '@/components/course/CourseTable.vue'
 import CourseCard from '@/components/course/CourseCard.vue'
 import ScheduleTable from '@/components/supervision/ScheduleTable.vue'
 import CoverageCard from '@/components/supervision/CoverageCard.vue'
@@ -45,8 +44,8 @@ async function loadData(): Promise<void> {
   }
 }
 
-function goCourseDetail(course: Course): void {
-  void router.push({ name: 'course-detail', params: { id: course.id } })
+function goCourseImprove(course: Course): void {
+  void router.push({ name: 'course-improve', params: { id: course.id } })
 }
 
 function goCourseList(): void {
@@ -55,6 +54,10 @@ function goCourseList(): void {
 
 function goNewCourse(): void {
   void router.push({ name: 'course-new' })
+}
+
+function goTeacherList(): void {
+  void router.push({ name: 'teacher-list' })
 }
 
 function goSupervision(): void {
@@ -120,16 +123,22 @@ onMounted(() => {
       <div v-if="auth.role === 'director'" class="dashboard__grid">
         <section class="dashboard__panel">
           <div class="dashboard__panel-head">
-            <h2 class="dashboard__panel-title">本室教师开课情况</h2>
-            <el-button link type="primary" @click="goCourseList">查看全部</el-button>
+            <h2 class="dashboard__panel-title">管理入口</h2>
           </div>
-          <CourseTable
-            :rows="data?.courses ?? []"
-            :loading="loading"
-            show-edit
-            @view="goCourseDetail"
-            @edit="(course) => router.push({ name: 'course-edit', params: { id: course.id } })"
-          />
+          <div class="dashboard__entries">
+            <button class="dashboard__entry" type="button" @click="goCourseList">
+              <span class="dashboard__entry-title">课程管理</span>
+              <span class="dashboard__entry-desc">
+                查看本室课程简介与开课情况，新增或维护课程信息
+              </span>
+            </button>
+            <button class="dashboard__entry" type="button" @click="goTeacherList">
+              <span class="dashboard__entry-title">教师管理</span>
+              <span class="dashboard__entry-desc">
+                查看本室教师综合评分与各维度分，统筹教学支持
+              </span>
+            </button>
+          </div>
         </section>
 
         <aside class="dashboard__side">
@@ -139,21 +148,7 @@ onMounted(() => {
               新增课程
             </el-button>
             <el-button class="dashboard__quick" @click="goCourseList">进入课程管理</el-button>
-          </section>
-
-          <section class="dashboard__panel">
-            <h2 class="dashboard__panel-title">近期开课</h2>
-            <ul class="dashboard__recent">
-              <li
-                v-for="course in (data?.courses ?? []).slice(0, 6)"
-                :key="course.id"
-                class="dashboard__recent-item"
-                @click="goCourseDetail(course)"
-              >
-                <span class="dashboard__recent-name">{{ course.name }}</span>
-                <span class="dashboard__recent-meta">{{ course.teacherName }}</span>
-              </li>
-            </ul>
+            <el-button class="dashboard__quick" @click="goTeacherList">进入教师管理</el-button>
           </section>
         </aside>
       </div>
@@ -173,7 +168,7 @@ onMounted(() => {
               v-for="course in data?.courses ?? []"
               :key="course.id"
               :course="course"
-              @click="goCourseDetail"
+              @click="goCourseImprove"
             />
           </div>
           <EmptyState v-else description="本学期暂无授课课程" />
@@ -309,6 +304,46 @@ onMounted(() => {
     & + & {
       margin-top: var(--spacing-2);
     }
+  }
+
+  &__entries {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: var(--spacing-4);
+
+    @media (max-width: 1024px) {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  &__entry {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-2);
+    padding: var(--spacing-6);
+    text-align: left;
+    cursor: pointer;
+    background-color: var(--color-bg-page);
+    border: 1px solid var(--color-divider);
+    border-radius: var(--radius-lg);
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+
+    &:hover {
+      border-color: var(--color-primary);
+      box-shadow: var(--shadow-card-hover);
+    }
+  }
+
+  &__entry-title {
+    font-size: var(--font-size-xl);
+    font-weight: 600;
+    color: var(--color-primary);
+  }
+
+  &__entry-desc {
+    font-size: var(--font-size-sm);
+    line-height: 1.6;
+    color: var(--color-text-tertiary);
   }
 
   &__cards {

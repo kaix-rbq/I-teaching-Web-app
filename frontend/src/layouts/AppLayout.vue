@@ -9,7 +9,8 @@ import {
   Fold,
   Odometer,
   SwitchButton,
-  User
+  User,
+  UserFilled
 } from '@element-plus/icons-vue'
 import RoleTag from '@/components/common/RoleTag.vue'
 import { useAuthStore } from '@/stores/auth'
@@ -38,6 +39,10 @@ const menuItems = computed<MenuItem[]>(() => {
     { index: 'course-list', label: courseLabel, icon: markRaw(Collection) }
   ]
 
+  if (role === 'director') {
+    items.push({ index: 'teacher-list', label: '教师管理', icon: markRaw(UserFilled) })
+  }
+
   if (role === 'supervisor') {
     items.push({ index: 'supervision', label: '听评课管理', icon: markRaw(DataAnalysis) })
   }
@@ -52,9 +57,13 @@ const activeMenu = computed(() => {
     name === 'course-detail' ||
     name === 'course-new' ||
     name === 'course-edit' ||
+    name === 'course-improve' ||
     name === 'session-evaluation'
   ) {
     return 'course-list'
+  }
+  if (name === 'teacher-detail') {
+    return 'teacher-list'
   }
   return name
 })
