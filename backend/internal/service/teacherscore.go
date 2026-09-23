@@ -42,7 +42,7 @@ func NewTeacherScoreService(
 }
 
 // List 返回教师评分列表（S6.4）：director 本室 / supervisor 全校或按教研室筛选。
-// 默认按姓名排序（§5.3 评分伦理），无评价教师综合分为 null 且不参与排序。
+// 默认按姓名排序（§5.3 评分伦理），无评价教师综合分为 null 且置底、不按 0 参与排序。
 func (s *teacherScoreService) List(
 	ctx context.Context, role string, deptID uint64, q dto.TeacherScoreListQuery,
 ) (*dto.PageResult[dto.TeacherScoreItem], error) {
@@ -89,6 +89,15 @@ func (s *teacherScoreService) List(
 			ScoreSummary: s.toScoreSummary(s.aggregate(byTeacher[t.ID])),
 		})
 	}
+
+	// 默认按姓名排序（教师列表来自 ListTeachers 的 name ASC）。
+	// 无评价教师综合分为 null，必须置底，且不得按 0 参与排序（前端 AGENTS §7.8）。
+	sort.SliceStable(items, func(i, j int) bool {
+		if (items[i].CompositeScore == nil) != (items[j].CompositeScore == nil) {
+			return items[i].CompositeScore != nil
+		}
+		return false
+	})
 
 	start := (page - 1) * pageSize
 	if start > len(items) {

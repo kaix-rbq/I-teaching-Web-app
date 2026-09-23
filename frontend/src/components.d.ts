@@ -7,6 +7,8 @@ export {}
 
 declare module 'vue' {
   export interface GlobalComponents {
+    AgentChat: typeof import('./components/evaluation/AgentChat.vue')['default']
+    AgentSuggestionList: typeof import('./components/evaluation/AgentSuggestionList.vue')['default']
     AudioPlayer: typeof import('./components/session/AudioPlayer.vue')['default']
     CommentPanel: typeof import('./components/evaluation/CommentPanel.vue')['default']
     CourseCard: typeof import('./components/course/CourseCard.vue')['default']
@@ -17,7 +19,6 @@ declare module 'vue' {
     ElBreadcrumb: typeof import('element-plus/es')['ElBreadcrumb']
     ElBreadcrumbItem: typeof import('element-plus/es')['ElBreadcrumbItem']
     ElButton: typeof import('element-plus/es')['ElButton']
-    ElCard: typeof import('element-plus/es')['ElCard']
     ElConfigProvider: typeof import('element-plus/es')['ElConfigProvider']
     ElDatePicker: typeof import('element-plus/es')['ElDatePicker']
     ElDescriptions: typeof import('element-plus/es')['ElDescriptions']
@@ -39,6 +40,7 @@ declare module 'vue' {
     ElPagination: typeof import('element-plus/es')['ElPagination']
     ElProgress: typeof import('element-plus/es')['ElProgress']
     ElRadio: typeof import('element-plus/es')['ElRadio']
+    ElRadioButton: typeof import('element-plus/es')['ElRadioButton']
     ElRadioGroup: typeof import('element-plus/es')['ElRadioGroup']
     ElSelect: typeof import('element-plus/es')['ElSelect']
     ElSkeleton: typeof import('element-plus/es')['ElSkeleton']
@@ -62,8 +64,12 @@ declare module 'vue' {
     RouterView: typeof import('vue-router')['RouterView']
     ScheduleTable: typeof import('./components/supervision/ScheduleTable.vue')['default']
     ScoreRadar: typeof import('./components/evaluation/ScoreRadar.vue')['default']
+    ScoreSummaryPanel: typeof import('./components/evaluation/ScoreSummaryPanel.vue')['default']
+    ScoreTrendChart: typeof import('./components/evaluation/ScoreTrendChart.vue')['default']
     SessionTable: typeof import('./components/session/SessionTable.vue')['default']
     StatCard: typeof import('./components/common/StatCard.vue')['default']
+    TeacherScorePanel: typeof import('./components/teacher/TeacherScorePanel.vue')['default']
+    TeacherScoreTable: typeof import('./components/teacher/TeacherScoreTable.vue')['default']
     TranscriptViewer: typeof import('./components/evaluation/TranscriptViewer.vue')['default']
   }
   export interface ComponentCustomProperties {

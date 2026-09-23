@@ -96,10 +96,10 @@ func (h *SessionHandler) Evaluation(c *gin.Context) {
 		return
 	}
 	if h.recordings != nil {
-		data.Recording, data.Transcript, err = h.recordings.Media(c.Request.Context(), role, middleware.DeptID(c), userID, id)
-		if err != nil {
-			response.Fail(c, err)
-			return
+		// 录音/转写是阶段②增强项：其查询失败（如迁移未执行）不得阻断阶段①评估数据展示。
+		recording, transcript, mediaErr := h.recordings.Media(c.Request.Context(), role, middleware.DeptID(c), userID, id)
+		if mediaErr == nil {
+			data.Recording, data.Transcript = recording, transcript
 		}
 	}
 	response.OK(c, data)

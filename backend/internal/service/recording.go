@@ -76,7 +76,7 @@ func (s *recordingService) Upload(ctx context.Context, userID, sessionID uint64,
 		}
 		return nil, errcode.Wrap(errcode.Internal, "保存录音记录失败", err)
 	}
-	transcript := &model.Transcript{SessionID: sessionID, RecordingID: record.ID, Status: model.TranscriptPending}
+	transcript := &model.Transcript{SessionID: sessionID, RecordingID: record.ID, Content: "", Status: model.TranscriptPending}
 	if err := s.recordings.CreateTranscript(ctx, transcript); err != nil {
 		return nil, errcode.Wrap(errcode.Internal, "创建转写任务失败", err)
 	}

@@ -1,0 +1,2 @@
+ALTER TABLE `transcripts`
+  MODIFY COLUMN `content` MEDIUMTEXT NOT NULL;

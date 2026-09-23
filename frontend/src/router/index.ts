@@ -67,13 +67,13 @@ const routes: RouteRecordRaw[] = [
         path: 'teachers',
         name: 'teacher-list',
         component: () => import('@/views/TeacherListView.vue'),
-        meta: { title: '教师评价', roles: ['director', 'supervisor'] }
+        meta: { title: '教师管理', roles: ['director', 'supervisor'] }
       },
       {
         path: 'teachers/:id',
         name: 'teacher-detail',
         component: () => import('@/views/TeacherDetailView.vue'),
-        meta: { title: '教师详情', roles: ['director', 'teacher', 'supervisor'] }
+        meta: { title: '教师评分面板', roles: ['director', 'supervisor'] }
       },
       {
         path: 'supervision',

@@ -14,8 +14,11 @@ export function fetchCourseDetailApi(id: number | string): Promise<Course> {
   return request<Course>({ url: `/courses/${id}`, method: 'get' })
 }
 
-export function fetchCourseEvaluationSummaryApi(id: number | string): Promise<import('@/types/course').CourseEvaluationSummary> {
-  return request({ url: `/courses/${id}/evaluation-summary`, method: 'get' })
+export function fetchCourseEvaluationSummaryApi(
+  id: number | string,
+  params: Record<string, unknown> = {}
+): Promise<import('@/types/course').CourseEvaluationSummary> {
+  return request({ url: `/courses/${id}/evaluation-summary`, method: 'get', params })
 }
 
 export function createCourseApi(payload: CourseUpsertPayload): Promise<Course> {

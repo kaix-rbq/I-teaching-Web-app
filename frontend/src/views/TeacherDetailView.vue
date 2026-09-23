@@ -1,23 +1,150 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
-import { useRoute } from 'vue-router'
+import { computed, onMounted, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import PageHeader from '@/components/common/PageHeader.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
+import RoleTag from '@/components/common/RoleTag.vue'
+import TeacherScorePanel from '@/components/teacher/TeacherScorePanel.vue'
 import { fetchTeacherEvaluationsApi, fetchTeacherSummaryApi } from '@/api/teacher'
+import { useDictStore } from '@/stores/dict'
 import type { TeacherSummary, TeacherTimelineItem } from '@/types/teacher'
-const route=useRoute(); const summary=ref<TeacherSummary|null>(null); const timeline=ref<TeacherTimelineItem[]>([]); const loading=ref(true)
-async function load(){loading.value=true;try{const id=String(route.params.id);[summary.value,timeline.value]=await Promise.all([fetchTeacherSummaryApi(id),fetchTeacherEvaluationsApi(id).then(v=>v.list)])}finally{loading.value=false}}
-function score(v:number|null){return v==null?'—':v.toFixed(2)}
-onMounted(load)
+
+const route = useRoute()
+const router = useRouter()
+const dict = useDictStore()
+
+const summary = ref<TeacherSummary | null>(null)
+const timeline = ref<TeacherTimelineItem[]>([])
+const loading = ref(true)
+const timelineLoading = ref(false)
+const error = ref(false)
+const semester = ref('')
+
+const teacherId = computed(() => String(route.params.id ?? ''))
+
+async function load(): Promise<void> {
+  loading.value = true
+  error.value = false
+  try {
+    summary.value = await fetchTeacherSummaryApi(teacherId.value, {
+      semester: semester.value || undefined
+    })
+  } catch {
+    error.value = true
+    summary.value = null
+    loading.value = false
+    return
+  }
+  loading.value = false
+
+  timelineLoading.value = true
+  try {
+    const result = await fetchTeacherEvaluationsApi(teacherId.value, {
+      semester: semester.value || undefined,
+      pageSize: 50
+    })
+    timeline.value = result.list
+  } catch {
+    timeline.value = []
+  } finally {
+    timelineLoading.value = false
+  }
+}
+
+function handleSemesterChange(): void {
+  void load()
+}
+
+function goBack(): void {
+  router.back()
+}
+
+function handleSelectCourse(courseId: number): void {
+  void router.push({ name: 'course-detail', params: { id: courseId } })
+}
+
+onMounted(() => {
+  void dict.load()
+  void load()
+})
 </script>
+
 <template>
- <PageHeader><template #title>{{ summary?.teacherName || '教师详情' }}</template><template #subtitle>综合评分与历次评价</template></PageHeader>
- <el-skeleton v-if="loading" :rows="10" animated />
- <EmptyState v-else-if="!summary" description="教师评价不存在" />
- <template v-else>
-  <div class="teacher-detail__score"><strong>{{ score(summary.compositeScore) }}</strong><span>综合分</span><el-tag v-if="!summary.sample.sampleSufficient" type="warning">样本不足（n={{summary.sample.evaluatedCount}}）</el-tag></div>
-  <el-card><template #header>五维评分</template><el-table :data="summary.dimensions"><el-table-column prop="name" label="维度"/><el-table-column label="评分"><template #default="{row}">{{score(row.score)}}</template></el-table-column><el-table-column label="权重"><template #default="{row}">{{row.isObservation?'观察项':`${Math.round(row.weight*100)}%`}}</template></el-table-column></el-table></el-card>
-  <el-card class="teacher-detail__timeline"><template #header>历次评价</template><el-table :data="timeline"><el-table-column prop="sessionDate" label="日期" width="130"/><el-table-column prop="courseName" label="课程"/><el-table-column prop="topic" label="主题"/><el-table-column label="综合分" width="110"><template #default="{row}">{{score(row.compositeScore)}}</template></el-table-column></el-table></el-card>
- </template>
+  <div class="teacher-detail">
+    <PageHeader>
+      <template #title>
+        <div class="teacher-detail__title">
+          <el-button link @click="goBack">返回</el-button>
+          <span class="teacher-detail__name">{{ summary?.teacherName || '教师评分面板' }}</span>
+          <RoleTag role="teacher" />
+        </div>
+      </template>
+      <template #subtitle>综合分、分维度、按课程明细与历次评价时间线</template>
+      <template #actions>
+        <el-select
+          v-model="semester"
+          placeholder="学期"
+          clearable
+          class="teacher-detail__semester"
+          @change="handleSemesterChange"
+        >
+          <el-option
+            v-for="item in dict.semesters"
+            :key="item"
+            :label="item"
+            :value="item"
+          />
+        </el-select>
+      </template>
+    </PageHeader>
+
+    <el-alert
+      class="teacher-detail__ethics"
+      type="info"
+      :closable="false"
+      show-icon
+      title="仅用于教学支持，不作为考核依据"
+      description="评分用于帮助教师改进教学，不用于绩效与人事评价。请勿外传或作他用。"
+    />
+
+    <el-skeleton v-if="loading" :rows="10" animated />
+
+    <EmptyState v-else-if="error || !summary" description="教师评分数据加载失败">
+      <template #action>
+        <el-button type="primary" @click="load">重新加载</el-button>
+      </template>
+    </EmptyState>
+
+    <TeacherScorePanel
+      v-else
+      :summary="summary"
+      :timeline="timeline"
+      :timeline-loading="timelineLoading"
+      @select-course="handleSelectCourse"
+    />
+  </div>
 </template>
-<style scoped lang="scss">.teacher-detail__score{display:flex;align-items:center;gap:var(--spacing-4);padding:var(--spacing-6);margin-bottom:var(--spacing-4);background:var(--color-bg-card);border:1px solid var(--color-divider);border-radius:var(--radius-lg)}.teacher-detail__score strong{font-size:var(--font-size-stat);color:var(--color-primary)}.teacher-detail__score span{color:var(--color-text-tertiary)}.teacher-detail__timeline{margin-top:var(--spacing-4)}</style>
+
+<style scoped lang="scss">
+.teacher-detail {
+  &__title {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-3);
+  }
+
+  &__name {
+    font-size: var(--font-size-3xl);
+    font-weight: 600;
+    color: var(--color-text-primary);
+  }
+
+  &__semester {
+    width: 180px;
+  }
+
+  &__ethics {
+    margin-bottom: var(--spacing-4);
+  }
+}
+</style>
