@@ -1,7 +1,12 @@
 <script setup lang="ts">
+import AiBadge from '@/components/common/AiBadge.vue'
 import { formatDate } from '@/utils/format'
 import type { AgentSuggestion } from '@/types/agent'
 
+/**
+ * AI 提优建议卡（琥珀语法，《前端设计-new》§4.5）：
+ * AiBadge 准入证 + 浅紫虚线卡 + 置信度可视化；低置信（<0.4）标警示。
+ */
 withDefaults(
   defineProps<{
     items: AgentSuggestion[]
@@ -12,8 +17,14 @@ withDefaults(
   }
 )
 
+const LOW_CONFIDENCE = 0.4
+
 function confidenceText(confidence: number): string {
   return `${Math.round(Math.max(0, Math.min(1, confidence)) * 100)}%`
+}
+
+function isLowConfidence(item: AgentSuggestion): boolean {
+  return item.confidence < LOW_CONFIDENCE
 }
 </script>
 
@@ -23,7 +34,7 @@ function confidenceText(confidence: number): string {
 
     <template v-else>
       <p class="agent-suggestions__notice">
-        <el-tag type="info" effect="plain" round>AI 参考</el-tag>
+        <AiBadge text="AI 参考" />
         以下提优建议由智能体依据课堂转写生成，仅用于教学改进参考，不代表考核结论。
       </p>
 
@@ -42,7 +53,16 @@ function confidenceText(confidence: number): string {
           </div>
           <div class="agent-suggestions__tags">
             <el-tag size="small" effect="light" round>{{ item.modelVersion }}</el-tag>
-            <span class="agent-suggestions__confidence">
+            <el-tag
+              v-if="isLowConfidence(item)"
+              type="warning"
+              size="small"
+              effect="light"
+              round
+            >
+              低置信 {{ confidenceText(item.confidence) }}
+            </el-tag>
+            <span v-else class="agent-suggestions__confidence">
               置信度 {{ confidenceText(item.confidence) }}
             </span>
           </div>
@@ -83,9 +103,10 @@ function confidenceText(confidence: number): string {
   &__item {
     padding: var(--spacing-4);
     margin-bottom: var(--spacing-3);
-    background-color: var(--color-bg-page);
-    border: 1px solid var(--color-divider);
-    border-radius: var(--radius-lg);
+    background-color: var(--color-ai-bg);
+    border: 1px dashed var(--color-ai-bright);
+    border-radius: var(--radius-ai, var(--radius-md));
+    box-shadow: var(--shadow-ai, none);
 
     &:last-of-type {
       margin-bottom: 0;
