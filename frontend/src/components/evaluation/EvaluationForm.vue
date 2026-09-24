@@ -1,13 +1,8 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import type { FormInstance, FormRules } from 'element-plus'
-import {
-  DIMENSION_ANCHORS,
-  EVALUATION_DIMENSIONS,
-  getDimensionAnchor,
-  getScoreLevel,
-  SCORE_LEVELS
-} from '@/constants'
+import { EVALUATION_DIMENSIONS } from '@/constants'
+import AnchorScale from '@/components/evaluation/AnchorScale.vue'
 import type { DimensionKey, EvaluationFormModel } from '@/types/evaluation'
 
 const props = withDefaults(
@@ -36,17 +31,14 @@ const rules: FormRules<EvaluationFormModel> = {
   frontier: [{ required: true, message: '请选择「前沿与交叉学科」评分', trigger: 'change' }]
 }
 
-function anchorContent(dimension: DimensionKey, score: number): string {
-  const level = getScoreLevel(score)
-  return `${score} 分 · ${level?.level ?? ''}：${getDimensionAnchor(dimension, score)}`
-}
-
 function weightLabel(weight: number): string {
   return `${Math.round(weight * 100)}%`
 }
 
-function setDimension(key: DimensionKey, value: string | number | boolean | undefined): void {
-  model.value[key] = typeof value === 'number' ? value : null
+/* 自定义刻度组件不走 Element 事件链，选择后主动校验该字段（清除红字） */
+async function setDimension(key: DimensionKey, value: number): Promise<void> {
+  model.value[key] = value
+  await formRef.value?.validateField(key).catch(() => undefined)
 }
 
 async function handleSubmit(): Promise<void> {
@@ -88,27 +80,17 @@ async function handleSubmit(): Promise<void> {
           </div>
         </template>
 
-        <el-radio-group
-          :model-value="model[dimension.key] ?? undefined"
-          class="evaluation-form__scores"
+        <AnchorScale
+          :dimension-key="dimension.key"
+          :dimension-name="dimension.name"
+          :model-value="model[dimension.key]"
+          :readonly="readonly"
           @update:model-value="(value) => setDimension(dimension.key, value)"
-        >
-          <el-tooltip
-            v-for="level in SCORE_LEVELS"
-            :key="level.value"
-            placement="top"
-            :content="anchorContent(dimension.key, level.value)"
-          >
-            <el-radio :value="level.value" border>{{ level.value }}</el-radio>
-          </el-tooltip>
-        </el-radio-group>
+        />
+        <p class="evaluation-form__scale-tip">
+          悬停刻度查看该档行为锚点 · 五维必填，权重见标签
+        </p>
       </el-form-item>
-
-      <p class="evaluation-form__anchors">
-        <span v-for="level in SCORE_LEVELS" :key="level.value" class="evaluation-form__anchor">
-          {{ level.value }} {{ DIMENSION_ANCHORS[dimension.key][level.value] }}
-        </span>
-      </p>
     </div>
 
     <el-divider content-position="left">结构化评语</el-divider>
@@ -218,18 +200,10 @@ async function handleSubmit(): Promise<void> {
     gap: var(--spacing-2);
   }
 
-  &__anchors {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    margin-top: var(--spacing-2);
+  &__scale-tip {
+    margin-top: var(--spacing-1);
     font-size: var(--font-size-xs);
-    line-height: 1.6;
-    color: var(--color-text-tertiary);
-  }
-
-  &__anchor {
-    display: block;
+    color: var(--color-text-disabled);
   }
 
   &__actions {

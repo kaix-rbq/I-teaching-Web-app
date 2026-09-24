@@ -7,6 +7,7 @@ import {
   DataAnalysis,
   Expand,
   Fold,
+  Medal,
   Odometer,
   SwitchButton,
   User,
@@ -15,6 +16,8 @@ import {
 import RoleTag from '@/components/common/RoleTag.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useDictStore } from '@/stores/dict'
+import { useSemester } from '@/composables/useSemester'
+import { SEMESTERS } from '@/constants'
 
 interface MenuItem {
   index: string
@@ -26,25 +29,31 @@ const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 const dict = useDictStore()
+const { semester, setSemester } = useSemester()
 
 const collapsed = ref(false)
 
 const menuItems = computed<MenuItem[]>(() => {
   const role = auth.user?.role
   const courseLabel =
-    role === 'director' ? '课程管理' : role === 'supervisor' ? '全校课程' : '我的课程'
+    role === 'director' ? '课程库' : role === 'supervisor' ? '全校课程库' : '我的课程'
 
   const items: MenuItem[] = [
-    { index: 'dashboard', label: '工作台', icon: markRaw(Odometer) },
-    { index: 'course-list', label: courseLabel, icon: markRaw(Collection) }
+    { index: 'dashboard', label: '质量驾驶舱', icon: markRaw(Odometer) }
   ]
 
+  if (role === 'teacher') {
+    items.push({ index: 'profile-quality', label: '我的质量档案', icon: markRaw(Medal) })
+  }
+
+  items.push({ index: 'course-list', label: courseLabel, icon: markRaw(Collection) })
+
   if (role === 'director') {
-    items.push({ index: 'teacher-list', label: '教师管理', icon: markRaw(UserFilled) })
+    items.push({ index: 'teacher-list', label: '教师画像', icon: markRaw(UserFilled) })
   }
 
   if (role === 'supervisor') {
-    items.push({ index: 'supervision', label: '听评课管理', icon: markRaw(DataAnalysis) })
+    items.push({ index: 'supervision', label: '课堂评估', icon: markRaw(DataAnalysis) })
   }
 
   items.push({ index: 'profile', label: '个人中心', icon: markRaw(User) })
@@ -133,24 +142,37 @@ onMounted(() => {
           </el-breadcrumb-item>
         </el-breadcrumb>
 
-        <el-dropdown trigger="click" @command="handleCommand">
-          <span class="app-layout__user">
-            <span class="app-layout__avatar">{{ avatarText }}</span>
-            <span class="app-layout__name">{{ auth.user?.name }}</span>
-            <RoleTag :role="auth.user?.role" />
-            <el-icon class="app-layout__caret"><ArrowDown /></el-icon>
-          </span>
-          <template #dropdown>
-            <el-dropdown-menu>
-              <el-dropdown-item command="profile">
-                <el-icon><User /></el-icon>个人中心
-              </el-dropdown-item>
-              <el-dropdown-item command="logout" divided>
-                <el-icon><SwitchButton /></el-icon>退出登录
-              </el-dropdown-item>
-            </el-dropdown-menu>
-          </template>
-        </el-dropdown>
+        <div class="app-layout__header-side">
+          <span class="app-layout__semester-label">学期口径</span>
+          <el-select
+            class="app-layout__semester"
+            :model-value="semester"
+            size="small"
+            aria-label="学期选择"
+            @update:model-value="setSemester"
+          >
+            <el-option v-for="item in SEMESTERS" :key="item" :label="item" :value="item" />
+          </el-select>
+
+          <el-dropdown trigger="click" @command="handleCommand">
+            <span class="app-layout__user">
+              <span class="app-layout__avatar">{{ avatarText }}</span>
+              <span class="app-layout__name">{{ auth.user?.name }}</span>
+              <RoleTag :role="auth.user?.role" />
+              <el-icon class="app-layout__caret"><ArrowDown /></el-icon>
+            </span>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="profile">
+                  <el-icon><User /></el-icon>个人中心
+                </el-dropdown-item>
+                <el-dropdown-item command="logout" divided>
+                  <el-icon><SwitchButton /></el-icon>退出登录
+                </el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+        </div>
       </header>
 
       <main class="app-layout__content">
@@ -181,8 +203,8 @@ onMounted(() => {
     display: flex;
     flex-direction: column;
     width: var(--sidebar-width);
-    background-color: var(--color-bg-card);
-    border-right: 1px solid var(--color-divider);
+    background-color: var(--color-ink);
+    border-right: 1px solid rgba(255, 255, 255, 0.06);
     transition: width 0.2s ease;
   }
 
@@ -197,7 +219,7 @@ onMounted(() => {
     height: var(--header-height);
     padding: 0 var(--spacing-4);
     overflow: hidden;
-    border-bottom: 1px solid var(--color-divider);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
   }
 
   &__logo-mark {
@@ -209,8 +231,8 @@ onMounted(() => {
     height: 32px;
     font-size: var(--font-size-lg);
     font-weight: 600;
-    color: var(--color-bg-card);
-    background-color: var(--color-primary);
+    color: #ffffff;
+    background: var(--gradient-ai);
     border-radius: var(--radius-md);
   }
 
@@ -218,7 +240,7 @@ onMounted(() => {
     font-size: var(--font-size-xl);
     font-weight: 600;
     white-space: nowrap;
-    color: var(--color-text-primary);
+    color: var(--color-ink-text);
   }
 
   &__menu {
@@ -227,16 +249,26 @@ onMounted(() => {
     overflow-y: auto;
     border-right: none;
 
+    /* Element 菜单变量深色化（官方支持的主题入口） */
+    --el-menu-bg-color: transparent;
+    --el-menu-text-color: var(--color-ink-text-dim);
+    --el-menu-hover-bg-color: var(--color-ink-2);
+    --el-menu-active-color: #ffffff;
+
     :deep(.el-menu-item) {
       height: 40px;
       margin: 2px var(--spacing-2);
       line-height: 40px;
       border-radius: var(--radius-md);
 
+      &:hover {
+        color: var(--color-ink-text);
+      }
+
       &.is-active {
         font-weight: 500;
-        color: var(--color-primary);
-        background-color: var(--color-primary-bg);
+        color: #ffffff;
+        background-color: var(--color-ink-3);
 
         &::before {
           position: absolute;
@@ -251,6 +283,11 @@ onMounted(() => {
         }
       }
     }
+
+    /* 深色侧栏内的滚动条弱化 */
+    &::-webkit-scrollbar-thumb {
+      background-color: rgba(255, 255, 255, 0.18);
+    }
   }
 
   &__collapse {
@@ -261,15 +298,15 @@ onMounted(() => {
     padding: 0 var(--spacing-4);
     overflow: hidden;
     font-size: var(--font-size-sm);
-    color: var(--color-text-tertiary);
+    color: var(--color-ink-text-dim);
     cursor: pointer;
     background: transparent;
     border: none;
-    border-top: 1px solid var(--color-divider);
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
     white-space: nowrap;
 
     &:hover {
-      color: var(--color-primary);
+      color: var(--color-ink-text);
     }
   }
 
@@ -295,6 +332,22 @@ onMounted(() => {
     padding: 0 var(--content-padding);
     background-color: var(--color-bg-card);
     border-bottom: 1px solid var(--color-divider);
+  }
+
+  &__header-side {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-4);
+  }
+
+  &__semester-label {
+    font-size: var(--font-size-sm);
+    color: var(--color-text-tertiary);
+    white-space: nowrap;
+  }
+
+  &__semester {
+    width: 132px;
   }
 
   &__user {
