@@ -90,3 +90,73 @@ ol {
   color: var(--color-text-secondary);
   font-weight: 600;
 }
+
+/* ===== 《前端设计-new》全局语法 ===== */
+
+/* 评分数字：仪器感 DIN 风数字（tabular-nums 由组件按规范叠加） */
+.score-num {
+  font-family: var(--font-score);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+/* AI 卡片语法：浅紫底 + 虚线描边 + 顶部渐变饰条 —— 一切智能体产出统一使用 */
+.ai-panel {
+  position: relative;
+  border: 1px dashed rgba(139, 92, 246, 0.45);
+  border-radius: var(--radius-ai);
+  background-color: var(--color-ai-bg);
+  box-shadow: var(--shadow-ai);
+}
+
+.ai-panel::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  border-radius: var(--radius-ai) var(--radius-ai) 0 0;
+  background: var(--gradient-ai);
+  opacity: 0.85;
+}
+
+/* 动效通用：数字进场 / 图形展开 */
+@keyframes fade-slide-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.anim-fade-slide {
+  animation: fade-slide-in var(--duration-mid) var(--ease-out-soft) both;
+}
+
+/* 转写生成 / 流式输出呼吸态 */
+@keyframes breathe {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.anim-breathe {
+  animation: breathe 2s ease-in-out infinite;
+}
+
+/* 降级：用户偏好减少动效时禁用装饰性动画 */
+@media (prefers-reduced-motion: reduce) {
+  .anim-fade-slide,
+  .anim-breathe {
+    animation: none;
+  }
+}

@@ -66,4 +66,43 @@
   --header-height: 56px;
   --content-padding: 24px;
   --content-max-width: 1440px;
+
+  /* ===== 结构色（深色侧边栏 / 深色页头）——《前端设计-new》§4.2.1 ===== */
+  --color-ink: #0e1b2c;
+  --color-ink-2: #16283e;
+  --color-ink-3: #1f3a5f;
+  --color-ink-text: #dce7f5;
+  --color-ink-text-dim: #8fa3bf;
+
+  /* ===== AI 视觉色（智能体产出的统一识别）——§4.2.2 ===== */
+  --color-ai: #8b5cf6;
+  --color-ai-bright: #a855f7;
+  --color-ai-deep: #6d28d9;
+  --color-ai-bg: #f6f3ff;
+  --gradient-ai: linear-gradient(135deg, #6d28d9 0%, #a855f7 55%, #d946ef 100%);
+
+  /* ===== 评分色阶（1-5 李克特锚点 → 质量色带）——§4.2.3 ===== */
+  --color-score-5: #2fb344; /* 优秀 · 可作为示范课 */
+  --color-score-4: #84b80c; /* 良好 · 骨干教师水平 */
+  --color-score-3: #f5a623; /* 合格 · 基本教学要求 */
+  --color-score-2: #f76707; /* 待改进 · 存在明显短板 */
+  --color-score-1: #e5484d; /* 不合格 · 需要立即干预 */
+  --color-score-void: #c9cdd4; /* 无分数（null 专用，禁止以 0 充当） */
+  --gradient-score: linear-gradient(90deg, #e5484d, #f5a623, #2fb344);
+
+  /* ===== 评分数字字体与字号——§4.3 ===== */
+  --font-score: 'Bahnschrift', 'DIN Alternate', 'Segoe UI', sans-serif;
+  --font-size-score-xl: 40px;
+  --font-size-score-lg: 28px;
+  --font-size-score-md: 20px;
+
+  /* ===== AI 卡片语法 ===== */
+  --radius-ai: 10px;
+  --shadow-ai: 0 2px 8px rgba(109, 40, 217, 0.08);
+
+  /* ===== 动效曲线 ——§4.6 ===== */
+  --ease-out-soft: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --duration-fast: 200ms;
+  --duration-mid: 400ms;
+  --duration-count: 600ms;
 }
