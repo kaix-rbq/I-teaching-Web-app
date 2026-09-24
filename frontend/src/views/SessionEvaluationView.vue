@@ -14,9 +14,10 @@ import {
 import { fetchSessionTranscriptApi, retrySessionTranscriptApi, uploadSessionRecordingApi } from '@/api/session'
 import AudioPlayer from '@/components/session/AudioPlayer.vue'
 import TranscriptViewer from '@/components/evaluation/TranscriptViewer.vue'
+import AiBadge from '@/components/common/AiBadge.vue'
 import { useAuthStore } from '@/stores/auth'
 import { EVALUATION_DIMENSIONS, getScoreLevel, getSessionStatusMeta } from '@/constants'
-import { formatDate } from '@/utils/format'
+import { formatDate, scoreTone, scoreToneColor } from '@/utils/format'
 import type {
   EvaluationDTO,
   EvaluationFormModel,
@@ -128,6 +129,11 @@ const dimensionRows = computed(() =>
 
 const displayTotal = computed(() =>
   displayedEvaluation.value?.totalScore ?? null
+)
+
+/* 总分色阶着色（totalScore 为 1-5 制，×20 映射到 0-100 色阶域） */
+const totalToneColor = computed(() =>
+  scoreToneColor(scoreTone(displayTotal.value === null ? null : displayTotal.value * 20))
 )
 
 const supervisorCount = computed(() => data.value?.supervisorScores.length ?? 0)
@@ -359,7 +365,10 @@ onUnmounted(() => { if (pollTimer) clearTimeout(pollTimer) })
               <span class="session-evaluation__total-label">
                 {{ isSupervisor ? '我的督导总分' : '督导总分' }}
               </span>
-              <span class="session-evaluation__total-value tabular-nums">
+              <span
+                class="session-evaluation__total-value score-num"
+                :style="{ color: displayTotal === null ? undefined : totalToneColor }"
+              >
                 {{ displayTotal === null ? (isSupervisor ? '待提交' : '暂无') : displayTotal.toFixed(2) }}
               </span>
             </div>
@@ -371,9 +380,7 @@ onUnmounted(() => { if (pollTimer) clearTimeout(pollTimer) })
               <div>
                 <dt>智能体参考</dt>
                 <dd>
-                  <el-tag v-if="agentScore" type="info" effect="light" round>
-                    {{ agentScore.totalScore?.toFixed(2) ?? '已接入' }}
-                  </el-tag>
+                  <AiBadge v-if="agentScore" text="AI 参考" />
                   <span v-else class="session-evaluation__muted">阶段②接入</span>
                 </dd>
               </div>
