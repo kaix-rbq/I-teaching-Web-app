@@ -79,7 +79,7 @@ onMounted(() => {
           <RoleTag role="teacher" />
         </div>
       </template>
-      <template #subtitle>综合分、分维度、按课程明细与历次评价时间线</template>
+      <template #subtitle>双源罗盘 · 五维双源叠加 · 按课程明细与历次评价流</template>
       <template #actions>
         <el-select
           v-model="semester"

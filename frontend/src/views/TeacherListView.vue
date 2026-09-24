@@ -5,6 +5,7 @@ import PageHeader from '@/components/common/PageHeader.vue'
 import FilterBar from '@/components/common/FilterBar.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import TeacherScoreTable from '@/components/teacher/TeacherScoreTable.vue'
+import TeacherScoreCard from '@/components/teacher/TeacherScoreCard.vue'
 import { fetchTeacherScoresApi } from '@/api/teacher'
 import { useAuthStore } from '@/stores/auth'
 import { useDictStore } from '@/stores/dict'
@@ -25,6 +26,43 @@ const pageSize = ref(10)
 const query = reactive<{ semester: string; departmentId: number | '' }>({
   semester: '',
   departmentId: ''
+})
+
+type ViewMode = 'card' | 'table'
+type SortKey = 'name' | 'score-desc' | 'score-asc'
+
+const VIEW_STORAGE_KEY = 'aijiaoxue_teacher_view'
+
+function readInitialView(): ViewMode {
+  const saved = typeof localStorage === 'undefined' ? null : localStorage.getItem(VIEW_STORAGE_KEY)
+  return saved === 'table' ? 'table' : 'card'
+}
+
+const view = ref<ViewMode>(readInitialView())
+
+function setView(value: string | number | boolean | undefined): void {
+  view.value = value === 'table' ? 'table' : 'card'
+  try {
+    localStorage.setItem(VIEW_STORAGE_KEY, view.value)
+  } catch {
+    /* 隐私模式等场景写入失败不阻塞 */
+  }
+}
+
+const sortKey = ref<SortKey>('name')
+
+/** 排序继承原表格逻辑：null 置底且不按 0 参与排序（AGENTS §9.6-1） */
+const cardRows = computed(() => {
+  if (sortKey.value === 'name') return rows.value
+  const direction = sortKey.value === 'score-desc' ? -1 : 1
+  return [...rows.value].sort((a, b) => {
+    const left = a.compositeScore
+    const right = b.compositeScore
+    if (left === null && right === null) return 0
+    if (left === null) return 1
+    if (right === null) return -1
+    return (left - right) * direction
+  })
 })
 
 /** 教研室筛选仅对督导开放：主任数据由后端裁剪为本室（§7.8）。 */
@@ -86,7 +124,10 @@ onMounted(() => {
 
 <template>
   <div class="teacher-list">
-    <PageHeader title="教师管理" subtitle="查看本室教师的综合评分、各维度分与评价次数，以便统筹教学支持" />
+    <PageHeader
+      title="教师画像"
+      subtitle="以质量卡片纵览本室教师：双源罗盘、五维分与样本量，点击进入单人画像"
+    />
 
     <el-alert
       class="teacher-list__ethics"
@@ -130,13 +171,49 @@ onMounted(() => {
           </template>
         </EmptyState>
       </div>
+
       <template v-else>
-        <TeacherScoreTable :rows="rows" :loading="loading" @view="handleView" />
-        <EmptyState
-          v-if="!loading && rows.length === 0"
-          class="teacher-list__state"
-          description="暂无教师评价数据"
-        />
+        <div class="teacher-list__toolbar">
+          <el-radio-group :model-value="view" size="default" @update:model-value="setView">
+            <el-radio-button value="card">质量卡片</el-radio-button>
+            <el-radio-button value="table">数据表格</el-radio-button>
+          </el-radio-group>
+          <el-select
+            v-if="view === 'card'"
+            v-model="sortKey"
+            class="teacher-list__sort"
+            aria-label="卡片排序"
+          >
+            <el-option value="name" label="按姓名" />
+            <el-option value="score-desc" label="综合分 高→低" />
+            <el-option value="score-asc" label="综合分 低→高" />
+          </el-select>
+        </div>
+
+        <template v-if="view === 'card'">
+          <el-skeleton v-if="loading" :rows="6" animated />
+          <template v-else>
+            <div v-if="cardRows.length" class="teacher-list__cards">
+              <TeacherScoreCard
+                v-for="item in cardRows"
+                :key="item.teacherId"
+                :item="item"
+                @view="handleView"
+              />
+            </div>
+            <EmptyState v-else class="teacher-list__state" description="暂无教师评价数据" />
+          </template>
+        </template>
+
+        <template v-else>
+          <TeacherScoreTable :rows="rows" :loading="loading" @view="handleView" />
+          <EmptyState
+            v-if="!loading && rows.length === 0"
+            class="teacher-list__state"
+            description="暂无教师评价数据"
+          />
+        </template>
+
         <div class="teacher-list__pagination">
           <el-pagination
             :current-page="page"
@@ -166,6 +243,25 @@ onMounted(() => {
     border: 1px solid var(--color-divider);
     border-radius: var(--radius-lg);
     box-shadow: var(--shadow-card);
+  }
+
+  &__toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--spacing-3);
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: var(--spacing-4);
+  }
+
+  &__sort {
+    width: 160px;
+  }
+
+  &__cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(248px, 1fr));
+    gap: var(--spacing-4);
   }
 
   &__field {
