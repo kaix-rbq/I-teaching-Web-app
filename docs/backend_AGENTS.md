@@ -134,7 +134,8 @@ aijiaoxue-api/
 │   └── seed/main.go         # 种子数据工具（bcrypt 写入演示账号）
 ├── migrations/              # 版本化迁移（embed 打包）；命名 <版本>_<名称>.up/down.sql
 │   ├── 1_baseline_sprint1.{up,down}.sql
-│   └── 2_teaching_sessions_and_evaluations.{up,down}.sql
+│   ├── 2_teaching_sessions_and_evaluations.{up,down}.sql
+│   └── 5_evaluation_drafts.{up,down}.sql   # 督导评估草稿（3/4 为录音转写迁移）
 ├── internal/
 │   ├── config/config.go     # viper 加载与结构体（含 evaluation 计分口径启动校验）
 │   ├── router/router.go     # 路由表 + 分组（唯一路由注册地）
@@ -280,14 +281,27 @@ type TeacherDashboard struct { // 教师
     ResourceCount int              `json:"resourceCount"`
     MyCourses     []CourseListItem `json:"myCourses"`
 }
-type SupervisorDashboard struct { // 督导
-    CourseCount   int       `json:"courseCount"`
-    PlanCount     int       `json:"planCount"`
-    CompletedCount int      `json:"completedCount"`
-    CoverageRate  float64   `json:"coverageRate"`   // 0-1
-    RecentPlans   []PlanItem `json:"recentPlans"`   // 前 8 条
+type SupervisorDashboard struct { // 督导（工作台：聚焦「记录课程并评估」）
+    RecentPlans     []PlanItem          `json:"recentPlans"`     // 全部听评课安排（前端按今日/本周/本月分档）
+    RecentDrafts    []DraftDTO          `json:"recentDrafts"`    // 最近 3 份草稿（草稿箱区块）
+    PendingSessions []PendingSessionItem `json:"pendingSessions"` // 待评估授课记录（含手动新增，最新在前）
+}
+type PendingSessionItem struct { // 手动新增/尚未评价的授课记录（status=scheduled|recorded）
+    SessionID   uint64 `json:"sessionId"`
+    CourseID    uint64 `json:"courseId"`
+    CourseCode  string `json:"courseCode"`
+    CourseName  string `json:"courseName"`
+    TeacherID   uint64 `json:"teacherId"`
+    TeacherName string `json:"teacherName"`
+    SessionDate string `json:"sessionDate"`
+    Period      string `json:"period"`
+    Topic       string `json:"topic"`
+    Status      string `json:"status"`
 }
 ```
+
+> **变更说明（工作台精简）**：督导工作台已移除 `courseCount/planCount/completedCount/coverageRate/byDepartment`
+> 等与听评课核心任务无关的统计；覆盖率仍由 `GET /supervision/coverage` 提供。
 
 ### 8.3 字典 dict（新增，供前端筛选下拉）
 
@@ -396,15 +410,20 @@ type DeptRate struct {
     Rate       float64 `json:"rate"`
 }
 type PlanItem struct {
-    ID             uint64 `json:"id"`
-    CourseID       uint64 `json:"courseId"`
-    CourseName     string `json:"courseName"`
-    TeacherName    string `json:"teacherName"`
-    SupervisorName string `json:"supervisorName"`
-    PlannedDate    string `json:"plannedDate"` // YYYY-MM-DD
-    Status         string `json:"status"`      // planned|completed
+    ID             uint64  `json:"id"`
+    CourseID       uint64  `json:"courseId"`
+    CourseName     string  `json:"courseName"`
+    TeacherName    string  `json:"teacherName"`
+    SupervisorName string  `json:"supervisorName"`
+    PlannedDate    string  `json:"plannedDate"` // YYYY-MM-DD
+    Status         string  `json:"status"`      // planned|completed
+    SessionID      *uint64 `json:"sessionId"`   // 关联授课记录；null=尚无，需先创建再评估
+    Evaluated      bool    `json:"evaluated"`   // 关联授课记录是否已督导评价（前端据此暴露/隐藏评估入口）
 }
 ```
+
+> **评估入口日期闸门（前端约束）**：`evaluated=false` 且 `plannedDate <= 今天` 才显示「去评估」（无授课记录时先 `POST /sessions` 建档再跳转）；
+> `plannedDate > 今天` 仅预览、不开放评估。工作台「未评」筛选列出 `plannedDate < 今天 && !evaluated`（不含今日，专用于补录）。
 
 **覆盖率口径（唯一）**：分母 = 当前学期 `status='open'` 的课程数；分子 = 这些课程中已有 `status='completed'` 听评课记录（DISTINCT course_id）的数量。分部门同理。当前学期取 `semesters` 常量中最新一项（Sprint 1 固定 `2026-2027-1`，定义在 `internal/service/consts.go`）。
 
@@ -427,6 +446,11 @@ type PlanItem struct {
 | GET `/teachers/:id/evaluation-summary?semester=` | director（本室）/ teacher（仅自己）/ supervisor | 教师级评分面板 |
 | GET `/teachers/:id/evaluations?semester=&page=&pageSize=` | director（本室）/ teacher（仅自己）/ supervisor | 教师历次评价时间线：按课次倒序，含督导结构化评语 + 智能体参考 + 场次综合分 |
 | GET `/courses/:id/evaluation-summary?semester=` | 登录（数据裁剪） | 课程级评分，与教师级共用同一聚合函数 |
+| GET `/sessions/:id/draft` | supervisor | 读取本人该场次草稿（无草稿返回 `null`） |
+| PUT `/sessions/:id/draft` | supervisor | 保存/覆盖本人草稿（**允许部分维度为空**） |
+| GET `/drafts?keyword=&page=&pageSize=` | supervisor | 本人草稿分页列表（按课程名查询） |
+| DELETE `/drafts/:id` | supervisor | 删除本人草稿（越权/不存在 40401） |
+| POST `/drafts/:id/submit` | supervisor | 草稿转正式评价：复用正式提交口径，**五维必填**；成功后删除草稿 |
 
 ```go
 // 五维必填：objective/content/interaction/organization/frontier，均为 1-5 整数
@@ -448,6 +472,42 @@ type SampleDTO struct { // 响应内嵌，聚合接口共用
     AgentCount       int  `json:"agentCount"`
     AlignedCount     int  `json:"alignedCount"`
     SampleSufficient bool `json:"sampleSufficient"`
+}
+
+// 评估草稿（evaluation_drafts 表；与正式评价分表，不进入聚合口径）
+type DraftUpsertReq struct {
+    Objective    *int   `json:"objective" binding:"omitempty,min=1,max=5"` // 草稿允许为空
+    Content      *int   `json:"content"`
+    Interaction  *int   `json:"interaction"`
+    Organization *int   `json:"organization"`
+    Frontier     *int   `json:"frontier"`
+    Comment      string `json:"comment"`
+    Highlights   string `json:"highlights"`
+    Improvements string `json:"improvements"`
+    Suggestions  string `json:"suggestions"`
+}
+type DraftDTO struct {
+    ID           uint64 `json:"id"`
+    SessionID    uint64 `json:"sessionId"`
+    CourseID     uint64 `json:"courseId"`
+    CourseCode   string `json:"courseCode"`
+    CourseName   string `json:"courseName"`
+    TeacherName  string `json:"teacherName"`
+    SessionDate  string `json:"sessionDate"`
+    Period       string `json:"period"`
+    Topic        string `json:"topic"`
+    // 以下五维与评语可为 null（草稿可只写一半）
+    Objective    *int   `json:"objective"`
+    Content      *int   `json:"content"`
+    Interaction  *int   `json:"interaction"`
+    Organization *int   `json:"organization"`
+    Frontier     *int   `json:"frontier"`
+    Comment      string `json:"comment"`
+    Highlights   string `json:"highlights"`
+    Improvements string `json:"improvements"`
+    Suggestions  string `json:"suggestions"`
+    CreatedAt    string `json:"createdAt"`
+    UpdatedAt    string `json:"updatedAt"`
 }
 ```
 
@@ -507,7 +567,12 @@ authed.Group("", mw.RequireRoles("supervisor")).
     GET("/supervision/coverage", h.Super.Coverage).
     GET("/supervision/plans", h.Super.Plans).
     POST("/sessions", h.Session.Create).
-    PUT("/sessions/:id/supervisor-evaluation", h.Session.Submit)
+    PUT("/sessions/:id/supervisor-evaluation", h.Session.Submit).
+    GET("/sessions/:id/draft", h.Draft.GetBySession).
+    PUT("/sessions/:id/draft", h.Draft.Save).
+    GET("/drafts", h.Draft.List).
+    DELETE("/drafts/:id", h.Draft.Delete).
+    POST("/drafts/:id/submit", h.Draft.Submit)
 
 authed.Group("", mw.RequireRoles("director", "supervisor")).
     GET("/teacher-scores", h.TeacherScore.List)
@@ -580,6 +645,7 @@ HTTP 请求
 | SupervisionPlan | supervision_plans | 听评课安排 |
 | TeachingSession | teaching_sessions | **Sprint 2 新增**：授课记录（某次具体的课，一切评价的落点） |
 | Evaluation | evaluations | **Sprint 2 新增**：评价（`evaluator_type` 区分督导/智能体，可插拔 scorer） |
+| EvaluationDraft | evaluation_drafts | **评估草稿**：督导未提交的私人工作副本（维度可空，不进入聚合） |
 | Recording | recordings | **Sprint 2.2 新增**：课堂录音 |
 | Transcript | transcripts | **Sprint 2.2 新增**：课堂转写（异步任务产物） |
 

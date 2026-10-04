@@ -446,6 +446,7 @@ func (Course) TableName() string { return "courses" }
 |------|------|
 | Sprint 1 | schema.sql + seed.sql 手工执行（本文档）；V1 基线已固化为 `migrations/1_baseline_sprint1.up.sql`（内容与 schema.sql 一致，`IF NOT EXISTS` 幂等） |
 | Sprint 2（看课堂） | `migrations/2_teaching_sessions_and_evaluations.up.sql`：新增 `teaching_sessions`（**授课记录**，核心实体）、`evaluations`（督导 + 智能体同表，靠 `evaluator_type` 区分）；阶段二再新增 `recordings`（课堂录音）、`transcripts`（转写文本，异步任务产物）→ `migrations/3_recordings_and_transcripts.up.sql`。均**只新增、不改存量表** |
+| v1.2（草稿能力） | `migrations/5_evaluation_drafts.up.sql`：新增 `evaluation_drafts`（**督导评估草稿**，`uk_draft(session_id, supervisor_id)`）。草稿是未生效的私人工作副本（维度可空），**不进入任何聚合**；提交后写入 `evaluations` 并删除草稿。seed 同步扩充为多教师/多课程/多记录，且智能体评价覆盖五维（修复雷达图缺角） |
 | Sprint 3（帮教师） | 新增 `quality_reports`（质量报告）、申诉复核相关表（`evaluation_appeals`）；`knowledge_base`（教学知识库条目） |
 | 版本化时机 | 从 Sprint 2 起引入 `golang-migrate`。**文件名必须是 `<版本>_<名称>.up.sql` / `.down.sql`**（如 `2_teaching_sessions_and_evaluations.up.sql`）；Flyway 风格 `V2__xxx.up.sql` 不被识别，会让 `migrate up` 报 `first .: file does not exist` |
 
