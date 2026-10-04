@@ -55,7 +55,7 @@ export interface EvaluationDTO {
   aiModelVersion: string
   aiConfidence: number | null
   formulaVersion: string
-  /** 1-5；智能体侧 objective 恒为 null */
+  /** 1-5；智能体侧现覆盖五维，但容错允许任一维度为 null */
   objective: number | null
   content: number | null
   interaction: number | null
@@ -80,6 +80,20 @@ export interface SessionEvaluation {
   supervisorScores: EvaluationDTO[]
   /** 阶段一恒为 null */
   agentScore: EvaluationDTO | null
+}
+
+/** 督导工作台「待评估授课记录」行（含课程/教师上下文） */
+export interface PendingSessionItem {
+  sessionId: number
+  courseId: number
+  courseCode: string
+  courseName: string
+  teacherId: number
+  teacherName: string
+  sessionDate: string
+  period: string
+  topic: string
+  status: SessionStatus
 }
 
 export interface RecordingDTO {

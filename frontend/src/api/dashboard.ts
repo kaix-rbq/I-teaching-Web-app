@@ -2,7 +2,9 @@ import { request } from './http'
 import type { Course } from '@/types/course'
 import type { Resource } from '@/types/resource'
 import type { SupervisionPlan } from '@/types/supervision'
-import type { CoverageStat, DashboardData, DashboardStat } from '@/types/supervision'
+import type { DraftDTO } from '@/types/draft'
+import type { PendingSessionItem } from '@/types/evaluation'
+import type { DashboardData, DashboardStat } from '@/types/supervision'
 
 /** 后端 GET /dashboard 按角色返回的三种 DTO（见后端 AGENTS.md §8.2） */
 interface DirectorDashboard {
@@ -23,12 +25,9 @@ interface TeacherDashboard {
 }
 
 interface SupervisorDashboard {
-  courseCount: number
-  planCount: number
-  completedCount: number
-  coverageRate: number
   recentPlans: SupervisionPlan[]
-  byDepartment: { department: string; rate: number }[]
+  recentDrafts: DraftDTO[]
+  pendingSessions: PendingSessionItem[]
 }
 
 function stat(
@@ -76,21 +75,11 @@ export async function fetchDashboardApi(): Promise<DashboardData> {
     }
   }
 
-  const coverage: CoverageStat = {
-    totalCourses: raw.courseCount,
-    supervisedCourses: raw.completedCount,
-    rate: raw.coverageRate,
-    byDepartment: raw.byDepartment ?? []
-  }
-
+  // 督导工作台聚焦「记录课程并评估」：不再返回统计卡与覆盖率。
   return {
-    stats: [
-      stat('全校课程数', raw.courseCount, '门', 'course', 'primary'),
-      stat('本学期听评课计划', raw.planCount, '项', 'plan', 'info'),
-      stat('已完成听评课', raw.completedCount, '项', 'done', 'success'),
-      stat('督导覆盖率', Math.round(raw.coverageRate * 100), '%', 'coverage', 'supervisor')
-    ],
+    stats: [],
     plans: raw.recentPlans ?? [],
-    coverage
+    recentDrafts: raw.recentDrafts ?? [],
+    pendingSessions: raw.pendingSessions ?? []
   }
 }
