@@ -71,7 +71,7 @@ func TestSideTotalWorkbook(t *testing.T) {
 	assert.Equal(t, 82.50, round2(*got))
 }
 
-// TestSideTotalSeed 对照 §3.4 对账基准的 6 条种子评价（含智能体缺 objective 时的权重再归一化）。
+// TestSideTotalSeed 对照 seed.sql 的 6 条 c1 评价（督导与智能体均五维齐全）。
 func TestSideTotalSeed(t *testing.T) {
 	cases := []struct {
 		name string
@@ -81,9 +81,9 @@ func TestSideTotalSeed(t *testing.T) {
 		{name: "第 1 次课督导 52.50", ds: NewDimensionScores(i(4), i(3), i(2), i(3), i(2)), want: 52.50},
 		{name: "第 2 次课督导 70.00", ds: NewDimensionScores(i(4), i(4), i(3), i(4), i(3)), want: 70.00},
 		{name: "第 3 次课督导 82.50", ds: NewDimensionScores(i(5), i(4), i(4), i(4), i(3)), want: 82.50},
-		{name: "第 1 次课智能体 60.71", ds: NewDimensionScores(nil, i(4), i(3), i(3), i(3)), want: 60.71},
-		{name: "第 2 次课智能体 67.86", ds: NewDimensionScores(nil, i(4), i(3), i(4), i(3)), want: 67.86},
-		{name: "第 3 次课智能体 75.00", ds: NewDimensionScores(nil, i(4), i(4), i(4), i(4)), want: 75.00},
+		{name: "第 1 次课智能体 65.00", ds: NewDimensionScores(i(4), i(4), i(3), i(3), i(3)), want: 65.00},
+		{name: "第 2 次课智能体 70.00", ds: NewDimensionScores(i(4), i(4), i(3), i(4), i(3)), want: 70.00},
+		{name: "第 3 次课智能体 75.00", ds: NewDimensionScores(i(4), i(4), i(4), i(4), i(4)), want: 75.00},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -106,33 +106,33 @@ func TestSideTotalEdge(t *testing.T) {
 	assert.Equal(t, 75.00, round2(*got))
 }
 
-// seedSessions 构造 §3.4 种子数据（课程 1 · 教师 2 · 三次课 · 双侧评价）。
+// seedSessions 构造 seed.sql 的 c1 数据（课程 1 · 教师 2 · 三次课 · 双侧五维评价）。
 func seedSessions() []SessionScore {
 	return []SessionScore{
 		{
 			SessionID: 1, CourseID: 1,
 			Supervisor: NewDimensionScores(i(4), i(3), i(2), i(3), i(2)),
-			Agent:      NewDimensionScores(nil, i(4), i(3), i(3), i(3)),
+			Agent:      NewDimensionScores(i(4), i(4), i(3), i(3), i(3)),
 		},
 		{
 			SessionID: 2, CourseID: 1,
 			Supervisor: NewDimensionScores(i(4), i(4), i(3), i(4), i(3)),
-			Agent:      NewDimensionScores(nil, i(4), i(3), i(4), i(3)),
+			Agent:      NewDimensionScores(i(4), i(4), i(3), i(4), i(3)),
 		},
 		{
 			SessionID: 3, CourseID: 1,
 			Supervisor: NewDimensionScores(i(5), i(4), i(4), i(4), i(3)),
-			Agent:      NewDimensionScores(nil, i(4), i(4), i(4), i(4)),
+			Agent:      NewDimensionScores(i(4), i(4), i(4), i(4), i(4)),
 		},
 	}
 }
 
-// TestSessionCompositeSeed 对照 §3.4 对账基准：三次课综合分 58.75 / 70.00 / 82.50。
+// TestSessionCompositeSeed 对照 seed.sql：三次课综合分 58.75 / 70.00 / 78.75。
 func TestSessionCompositeSeed(t *testing.T) {
 	cases := []struct {
 		idx  int
 		want float64
-	}{{0, 58.75}, {1, 70.00}, {2, 82.50}}
+	}{{0, 58.75}, {1, 70.00}, {2, 78.75}}
 	for _, tc := range cases {
 		got := SessionComposite(seedSessions()[tc.idx], defaultWeights(), 0.5)
 		require.NotNil(t, got)
@@ -140,16 +140,16 @@ func TestSessionCompositeSeed(t *testing.T) {
 	}
 }
 
-// TestAggregateSeed 对照 §4.2 响应示例：教师级综合分 70.42、双侧分、逐维度分与样本计数。
+// TestAggregateSeed 对照 seed.sql：教师级综合分 69.17、双侧分、逐维度分与样本计数。
 func TestAggregateSeed(t *testing.T) {
 	s := Aggregate(seedSessions(), defaultWeights(), 0.5)
 
 	require.NotNil(t, s.Composite)
-	assert.Equal(t, 70.42, round2(*s.Composite), "教师级综合分")
+	assert.Equal(t, 69.17, round2(*s.Composite), "教师级综合分")
 	require.NotNil(t, s.Supervisor)
 	assert.Equal(t, 68.33, round2(*s.Supervisor), "督导侧")
 	require.NotNil(t, s.Agent)
-	assert.Equal(t, 67.86, round2(*s.Agent), "智能体侧（缺 objective 时再归一化）")
+	assert.Equal(t, 70.00, round2(*s.Agent), "智能体侧（五维齐全）")
 
 	assert.Equal(t, Sample{SessionCount: 3, EvaluatedCount: 3, SupervisorCount: 3, AgentCount: 3, AlignedCount: 3}, s.Sample)
 	assert.Empty(t, s.Flags)
@@ -159,9 +159,8 @@ func TestAggregateSeed(t *testing.T) {
 		score, sup, ai float64
 		weight         float64
 		isObservation  bool
-		supNil, aiNil  bool
 	}{
-		{key: KeyObjective, score: 83.33, sup: 83.33, weight: 0.30},
+		{key: KeyObjective, score: 79.17, sup: 83.33, ai: 75.00, weight: 0.30},
 		{key: KeyContent, score: 70.83, sup: 66.67, ai: 75.00, weight: 0.30},
 		{key: KeyInteraction, score: 54.17, sup: 50.00, ai: 58.33, weight: 0.20},
 		{key: KeyOrganization, score: 66.67, sup: 66.67, ai: 66.67, weight: 0.20},
@@ -175,17 +174,10 @@ func TestAggregateSeed(t *testing.T) {
 		assert.Equal(t, want.isObservation, dim.IsObservation)
 		require.NotNil(t, dim.Score)
 		assert.Equal(t, want.score, round2(*dim.Score), "维度 %s 融合分", dim.Key)
-		switch dim.Key {
-		case KeyObjective:
-			assert.Nil(t, dim.AgentScore, "智能体无法评价 objective")
-			require.NotNil(t, dim.SupervisorScore)
-			assert.Equal(t, want.sup, round2(*dim.SupervisorScore))
-		default:
-			require.NotNil(t, dim.SupervisorScore)
-			assert.Equal(t, want.sup, round2(*dim.SupervisorScore))
-			require.NotNil(t, dim.AgentScore)
-			assert.Equal(t, want.ai, round2(*dim.AgentScore))
-		}
+		require.NotNil(t, dim.SupervisorScore)
+		assert.Equal(t, want.sup, round2(*dim.SupervisorScore))
+		require.NotNil(t, dim.AgentScore, "五维齐全后智能体侧各维度均应有分")
+		assert.Equal(t, want.ai, round2(*dim.AgentScore))
 	}
 }
 
@@ -203,7 +195,7 @@ func TestAggregateIdentity(t *testing.T) {
 	}
 	mean := sum / float64(len(items))
 	assert.InDelta(t, *s.Composite, mean, 1e-9)
-	assert.Equal(t, 70.42, round2(mean))
+	assert.Equal(t, 69.17, round2(mean))
 }
 
 // TestAggregateMissingMatrix 覆盖 §2.5.5 缺失矩阵全部 5 行。
@@ -323,6 +315,71 @@ func TestAggregateEmpty(t *testing.T) {
 	assert.Equal(t, []string{"no_data"}, s.Flags)
 	assert.Equal(t, Sample{}, s.Sample)
 	assert.Len(t, s.Dimensions, 5)
+}
+
+// seedDataset 复刻 database/seed.sql 的 14 次授课（多教师 / 多课程 / 双侧五维），
+// 用于验证「增加数据量与复杂度后」聚合逻辑仍逐位正确。
+type seedDataset struct {
+	sessionID uint64
+	teacherID uint64
+	courseID  uint64
+	score     SessionScore
+}
+
+func seedDatasetItems() []seedDataset {
+	ds := func(o, c, i, org, fr int) *DimensionScores {
+		return NewDimensionScores(&o, &c, &i, &org, &fr)
+	}
+	return []seedDataset{
+		{1, 2, 1, SessionScore{SessionID: 1, CourseID: 1, Supervisor: ds(4, 3, 2, 3, 2), Agent: ds(4, 4, 3, 3, 3)}},
+		{2, 2, 1, SessionScore{SessionID: 2, CourseID: 1, Supervisor: ds(4, 4, 3, 4, 3), Agent: ds(4, 4, 3, 4, 3)}},
+		{3, 2, 1, SessionScore{SessionID: 3, CourseID: 1, Supervisor: ds(5, 4, 4, 4, 3), Agent: ds(4, 4, 4, 4, 4)}},
+		{4, 3, 2, SessionScore{SessionID: 4, CourseID: 2, Supervisor: ds(5, 4, 3, 4, 2), Agent: ds(4, 4, 3, 4, 3)}},
+		{5, 3, 2, SessionScore{SessionID: 5, CourseID: 2, Supervisor: ds(4, 4, 4, 4, 3), Agent: ds(4, 5, 4, 4, 4)}},
+		{6, 3, 2, SessionScore{SessionID: 6, CourseID: 2, Supervisor: ds(5, 5, 4, 5, 4), Agent: ds(4, 4, 4, 4, 4)}},
+		{7, 4, 3, SessionScore{SessionID: 7, CourseID: 3, Supervisor: ds(3, 3, 2, 3, 2), Agent: ds(3, 3, 2, 3, 3)}},
+		{8, 4, 3, SessionScore{SessionID: 8, CourseID: 3, Supervisor: ds(4, 4, 3, 4, 3), Agent: ds(4, 4, 3, 4, 3)}},
+		{9, 2, 4, SessionScore{SessionID: 9, CourseID: 4, Supervisor: ds(4, 3, 3, 4, 2), Agent: ds(4, 4, 3, 4, 3)}},
+		{10, 2, 4, SessionScore{SessionID: 10, CourseID: 4, Supervisor: ds(5, 4, 4, 4, 3), Agent: ds(4, 5, 4, 4, 4)}},
+		{11, 6, 5, SessionScore{SessionID: 11, CourseID: 5, Supervisor: ds(4, 3, 2, 3, 3), Agent: ds(4, 4, 3, 3, 4)}},
+		{12, 6, 5, SessionScore{SessionID: 12, CourseID: 5, Supervisor: ds(5, 5, 4, 4, 4), Agent: ds(4, 5, 4, 5, 4)}},
+		{13, 4, 6, SessionScore{SessionID: 13, CourseID: 6, Supervisor: ds(4, 3, 3, 3, 2), Agent: ds(4, 4, 3, 3, 3)}},
+		{14, 4, 6, SessionScore{SessionID: 14, CourseID: 6, Supervisor: ds(5, 4, 4, 4, 4), Agent: ds(4, 4, 4, 4, 4)}},
+	}
+}
+
+// TestSeedDatasetSessionComposites 逐场次核对 seed.sql 中写入的 total_score/综合分口径。
+func TestSeedDatasetSessionComposites(t *testing.T) {
+	want := map[uint64]float64{
+		1: 58.75, 2: 70.00, 3: 78.75, 4: 73.75, 5: 78.75, 6: 85.00, 7: 45.00,
+		8: 70.00, 9: 66.25, 10: 82.50, 11: 58.75, 12: 88.75, 13: 61.25, 14: 78.75,
+	}
+	for _, item := range seedDatasetItems() {
+		got := SessionComposite(item.score, defaultWeights(), 0.5)
+		require.NotNil(t, got, "session %d", item.sessionID)
+		assert.Equal(t, want[item.sessionID], round2(*got), "session %d 综合分", item.sessionID)
+	}
+}
+
+// TestSeedDatasetTeacherIdentity 验证多教师数据下，教师级综合分 ≡ 该教师各场次综合分的算术平均。
+func TestSeedDatasetTeacherIdentity(t *testing.T) {
+	wantMean := map[uint64]float64{2: 71.25, 3: 79.17, 4: 63.75, 6: 73.75}
+	byTeacher := map[uint64][]SessionScore{}
+	for _, item := range seedDatasetItems() {
+		byTeacher[item.teacherID] = append(byTeacher[item.teacherID], item.score)
+	}
+	for teacherID, items := range byTeacher {
+		s := Aggregate(items, defaultWeights(), 0.5)
+		require.NotNil(t, s.Composite, "teacher %d", teacherID)
+		var sum float64
+		for _, it := range items {
+			c := SessionComposite(it, defaultWeights(), 0.5)
+			require.NotNil(t, c)
+			sum += *c
+		}
+		assert.InDelta(t, *s.Composite, sum/float64(len(items)), 1e-9, "teacher %d", teacherID)
+		assert.Equal(t, wantMean[teacherID], round2(*s.Composite), "teacher %d 综合分", teacherID)
+	}
 }
 
 // TestAggregateAlphaClamp α 越界时收敛到 [0,1]，不产生非法加权。

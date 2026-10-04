@@ -34,7 +34,7 @@ echo "==> [4/4] 覆写演示账号 bcrypt 密码哈希：go run ./cmd/seed"
 go run ./cmd/seed -config "${CONFIG:-config.yaml}"
 
 echo
-echo "==> 自查（期望 departments=3 users=6 courses=8 classes=14 resources=6 plans=5 sessions=3 evaluations=6）"
+echo "==> 自查（期望 departments=3 users=6 courses=8 classes=14 resources=6 plans=7 sessions=14 evaluations=28）"
 mysql_admin "$DB_NAME" <<'SQL'
 SELECT
   (SELECT COUNT(*) FROM departments)       AS departments,
