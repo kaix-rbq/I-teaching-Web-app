@@ -10,16 +10,21 @@ const props = withDefaults(
     /** 只读：主任（本室）/ 教师（本人）进入时禁用并隐藏提交 */
     readonly?: boolean
     submitting?: boolean
+    /** 显示「保存草稿」按钮（仅督导评估页） */
+    showDraft?: boolean
+    draftSaving?: boolean
   }>(),
   {
     readonly: false,
-    submitting: false
+    submitting: false,
+    showDraft: false,
+    draftSaving: false
   }
 )
 
 const model = defineModel<EvaluationFormModel>({ required: true })
 
-const emit = defineEmits<{ (e: 'submit'): void }>()
+const emit = defineEmits<{ (e: 'submit'): void; (e: 'save-draft'): void }>()
 
 const formRef = ref<FormInstance>()
 
@@ -140,10 +145,15 @@ async function handleSubmit(): Promise<void> {
     </el-form-item>
 
     <div v-if="!readonly" class="evaluation-form__actions">
+      <el-button v-if="showDraft" :loading="draftSaving" @click="emit('save-draft')">
+        保存草稿
+      </el-button>
       <el-button type="primary" :loading="submitting" @click="handleSubmit">
         提交评分
       </el-button>
-      <span class="evaluation-form__tip">提交后再次提交将覆盖你上次的评分</span>
+      <span class="evaluation-form__tip">
+        草稿可稍后继续编辑；提交后再次提交将覆盖你上次的评分
+      </span>
     </div>
 
     <el-alert

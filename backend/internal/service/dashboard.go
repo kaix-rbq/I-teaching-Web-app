@@ -19,6 +19,8 @@ type dashboardService struct {
 	users       repository.UserRepository
 	resources   repository.ResourceRepository
 	supervision repository.SupervisionRepository
+	drafts      repository.DraftRepository
+	sessions    repository.SessionRepository
 }
 
 // NewDashboardService 构造工作台服务。
@@ -27,8 +29,13 @@ func NewDashboardService(
 	users repository.UserRepository,
 	resources repository.ResourceRepository,
 	supervision repository.SupervisionRepository,
+	drafts repository.DraftRepository,
+	sessions repository.SessionRepository,
 ) DashboardService {
-	return &dashboardService{courses: courses, users: users, resources: resources, supervision: supervision}
+	return &dashboardService{
+		courses: courses, users: users, resources: resources,
+		supervision: supervision, drafts: drafts, sessions: sessions,
+	}
 }
 
 // Board 依据角色分派到主任 / 教师 / 督导三种聚合。
@@ -39,7 +46,7 @@ func (s *dashboardService) Board(ctx context.Context, role string, deptID, userI
 	case model.RoleTeacher:
 		return s.teacherBoard(ctx, userID)
 	case model.RoleSupervisor:
-		return s.supervisorBoard(ctx)
+		return s.supervisorBoard(ctx, userID)
 	default:
 		return nil, errcode.New(errcode.ForbiddenRole, "未知角色，无法加载工作台")
 	}
@@ -127,40 +134,37 @@ func (s *dashboardService) teacherBoard(ctx context.Context, userID uint64) (*dt
 	}, nil
 }
 
-func (s *dashboardService) supervisorBoard(ctx context.Context) (*dto.SupervisorDashboard, error) {
-	courseCount, err := s.courses.Count(ctx, repository.CourseFilter{
-		Semester: CurrentSemester,
-		Status:   model.CourseStatusOpen,
-	})
-	if err != nil {
-		return nil, errcode.Wrap(errcode.Internal, "统计全校课程数失败", err)
-	}
-	planCount, err := s.supervision.CountPlans(ctx, "")
-	if err != nil {
-		return nil, errcode.Wrap(errcode.Internal, "统计听评课计划失败", err)
-	}
-	completedCount, err := s.supervision.CountPlans(ctx, model.PlanStatusCompleted)
-	if err != nil {
-		return nil, errcode.Wrap(errcode.Internal, "统计已完成听评课失败", err)
-	}
-	coverage, err := NewSupervisionService(s.supervision).Coverage(ctx)
-	if err != nil {
-		return nil, err
-	}
+// supervisorBoard 只聚合并返回督导核心任务所需数据：
+//   - 全部听评课安排（前端按今日 / 本周 / 本月分档展示待评课队列）；
+//   - 最近创建的三份草稿（工作台「草稿箱」区块）。
+//
+// 已移除课程数 / 覆盖率等与「记录课程并评估」无关的统计。
+func (s *dashboardService) supervisorBoard(ctx context.Context, userID uint64) (*dto.SupervisorDashboard, error) {
 	rows, _, err := s.supervision.ListPlans(ctx, repository.PlanListParams{
 		Page:     1,
-		PageSize: 8,
+		PageSize: 100,
 	})
 	if err != nil {
 		return nil, errcode.Wrap(errcode.Internal, "查询听评课安排失败", err)
 	}
 
+	draftRows, err := s.drafts.RecentBySupervisor(ctx, userID, 3)
+	if err != nil {
+		return nil, errcode.Wrap(errcode.Internal, "查询最近草稿失败", err)
+	}
+	drafts := make([]dto.DraftDTO, 0, len(draftRows))
+	for _, row := range draftRows {
+		drafts = append(drafts, toDraftDTOFromRow(row))
+	}
+
+	pendingRows, err := s.sessions.ListPending(ctx, 20)
+	if err != nil {
+		return nil, errcode.Wrap(errcode.Internal, "查询待评估授课记录失败", err)
+	}
+
 	return &dto.SupervisorDashboard{
-		CourseCount:    int(courseCount),
-		PlanCount:      int(planCount),
-		CompletedCount: int(completedCount),
-		CoverageRate:   coverage.Rate,
-		RecentPlans:    toPlanItems(rows),
-		ByDepartment:   coverage.ByDepartment,
+		RecentPlans:     toPlanItems(rows),
+		RecentDrafts:    drafts,
+		PendingSessions: toPendingSessionItems(pendingRows),
 	}, nil
 }

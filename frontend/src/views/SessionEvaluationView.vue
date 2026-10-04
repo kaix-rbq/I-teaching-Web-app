@@ -12,6 +12,7 @@ import {
   submitSupervisorEvaluationApi
 } from '@/api/session'
 import { fetchSessionTranscriptApi, retrySessionTranscriptApi, uploadSessionRecordingApi } from '@/api/session'
+import { fetchSessionDraftApi, saveSessionDraftApi } from '@/api/draft'
 import AudioPlayer from '@/components/session/AudioPlayer.vue'
 import TranscriptViewer from '@/components/evaluation/TranscriptViewer.vue'
 import AiBadge from '@/components/common/AiBadge.vue'
@@ -24,6 +25,7 @@ import type {
   SessionEvaluation,
   SupervisorEvaluationPayload
 } from '@/types/evaluation'
+import type { DraftDTO, DraftUpsertPayload } from '@/types/draft'
 
 const route = useRoute()
 const router = useRouter()
@@ -33,6 +35,7 @@ const data = ref<SessionEvaluation | null>(null)
 const loading = ref(true)
 const error = ref(false)
 const submitting = ref(false)
+const draftSaving = ref(false)
 const activeEvaluation = ref<EvaluationDTO | null>(null)
 
 const sessionId = computed(() => String(route.params.id ?? ''))
@@ -64,6 +67,20 @@ function fromEvaluation(evaluation: EvaluationDTO): EvaluationFormModel {
     highlights: evaluation.highlights ?? '',
     improvements: evaluation.improvements ?? '',
     suggestions: evaluation.suggestions ?? ''
+  }
+}
+
+function fromDraft(draft: DraftDTO): EvaluationFormModel {
+  return {
+    objective: draft.objective,
+    content: draft.content,
+    interaction: draft.interaction,
+    organization: draft.organization,
+    frontier: draft.frontier,
+    comment: draft.comment ?? '',
+    highlights: draft.highlights ?? '',
+    improvements: draft.improvements ?? '',
+    suggestions: draft.suggestions ?? ''
   }
 }
 
@@ -184,6 +201,15 @@ async function load(): Promise<void> {
     } else {
       form.value = emptyForm()
     }
+    // 督导：草稿优先于已提交评价，便于继续未完成的编辑。
+    if (isSupervisor.value) {
+      try {
+        const savedDraft = await fetchSessionDraftApi(sessionId.value)
+        if (savedDraft) form.value = fromDraft(savedDraft)
+      } catch {
+        // 草稿读取失败不阻断评估页
+      }
+    }
     await loadMedia()
   } catch {
     error.value = true
@@ -220,6 +246,34 @@ function buildPayload(): SupervisorEvaluationPayload | null {
     highlights: value.highlights,
     improvements: value.improvements,
     suggestions: value.suggestions
+  }
+}
+
+/** 草稿允许部分维度为空，直接透传表单当前状态。 */
+function buildDraftPayload(): DraftUpsertPayload {
+  const value = form.value
+  return {
+    objective: value.objective,
+    content: value.content,
+    interaction: value.interaction,
+    organization: value.organization,
+    frontier: value.frontier,
+    comment: value.comment,
+    highlights: value.highlights,
+    improvements: value.improvements,
+    suggestions: value.suggestions
+  }
+}
+
+async function handleSaveDraft(): Promise<void> {
+  draftSaving.value = true
+  try {
+    await saveSessionDraftApi(sessionId.value, buildDraftPayload())
+    ElMessage.success('草稿已保存，可在草稿箱继续编辑')
+  } catch {
+    // 错误提示由 api/http.ts 拦截器统一处理
+  } finally {
+    draftSaving.value = false
   }
 }
 
@@ -401,7 +455,10 @@ onUnmounted(() => { if (pollTimer) clearTimeout(pollTimer) })
               v-model="form"
               :readonly="readonly"
               :submitting="submitting"
+              :show-draft="isSupervisor"
+              :draft-saving="draftSaving"
               @submit="handleSubmit"
+              @save-draft="handleSaveDraft"
             />
           </section>
         </div>

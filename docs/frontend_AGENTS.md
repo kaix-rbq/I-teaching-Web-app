@@ -20,6 +20,20 @@
 
 ---
 
+> ## 🆕 v1.2 角色信息架构收敛与草稿能力（2026-09-28）
+>
+> 本次更新对既有页面做了**破坏性重排**（以可读性/职责单一为准，规范从宽）。要点：
+>
+> 1. **登录页 `LoginView`**：品牌雷达五轴标注维度名称；移除雷达下方「教研室主任·director / 教师·teacher / 教学督导·supervisor」角色图例；登录后默认落点由 `defaultRouteName(role)` 决定（教师 → `/me/quality`，其余 → `/dashboard`）。
+> 2. **教师端**：**删除「质量驾驶舱」**（与质量档案重复），`/me/quality` 为登录后首页；侧边栏为「我的质量档案 / 我的课程 / 个人中心」。质量档案第三卡由「本学期样本」改为 **「提优分析」**（可提优方向 + 提优建议，AI 预留接口）；删除「全部评价流」「AI 提优建议摘要」；新增 **「授课快照」**（逐次授课卡片，色条对应质量水平，高分标亮点、低分标不足）。
+> 3. **提优页 `CourseImproveView`**：重排为「课程信息置顶 → 五维双源横向柱条（增长动画）+ 综合雷达 → 督导评语流 → 智能体提优建议 → 分数趋势 → 课程资源置底」，删除与质量档案重复的罗盘/样本/教师级五维区块。
+> 4. **督导端**：「质量驾驶舱」改 **「工作台」**：删除四个统计卡与覆盖率图表；保留 **待评课队列**（今日/本周/本月/**未评**按钮切换）；**评估入口按日期闸门**——`plannedDate <= 今天` 且未评估显示「去评估」（无授课记录先建档），未来课次仅预览不开放评估；「未评」列出已过日期未评课的记录便于补录；工作台右上角新增 **新增授课记录**（替代教务录入），并新增 **待评估授课记录** 区块；新增 **草稿箱**（最近三次 + 更多>>）与 `/drafts` 页面（按课程名查询、编辑/提交/删除）；评估页新增 **保存草稿**。侧边栏精简为「工作台 / 草稿箱 / 个人中心」，删除「全校课程库」「课堂评估」等入口。
+> 5. **契约同步**：新增接口 `GET/PUT /sessions/:id/draft`、`GET /drafts`、`DELETE /drafts/:id`、`POST /drafts/:id/submit`；`GET /dashboard` 督导 DTO 改为 `recentPlans + recentDrafts`；`PlanItem` 新增 `sessionId`；seed 扩充为多教师/多课程/多记录且 AI 评分覆盖五维。
+>
+> 详细页面规格见 [`前端设计-new.md`](./前端设计-new.md) §3、§5；接口契约见 [`backend_AGENTS.md`](./backend_AGENTS.md) §8。
+
+---
+
 ## 1. 项目背景
 
 「爱教学」是面向高校（参考东北大学教学管理场景）的**教学质量全链路数字化管理平台**，产品愿景为"让教学质量持续可测"，走三阶进化路线：
@@ -349,8 +363,10 @@ aijiaoxue-web/
 | `/courses/:id/improve` | course-improve | CourseImproveView | App | teacher | S2① 新增（S3③ 增强） |
 | `/teachers` | teacher-list | TeacherListView | App | director / supervisor | S2① 新增 |
 | `/teachers/:id` | teacher-detail | TeacherDetailView | App | director / supervisor | S2① 新增 |
-| `/sessions/:id/evaluation` | session-evaluation | SessionEvaluationView | App | supervisor（他人只读） | S2① 新增（S2② 增强） |
-| `/supervision` | supervision | SupervisionView | App | supervisor | S1（S2① 改造为「听评课管理」） |
+| `/sessions/:id/evaluation` | session-evaluation | SessionEvaluationView | App | supervisor（他人只读） | S2① 新增（v1.2 增「保存草稿」） |
+| `/me/quality` | profile-quality | ProfileQualityView | App | teacher | v1.0 新增（v1.2 为教师首页） |
+| `/drafts` | draft-box | DraftBoxView | App | supervisor | v1.2 新增（督导草稿箱） |
+| `/supervision` | supervision | SupervisionView | App | supervisor | S1（v1.2 起从督导菜单摘除，保留后备） |
 | `/profile` | profile | ProfileView | App | 登录 | S1 |
 | `/403` | forbidden | ForbiddenView | Blank | 公开 | S1 |
 | `/:pathMatch(.*)*` | not-found | NotFoundView | Blank | 公开 | S1 |

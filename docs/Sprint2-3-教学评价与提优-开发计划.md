@@ -207,7 +207,7 @@ func Aggregate(items []SessionScore, weights Weights, alpha float64) Summary
 ```
 
 > 🔴 **口径取舍（2026-09 决议）**：**教师级 / 课程级综合分取「综合均值」**——各场次综合分的算术平均。
-> 这保证**教师面板的总分恒等于其各次课总分的平均值**（§8.1 恒等式在任意数据下恒定成立）。用 §3.4 种子数据验证：三次课综合分 58.75 / 70.00 / 82.50，教师级为 **70.42**。
+> 这保证**教师面板的总分恒等于其各次课总分的平均值**（§8.1 恒等式在任意数据下恒定成立）。用 §3.4 种子数据验证：c1 三次课综合分 58.75 / 70.00 / 78.75，教师级为 **69.17**。
 > **默认前提是数据双侧对齐**（每节课督导与智能体都有评价，或缺失模式在各场次一致）：此时维度展示分的加权求和 `Σ w_i × dim_i^level` 与综合均值逐位相等，页面数字自洽。
 > 非对齐数据（部分场次仅单侧评价）下的通用算法本轮**不实现**，后续单独立项；届时必须同时更新本节与 `pkg/scoring`，不得只改代码。
 
@@ -429,49 +429,24 @@ CREATE TABLE `transcripts` (
 
 ### 3.4 演示种子数据（阶段一联调用）
 
-```sql
--- 为 c1（软件项目管理，教师李明 id=2）补 3 次授课记录与评价
-INSERT INTO `teaching_sessions`
-  (`course_id`,`class_id`,`teacher_id`,`session_date`,`period`,`topic`,`status`) VALUES
-(1, 0, 2, '2026-09-12', '3-4 节', '项目立项与章程',     'evaluated'),
-(1, 0, 2, '2026-09-19', '3-4 节', '需求调研与用户故事', 'evaluated'),
-(1, 0, 2, '2026-09-26', '3-4 节', '迭代计划与估点',     'evaluated');
+> ⚠️ **v1.2（2026-09-28）已扩充种子数据**：事实源为 `database/seed.sql`，现覆盖
+> 4 位教师（李明/张华/刘洋/赵磊）、6 门课程、14 次授课，每门课程配同一位督导（陈静），
+> 每次课同时具备督导与智能体两侧、且**两侧均覆盖五维**（智能体不再缺 `objective`，修复雷达图缺角）。
+> 本节仅保留 c1（软件项目管理 · 李明）3 次课的对账基准；全量 14 次课的逐场综合分与教师级均值
+> 由 `pkg/scoring` 单测 `TestSeedDataset*` 锁定（如算法变更需同步重算）。
 
--- 督导（陈静 id=5）评价：3 次，逐次提升以演示"趋势"
-INSERT INTO `evaluations`
-  (`session_id`,`evaluator_type`,`evaluator_id`,`objective_score`,`content_score`,
-   `interaction_score`,`organization_score`,`frontier_score`,`total_score`,
-   `comment`,`highlights`,`improvements`,`suggestions`) VALUES
-(1,'supervisor',5, 4,3,2,3,2, 52.50, '开篇结构完整，但互动偏少。',
-   '课程框架清晰','提问后等待时间不足','增加案例讨论环节'),
-(2,'supervisor',5, 4,4,3,4,3, 70.00, '用户故事讲解透彻，小组讨论有效。',
-   '小组讨论组织得当','个别小组偏离主题','为每组设定明确产出物'),
-(3,'supervisor',5, 5,4,4,4,3, 82.50, '估点练习设计巧妙，学生参与度高。',
-   '练习设计贴近实战','时间略紧','预留 5 分钟总结');
+**c1 对账基准（3 次课，督导 + 智能体双侧五维）**：
 
--- 智能体评价（阶段二启用；objective 恒为 NULL，用于验收"维度可空"的融合逻辑）
-INSERT INTO `evaluations`
-  (`session_id`,`evaluator_type`,`evaluator_id`,`ai_model_version`,
-   `objective_score`,`content_score`,`interaction_score`,`organization_score`,`frontier_score`,
-   `total_score`,`ai_confidence`) VALUES
-(1,'agent',0,'qwen-audio-v1', NULL,4,3,3,3, 60.71, 0.72),
-(2,'agent',0,'qwen-audio-v1', NULL,4,3,4,3, 67.86, 0.68),
-(3,'agent',0,'qwen-audio-v1', NULL,4,4,4,4, 75.00, 0.75);
-```
-
-> **对账基准（可直接用于联调验收）**：
->
 > | 指标 | 第 1 次课 | 第 2 次课 | 第 3 次课 | 教师级汇总 |
 > |------|----------|----------|----------|-----------|
 > | 督导单次总分 | 52.50 | 70.00 | 82.50 | **68.33** |
-> | 智能体单次总分 | 60.71 | 67.86 | 75.00 | **67.86** |
-> | **综合分** | **58.75** | **70.00** | **82.50** | **70.42** |
+> | 智能体单次总分 | 65.00 | 70.00 | 75.00 | **70.00** |
+> | **综合分** | **58.75** | **70.00** | **78.75** | **69.17** |
 >
-> - 三次课综合分逐次上升，趋势折线应呈现**上升**，用于验收 S8.3；
-> - 教师级综合分 70.42 **恰好等于三次课综合分的算术平均**（§2.5.2 的恒等式），若实现后两者不等即为聚合层次写错；
-> - 智能体侧 `objective_score` 恒为 `NULL`，其维度融合自动退化为"只取督导侧"，用于验收该分支；
+> - 教师级综合分 69.17 **恰好等于三次课综合分的算术平均**（§2.5.2 的恒等式），若实现后两者不等即为聚合层次写错；
+> - 智能体侧现覆盖五维；算法**仍保留**「某侧维度为 NULL 时该维度只取另一侧 / 单侧总分权重再归一化」的容错分支（由 `pkg/scoring` 单测覆盖，seed 不再出现缺维）；
 > - `total_score` 仅为展示与排序用，**聚合以维度分为准**；
-> - 第 2 次课督导与智能体在三个共同维度上完全一致，故综合分 70.00 与督导分相同；而智能体单次总分 67.86 是其在**可评的三个维度上重新归一化**的结果，因不含 `objective`（督导独占维度）而略低——**这是预期行为，不是计算错误**。
+> - 全量 14 次课：综合分 58.75 / 70.00 / 78.75 / 73.75 / 78.75 / 85.00 / 45.00 / 70.00 / 66.25 / 82.50 / 58.75 / 88.75 / 61.25 / 78.75；教师级综合分（李明 71.25 / 张华 79.17 / 刘洋 63.75 / 赵磊 73.75）。
 
 ---
 
@@ -519,12 +494,12 @@ INSERT INTO `evaluations`
 ```json
 {
   "teacherId": 2, "teacherName": "李明", "semester": "2026-2027-1",
-  "compositeScore": 70.42,
+  "compositeScore": 69.17,
   "supervisorScore": 68.33,
-  "agentScore": 67.86,
+  "agentScore": 70.00,
   "weights": { "supervisor": 0.5, "agent": 0.5 },
   "dimensions": [
-    { "key": "objective",    "name": "教学目标与内容准确性", "score": 83.33, "supervisorScore": 83.33, "agentScore": null,  "weight": 0.30 },
+    { "key": "objective",    "name": "教学目标与内容准确性", "score": 79.17, "supervisorScore": 83.33, "agentScore": 75.00, "weight": 0.30 },
     { "key": "content",      "name": "内容质量与深度",       "score": 70.83, "supervisorScore": 66.67, "agentScore": 75.00, "weight": 0.30 },
     { "key": "interaction",  "name": "学生互动与参与",       "score": 54.17, "supervisorScore": 50.00, "agentScore": 58.33, "weight": 0.20 },
     { "key": "organization", "name": "课堂组织与节奏",       "score": 66.67, "supervisorScore": 66.67, "agentScore": 66.67, "weight": 0.20 },
@@ -539,8 +514,8 @@ INSERT INTO `evaluations`
 }
 ```
 
-> 该响应与 §3.4 种子数据一一对应，可直接作为联调断言：`compositeScore` = 三次课综合分 `58.75/70.00/82.50` 的算术平均 = **70.42**。
-> 数据双侧对齐时，它也等于维度展示分加权求和 `0.30×83.33 + 0.30×70.83 + 0.20×54.17 + 0.20×66.67 = 70.42`（§2.5.2 的默认前提）。
+> 该响应与 §3.4 种子数据一一对应，可直接作为联调断言：`compositeScore` = c1 三次课综合分 `58.75/70.00/78.75` 的算术平均 = **69.17**。
+> 数据双侧对齐时，它也等于维度展示分加权求和 `0.30×79.17 + 0.30×70.83 + 0.20×54.17 + 0.20×66.67 ≈ 69.17`（§2.5.2 的默认前提）。
 > `sampleSufficient` 以 `evaluatedCount`（已评价场次）为准，不以 `sessionCount` 为准。
 > `frontier` 返回 `weight: 0` 与 `isObservation: true`，前端据此把它渲染为"亮点标记"而非计分维度。
 
@@ -555,7 +530,7 @@ INSERT INTO `evaluations`
       "sessionId": 3, "sessionDate": "2026-09-26", "period": "3-4 节",
       "topic": "迭代计划与估点", "courseId": 1, "courseCode": "SE3101",
       "courseName": "软件项目管理", "status": "evaluated",
-      "compositeScore": 82.50, "supervisorScore": 82.50, "agentScore": 75.00,
+      "compositeScore": 78.75, "supervisorScore": 82.50, "agentScore": 75.00,
       "supervisorEvaluations": [
         { "evaluatorId": 5, "evaluatorName": "陈静", "evaluatorType": "supervisor",
           "formulaVersion": "v1", "objective": 5, "content": 4, "interaction": 4,
@@ -565,7 +540,7 @@ INSERT INTO `evaluations`
           "createdAt": "2026-09-26T10:00:00+08:00", "updatedAt": "2026-09-26T10:00:00+08:00" }
       ],
       "agentEvaluation": { "evaluatorType": "agent", "aiModelVersion": "qwen-audio-v1",
-                           "aiConfidence": 0.75, "totalScore": 75.00 }
+                           "aiConfidence": 0.70, "totalScore": 75.00 }
     }
   ],
   "total": 3, "page": 1, "pageSize": 10
@@ -804,7 +779,7 @@ src/
 | **一致性** | 同一教师，主任端与教师端综合分、各维度分**逐位相同**（由单一聚合函数保证） |
 | 数据范围 | 教师访问 `/teachers/3/evaluation-summary` 返回 40302；主任访问他室教师同样 40302 |
 | 算法 | §2.4 验算例返回 **82.50**；§2.5.5 五种缺失组合全部有断言 |
-| 恒等式 | 教师级综合分 ≡ 其各次课综合分的算术平均（§2.5.2 综合均值口径，**任意数据下恒定成立**）；用 §3.4 种子数据对账应为 **70.42** |
+| 恒等式 | 教师级综合分 ≡ 其各次课综合分的算术平均（§2.5.2 综合均值口径，**任意数据下恒定成立**）；用 §3.4 种子数据对账 c1 应为 **69.17** |
 | 维度必填 | 督导 `PUT /sessions/:id/supervisor-evaluation` 五维缺一返回 **40002**；缺维度不得落库 |
 | 样本量 | `sampleSufficient` 以 `evaluatedCount`（已评价场次）为准；有课未评时综合分为 `null` 且 `no_data` |
 | 错误码 | `40002` 的 HTTP 状态必须是 **400**（不得落 500）；`pkg/errcode` 表驱动单测锁定 |

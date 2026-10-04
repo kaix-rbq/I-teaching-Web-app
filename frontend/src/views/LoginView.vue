@@ -3,7 +3,7 @@ import { onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import type { FormInstance, FormRules } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
-import { ROLES } from '@/constants'
+import { defaultRouteName, EVALUATION_DIMENSIONS, ROLES } from '@/constants'
 import type { Role } from '@/types/user'
 
 const route = useRoute()
@@ -45,7 +45,7 @@ async function redirectAfterLogin(): Promise<void> {
   if (typeof redirect === 'string' && redirect) {
     await router.replace(redirect)
   } else {
-    await router.replace({ name: 'dashboard' })
+    await router.replace({ name: defaultRouteName(auth.role) })
   }
 }
 
@@ -118,6 +118,14 @@ async function handleDemoLogin(role: Role): Promise<void> {
             <circle cx="67.1" cy="145.3" r="3" />
             <circle cx="49.8" cy="83.7" r="3" />
           </g>
+          <!-- 五维维度名称：与评分体系同源（顺序对应上方五个顶点） -->
+          <g class="login__radar-labels">
+            <text x="100" y="12">{{ EVALUATION_DIMENSIONS[0].shortName }}</text>
+            <text x="180" y="72">{{ EVALUATION_DIMENSIONS[1].shortName }}</text>
+            <text x="150" y="180">{{ EVALUATION_DIMENSIONS[2].shortName }}</text>
+            <text x="50" y="180">{{ EVALUATION_DIMENSIONS[3].shortName }}</text>
+            <text x="20" y="72">{{ EVALUATION_DIMENSIONS[4].shortName }}</text>
+          </g>
         </svg>
 
         <div class="login__narration" aria-live="polite">
@@ -127,13 +135,6 @@ async function handleDemoLogin(role: Role): Promise<void> {
             </span>
           </transition>
         </div>
-
-        <ul class="login__roles">
-          <li v-for="role in ROLES" :key="role.value" class="login__role">
-            <span class="login__role-dot" :style="{ backgroundColor: role.color }" />
-            <span>{{ role.label }} · {{ role.value }}</span>
-          </li>
-        </ul>
       </div>
     </section>
 
@@ -274,6 +275,13 @@ async function handleDemoLogin(role: Role): Promise<void> {
       stroke: var(--color-ink);
       stroke-width: 1;
     }
+
+    &-labels text {
+      font-size: 9px;
+      letter-spacing: 0.5px;
+      fill: rgb(220 231 245 / 82%);
+      text-anchor: middle;
+    }
   }
 
   &__narration {
@@ -288,28 +296,6 @@ async function handleDemoLogin(role: Role): Promise<void> {
       letter-spacing: 1px;
       color: rgb(220 231 245 / 88%);
     }
-  }
-
-  &__roles {
-    display: flex;
-    flex-direction: column;
-    gap: var(--spacing-3);
-    margin-top: var(--spacing-7);
-  }
-
-  &__role {
-    display: flex;
-    align-items: center;
-    gap: var(--spacing-2);
-    font-size: var(--font-size-base);
-    color: rgb(255 255 255 / 90%);
-  }
-
-  &__role-dot {
-    width: 8px;
-    height: 8px;
-    background-color: var(--color-bg-card);
-    border-radius: 50%;
   }
 
   &__form-side {

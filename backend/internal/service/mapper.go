@@ -82,6 +82,8 @@ func toPlanItems(rows []repository.PlanRow) []dto.PlanItem {
 			SupervisorName: row.SupervisorName,
 			PlannedDate:    row.PlannedDate.Format("2006-01-02"),
 			Status:         row.Status,
+			SessionID:      row.SessionID,
+			Evaluated:      row.Evaluated,
 		})
 	}
 	return out
@@ -119,6 +121,26 @@ func toSessionListItems(rows []repository.SessionListRow) []dto.SessionListItem 
 			SupervisorScore: round2Ptr(row.SupervisorTotal),
 			AgentScore:      round2Ptr(row.AgentTotal),
 			EvaluationCount: row.EvaluationCount,
+		})
+	}
+	return out
+}
+
+// toPendingSessionItems 映射「待评估授课记录」列表。
+func toPendingSessionItems(rows []repository.PendingSessionRow) []dto.PendingSessionItem {
+	out := make([]dto.PendingSessionItem, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, dto.PendingSessionItem{
+			SessionID:   row.ID,
+			CourseID:    row.CourseID,
+			CourseCode:  row.CourseCode,
+			CourseName:  row.CourseName,
+			TeacherID:   row.TeacherID,
+			TeacherName: row.TeacherName,
+			SessionDate: row.SessionDate.Format("2006-01-02"),
+			Period:      row.Period,
+			Topic:       row.Topic,
+			Status:      row.Status,
 		})
 	}
 	return out

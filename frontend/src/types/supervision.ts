@@ -8,6 +8,10 @@ export interface SupervisionPlan {
   supervisorName: string
   plannedDate: string
   status: SupervisionStatus
+  /** 关联授课记录（null = 尚未创建，需先创建再评估） */
+  sessionId: number | null
+  /** 关联授课记录是否已完成督导评价（决定是否暴露评估入口） */
+  evaluated: boolean
 }
 
 export interface DepartmentCoverage {
@@ -49,4 +53,8 @@ export interface DashboardData {
   plans?: SupervisionPlan[]
   coverage?: CoverageStat | null
   recentResources?: import('./resource').Resource[]
+  /** 督导工作台「草稿箱」区块：最近创建的草稿 */
+  recentDrafts?: import('./draft').DraftDTO[]
+  /** 督导工作台「待评估授课记录」：手动新增或尚未评价的授课记录 */
+  pendingSessions?: import('./evaluation').PendingSessionItem[]
 }

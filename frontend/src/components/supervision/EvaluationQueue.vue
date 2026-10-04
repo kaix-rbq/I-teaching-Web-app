@@ -1,15 +1,16 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import dayjs from 'dayjs'
 import type { SupervisionPlan } from '@/types/supervision'
 import { formatDate } from '@/utils/format'
 import EmptyState from '@/components/common/EmptyState.vue'
 
 /**
- * 督导待评课队列（《前端设计-new》§5.3 / §5.4）——「下一步该评哪节课」无需思考。
- * 按今日 / 本周 / 更早 / 已完成分组。
- * 已知数据缺口：supervision_plans 与 teaching_sessions 无外键关联，
- * 计划行无法直达评估页，故主动作为「创建授课记录并评估」（父级实现 POST /sessions 流）。
+ * 督导待评课队列（工作台核心组件）。
+ * 通过「今日 / 本周 / 本月 / 未评」按钮切换卡片内容：
+ *   - 评估入口按授课日期闸门控制：**未来课次仅预览（不开放评估）**；
+ *     到达/超过授课日期后自动暴露「去评估」（未建档则「创建授课记录并评估」）；
+ *   - 「未评」专门列出**已过授课日期且尚未评价**的记录（不含今日），便于补录过去课程评分。
  */
 const props = withDefaults(
   defineProps<{
@@ -21,84 +22,130 @@ const props = withDefaults(
 
 const emit = defineEmits<{
   create: [plan: SupervisionPlan]
-  'view-course': [plan: SupervisionPlan]
+  view: [plan: SupervisionPlan]
+  evaluate: [plan: SupervisionPlan]
 }>()
 
-interface QueueGroup {
-  key: string
-  title: string
-  items: SupervisionPlan[]
-}
+type RangeKey = 'day' | 'week' | 'month' | 'pending'
 
-const groups = computed<QueueGroup[]>(() => {
+const range = ref<RangeKey>('day')
+
+const RANGES: { key: RangeKey; label: string }[] = [
+  { key: 'day', label: '今日' },
+  { key: 'week', label: '本周' },
+  { key: 'month', label: '本月' },
+  { key: 'pending', label: '未评' }
+]
+
+const rangedPlans = computed<SupervisionPlan[]>(() => {
   const today = dayjs()
-  const pending = props.plans.filter((item) => item.status === 'planned')
-  const done = props.plans.filter((item) => item.status === 'completed')
-
-  const ofToday = pending.filter((item) => dayjs(item.plannedDate).isSame(today, 'day'))
-  const rest = pending.filter((item) => !dayjs(item.plannedDate).isSame(today, 'day'))
-  const ofThisWeek = rest.filter((item) => dayjs(item.plannedDate).isSame(today, 'week'))
-  const earlier = rest.filter((item) => !dayjs(item.plannedDate).isSame(today, 'week'))
-
-  const sortByDate = (list: SupervisionPlan[]): SupervisionPlan[] =>
-    [...list].sort((a, b) => dayjs(a.plannedDate).valueOf() - dayjs(b.plannedDate).valueOf())
-
-  return [
-    { key: 'today', title: '今日待评', items: sortByDate(ofToday) },
-    { key: 'week', title: '本周待评', items: sortByDate(ofThisWeek) },
-    { key: 'earlier', title: '更早计划', items: sortByDate(earlier) },
-    { key: 'done', title: '已完成', items: sortByDate(done).reverse() }
-  ].filter((group) => group.items.length > 0)
+  return props.plans
+    .filter((plan) => {
+      const date = dayjs(plan.plannedDate)
+      if (range.value === 'day') return date.isSame(today, 'day')
+      if (range.value === 'week') return date.isSame(today, 'week')
+      if (range.value === 'month') return date.isSame(today, 'month')
+      // 未评：已过授课日期（严格早于今天，不与「今日」重合）且尚未评估
+      return date.isBefore(today, 'day') && !plan.evaluated
+    })
+    .sort((a, b) => dayjs(a.plannedDate).valueOf() - dayjs(b.plannedDate).valueOf())
 })
 
-const pendingCount = computed(() => props.plans.filter((item) => item.status === 'planned').length)
+const pendingCount = computed(
+  () => rangedPlans.value.filter((item) => !item.evaluated).length
+)
+
+const emptyText = computed(() => {
+  if (range.value === 'pending') return '暂无已过日期且未评课的记录'
+  return `${RANGES.find((r) => r.key === range.value)?.label}暂无听评课安排`
+})
+
+/** 授课日期是否已到达/超过（date <= 今天）——未来课程不开放评估入口 */
+function isReached(plan: SupervisionPlan): boolean {
+  return !dayjs(plan.plannedDate).isAfter(dayjs(), 'day')
+}
+
+function isFuture(plan: SupervisionPlan): boolean {
+  return dayjs(plan.plannedDate).isAfter(dayjs(), 'day')
+}
+
+/** 到达/超过授课日期且未评估：暴露「去评估」入口（未来课次仅预览） */
+function canEvaluateEntry(plan: SupervisionPlan): boolean {
+  return isReached(plan) && !plan.evaluated
+}
+
+/** 无授课记录时先创建再评估；已有记录直接进入评估页 */
+function handleEvaluateClick(plan: SupervisionPlan): void {
+  if (plan.sessionId === null) {
+    emit('create', plan)
+  } else {
+    emit('evaluate', plan)
+  }
+}
+
+function canView(plan: SupervisionPlan): boolean {
+  return plan.evaluated && plan.sessionId !== null
+}
 </script>
 
 <template>
   <div class="evaluation-queue">
+    <div class="evaluation-queue__tabs">
+      <button
+        v-for="item in RANGES"
+        :key="item.key"
+        type="button"
+        class="evaluation-queue__tab"
+        :class="{ 'evaluation-queue__tab--active': range === item.key }"
+        @click="range = item.key"
+      >
+        {{ item.label }}
+      </button>
+      <span class="evaluation-queue__summary">待评 {{ pendingCount }} 条</span>
+    </div>
+
     <el-skeleton v-if="loading" :rows="5" animated />
 
-    <template v-else-if="groups.length">
-      <p class="evaluation-queue__summary">
-        共 {{ pendingCount }} 条待评计划 · 下一步动作已按日期排好
-      </p>
+    <template v-else-if="rangedPlans.length">
+      <ul class="evaluation-queue__list">
+        <li v-for="plan in rangedPlans" :key="plan.id" class="evaluation-queue__item">
+          <span class="evaluation-queue__date">
+            {{ formatDate(plan.plannedDate, 'MM-DD') }}
+          </span>
+          <span class="evaluation-queue__course" :title="plan.courseName">
+            {{ plan.courseName }}
+          </span>
+          <span class="evaluation-queue__teacher">{{ plan.teacherName }}</span>
+          <el-tag
+            class="evaluation-queue__status"
+            size="small"
+            :type="plan.evaluated ? 'success' : isFuture(plan) ? 'info' : 'warning'"
+            effect="plain"
+          >
+            {{ plan.evaluated ? '已评估' : isFuture(plan) ? '未开始' : '待评估' }}
+          </el-tag>
 
-      <section v-for="group in groups" :key="group.key" class="evaluation-queue__group">
-        <h4 class="evaluation-queue__group-title">
-          {{ group.title }}
-          <span class="evaluation-queue__count">{{ group.items.length }}</span>
-        </h4>
-
-        <ul class="evaluation-queue__list">
-          <li v-for="plan in group.items" :key="plan.id" class="evaluation-queue__item">
-            <span class="evaluation-queue__date">
-              {{ formatDate(plan.plannedDate, 'MM-DD') }}
+          <span class="evaluation-queue__actions">
+            <el-button
+              v-if="canEvaluateEntry(plan)"
+              size="small"
+              type="primary"
+              @click="handleEvaluateClick(plan)"
+            >
+              去评估
+            </el-button>
+            <el-button v-else-if="canView(plan)" size="small" text type="primary" @click="emit('view', plan)">
+              查看授课记录
+            </el-button>
+            <span v-else-if="isFuture(plan)" class="evaluation-queue__preview">
+              未到授课日期 · 仅预览
             </span>
-            <span class="evaluation-queue__course" :title="plan.courseName">
-              {{ plan.courseName }}
-            </span>
-            <span class="evaluation-queue__teacher">{{ plan.teacherName }}</span>
-
-            <span class="evaluation-queue__actions">
-              <el-button
-                v-if="plan.status === 'planned'"
-                size="small"
-                type="primary"
-                plain
-                @click="emit('create', plan)"
-              >
-                创建授课记录并评估
-              </el-button>
-              <el-button v-else size="small" text type="primary" @click="emit('view-course', plan)">
-                查看授课记录
-              </el-button>
-            </span>
-          </li>
-        </ul>
-      </section>
+          </span>
+        </li>
+      </ul>
     </template>
 
-    <EmptyState v-else description="本学期暂无听课计划，可前往课堂评估页排期" />
+    <EmptyState v-else :description="emptyText" />
   </div>
 </template>
 
@@ -106,29 +153,39 @@ const pendingCount = computed(() => props.plans.filter((item) => item.status ===
 .evaluation-queue {
   width: 100%;
 
-  &__summary {
-    margin-bottom: var(--spacing-3);
-    font-size: var(--font-size-xs);
-    color: var(--color-text-tertiary);
+  &__tabs {
+    display: flex;
+    gap: var(--spacing-2);
+    align-items: center;
+    margin-bottom: var(--spacing-4);
   }
 
-  &__group {
-    &-title {
-      display: flex;
-      gap: var(--spacing-2);
-      align-items: center;
-      margin: var(--spacing-4) 0 var(--spacing-2);
-      font-size: var(--font-size-sm);
-      color: var(--color-text-secondary);
+  &__tab {
+    padding: 4px 14px;
+    font-size: var(--font-size-sm);
+    color: var(--color-text-secondary);
+    cursor: pointer;
+    background-color: var(--color-bg-page);
+    border: 1px solid var(--color-divider);
+    border-radius: 999px;
+    transition: all var(--duration-fast) ease;
+
+    &:hover {
+      color: var(--color-primary);
+    }
+
+    &--active {
+      font-weight: 600;
+      color: #ffffff;
+      background-color: var(--color-primary);
+      border-color: var(--color-primary);
     }
   }
 
-  &__count {
-    padding: 0 6px;
+  &__summary {
+    margin-left: auto;
     font-size: var(--font-size-xs);
     color: var(--color-text-tertiary);
-    background-color: var(--color-bg-page);
-    border-radius: 999px;
   }
 
   &__list {
@@ -141,7 +198,7 @@ const pendingCount = computed(() => props.plans.filter((item) => item.status ===
     display: flex;
     gap: var(--spacing-3);
     align-items: center;
-    padding: var(--spacing-2) var(--spacing-3);
+    padding: var(--spacing-3);
     background-color: var(--color-bg-page);
     border-radius: var(--radius-md);
     transition: box-shadow var(--duration-fast) ease;
@@ -173,7 +230,7 @@ const pendingCount = computed(() => props.plans.filter((item) => item.status ===
 
   &__teacher {
     flex-shrink: 0;
-    max-width: 160px;
+    max-width: 140px;
     overflow: hidden;
     font-size: var(--font-size-sm);
     color: var(--color-text-tertiary);
@@ -181,11 +238,21 @@ const pendingCount = computed(() => props.plans.filter((item) => item.status ===
     text-overflow: ellipsis;
   }
 
+  &__status {
+    flex-shrink: 0;
+  }
+
   &__actions {
     display: flex;
     flex-shrink: 0;
     gap: var(--spacing-2);
+    align-items: center;
     margin-left: auto;
+  }
+
+  &__preview {
+    font-size: var(--font-size-xs);
+    color: var(--color-text-tertiary);
   }
 }
 </style>

@@ -670,3 +670,92 @@ func TestTeacherEvaluationsTimeline(t *testing.T) {
 		assert.Equal(t, errcode.ForbiddenData, errcode.From(aerr).Code)
 	})
 }
+
+// TestDraftService 覆盖督导评估草稿：部分维度可保存、提交需五维齐全、提交成功后删除草稿。
+func TestDraftService(t *testing.T) {
+	ctx := context.Background()
+	u8 := func(v uint8) *uint8 { return &v }
+	i := func(v int) *int { return &v }
+
+	newSvc := func(row *repository.DraftListRow) (DraftService, *fakeDraftRepo) {
+		var saved *model.EvaluationDraft
+		drafts := &fakeDraftRepo{
+			upsert: func(_ context.Context, d *model.EvaluationDraft) error {
+				d.ID = 9
+				saved = d
+				return nil
+			},
+			getBySession: func(_ context.Context, _, _ uint64) (*model.EvaluationDraft, error) {
+				if saved == nil {
+					return nil, gorm.ErrRecordNotFound
+				}
+				return saved, nil
+			},
+			getByID: func(_ context.Context, id, supervisorID uint64) (*repository.DraftListRow, error) {
+				if row == nil {
+					return nil, gorm.ErrRecordNotFound
+				}
+				clone := *row
+				clone.ID = id
+				clone.SupervisorID = supervisorID
+				return &clone, nil
+			},
+			delete: func(context.Context, uint64, uint64) error { return nil },
+		}
+		sessions := NewSessionService(
+			&fakeSessionRepo{
+				getDetail: func(context.Context, uint64) (*repository.SessionDetailRow, error) {
+					return sessionRow(), nil
+				},
+				updateStatus: func(context.Context, uint64, string) error { return nil },
+			},
+			&fakeEvalRepo{
+				upsert: func(context.Context, *model.Evaluation) error { return nil },
+				listBySession: func(_ context.Context, sessionID uint64) ([]repository.EvaluationRow, error) {
+					return []repository.EvaluationRow{{Evaluation: model.Evaluation{
+						SessionID: sessionID, EvaluatorType: model.EvaluatorSupervisor, EvaluatorID: 5,
+					}}}, nil
+				},
+			},
+			&fakeCourseRepo{}, &fakeUserRepo{}, evalCfg())
+		return NewDraftService(drafts, sessions), drafts
+	}
+
+	t.Run("保存草稿允许部分维度为空", func(t *testing.T) {
+		svc, _ := newSvc(nil)
+		out, err := svc.Save(ctx, 5, 7, dto.DraftUpsertReq{Content: i(4), Comment: "先写一半"})
+		require.NoError(t, err)
+		require.NotNil(t, out)
+		require.Nil(t, out.Objective)
+		require.NotNil(t, out.Content)
+		assert.Equal(t, 4, *out.Content)
+	})
+
+	t.Run("无草稿时返回 nil 而非错误", func(t *testing.T) {
+		svc, _ := newSvc(nil)
+		out, err := svc.GetBySession(ctx, 5, 7)
+		require.NoError(t, err)
+		assert.Nil(t, out)
+	})
+
+	t.Run("提交未满五维的草稿返回 40002 且保留草稿", func(t *testing.T) {
+		row := &repository.DraftListRow{EvaluationDraft: model.EvaluationDraft{SessionID: 7, ContentScore: u8(4)}}
+		svc, drafts := newSvc(row)
+		_, err := svc.Submit(ctx, 5, 9)
+		require.Error(t, err)
+		assert.Equal(t, errcode.BizRule, errcode.From(err).Code)
+		assert.Equal(t, uint64(0), drafts.deletedID, "维度不全时不得删除草稿")
+	})
+
+	t.Run("提交五维齐全草稿成功并删除", func(t *testing.T) {
+		row := &repository.DraftListRow{EvaluationDraft: model.EvaluationDraft{
+			SessionID: 7, ObjectiveScore: u8(4), ContentScore: u8(4),
+			InteractionScore: u8(3), OrganizationScore: u8(4), FrontierScore: u8(3),
+		}}
+		svc, drafts := newSvc(row)
+		out, err := svc.Submit(ctx, 5, 9)
+		require.NoError(t, err)
+		require.NotNil(t, out)
+		assert.Equal(t, uint64(9), drafts.deletedID, "提交成功后必须删除草稿")
+	})
+}

@@ -7,19 +7,19 @@ import AiBadge from '@/components/common/AiBadge.vue'
 import QualityBadge from '@/components/common/QualityBadge.vue'
 import QualityCompass from '@/components/evaluation/QualityCompass.vue'
 import ScoreDimensionsCard from '@/components/evaluation/ScoreDimensionsCard.vue'
-import EvaluationTimeline from '@/components/evaluation/EvaluationTimeline.vue'
 import { fetchTeacherEvaluationsApi, fetchTeacherSummaryApi } from '@/api/teacher'
-import { fetchAgentSuggestionsApi } from '@/api/agent'
 import { useAuthStore } from '@/stores/auth'
 import { useSemester } from '@/composables/useSemester'
 import { scoreTone, scoreToneColor } from '@/utils/format'
-import type { AgentSuggestion } from '@/types/agent'
 import type { TeacherSummary, TeacherTimelineItem } from '@/types/teacher'
 
 /**
- * 我的质量档案（教师「质量主页」，《前端设计-new》§5.7）。
- * 数据全部来自教师查本人接口（后端已裁剪，无他人数据）；只读。
- * 顶栏全局学期口径驱动（useSemester），与质量驾驶舱同源。
+ * 我的质量档案（教师首页，替代原「质量驾驶舱」，避免信息重复）。
+ * 数据全部来自教师查本人接口；只读。
+ *   - 顶部三卡：综合分 / 五维评分 / 提优分析；
+ *   - 我的课程评分明细；
+ *   - 授课快照：逐次授课卡片化，按质量水平标注亮点或不足。
+ * 「全部评价流」「AI 提优建议摘要」已移除：评价信息与具体授课记录绑定，避免信息混乱。
  */
 const router = useRouter()
 const auth = useAuthStore()
@@ -27,10 +27,7 @@ const { semester } = useSemester()
 
 const summary = ref<TeacherSummary | null>(null)
 const timeline = ref<TeacherTimelineItem[]>([])
-const suggestions = ref<AgentSuggestion[]>([])
 const loading = ref(true)
-const timelineLoading = ref(false)
-const suggestionsLoading = ref(false)
 const error = ref(false)
 
 const FLAG_TEXT: Record<string, string> = {
@@ -42,13 +39,20 @@ const FLAG_TEXT: Record<string, string> = {
 
 const flags = computed(() => summary.value?.flags ?? [])
 
-const courseNameById = computed(() => {
-  const map = new Map<number, string>()
-  for (const course of summary.value?.courses ?? []) {
-    map.set(course.courseId, course.courseName)
-  }
-  return map
-})
+/**
+ * 提优分析（预留 AI 接口，当前为示例文本）。
+ * 未来由 AI 综合历次授课记录与评价信息生成；接口就绪前展示示例内容。
+ */
+const improveAnalysis = {
+  directions: [
+    '学生互动维度相对偏弱：有效提问比例不足，提问后等待时间偏短，学生回应多为简单附和。',
+    '内容深度可再加强：真实项目案例偏少，知识点与行业前沿的结合不够自然。'
+  ],
+  suggestions: [
+    '提问后保持 3-5 秒沉默，把「自问自答」改为「点名学生 + 追问一层」，可在每节课挑 2-3 个关键节点刻意练习。',
+    '每个核心知识点配 1 个近两年的行业案例，并让学生判断「如果是你会怎么做」，把内容深度与互动一起带起来。'
+  ]
+}
 
 /** 数字一致性铁律：直接展示后端值，不做前端四舍五入 */
 function formatScore(score: number | null | undefined): string {
@@ -75,7 +79,6 @@ async function load(): Promise<void> {
   }
   loading.value = false
 
-  timelineLoading.value = true
   try {
     const page = await fetchTeacherEvaluationsApi(id, {
       semester: semester.value || undefined,
@@ -84,30 +87,37 @@ async function load(): Promise<void> {
     timeline.value = page.list
   } catch {
     timeline.value = []
-  } finally {
-    timelineLoading.value = false
-  }
-
-  // AI 提优建议摘要：跨课程聚合，按时间倒序取 3 条（阶段③，当前为演示数据）
-  suggestionsLoading.value = true
-  try {
-    const courses = summary.value?.courses ?? []
-    const grouped = await Promise.all(
-      courses.map((course) => fetchAgentSuggestionsApi(course.courseId).catch(() => [] as AgentSuggestion[]))
-    )
-    suggestions.value = grouped
-      .flat()
-      .sort((a, b) => (a.sessionDate < b.sessionDate ? 1 : -1))
-      .slice(0, 3)
-  } catch {
-    suggestions.value = []
-  } finally {
-    suggestionsLoading.value = false
   }
 }
 
 function goImprove(courseId: number): void {
   void router.push({ name: 'course-improve', params: { id: courseId } })
+}
+
+/* ===== 授课快照：按质量水平标注亮点或主要不足 ===== */
+
+function scoreColor(item: TeacherTimelineItem): string {
+  return scoreToneColor(scoreTone(item.compositeScore))
+}
+
+function isHighScore(item: TeacherTimelineItem): boolean {
+  const tone = scoreTone(item.compositeScore)
+  return tone === 4 || tone === 5
+}
+
+function isLowScore(item: TeacherTimelineItem): boolean {
+  const tone = scoreTone(item.compositeScore)
+  return tone === 1 || tone === 2 || tone === 3
+}
+
+function snapshotHighlights(item: TeacherTimelineItem): string {
+  const sup = item.supervisorEvaluations?.[0]
+  return sup?.highlights || item.agentEvaluation?.highlights || ''
+}
+
+function snapshotImprovements(item: TeacherTimelineItem): string {
+  const sup = item.supervisorEvaluations?.[0]
+  return sup?.improvements || item.agentEvaluation?.improvements || ''
 }
 
 onMounted(() => {
@@ -143,37 +153,11 @@ watch(semester, () => {
     </EmptyState>
 
     <template v-else>
-      <!-- 三卡横排：我的综合分 | 五维雷达 | 本学期样本 -->
+      <!-- 三卡横排：我的综合分 | 五维雷达 | 提优分析 -->
       <section class="my-quality__top">
         <div class="my-quality__card">
           <h2 class="my-quality__card-title">我的综合分</h2>
           <QualityCompass :summary="summary" size="lg" />
-        </div>
-
-        <div class="my-quality__card">
-          <ScoreDimensionsCard :summary="summary" />
-        </div>
-
-        <div class="my-quality__card">
-          <h2 class="my-quality__card-title">本学期样本</h2>
-          <dl class="my-quality__facts">
-            <div>
-              <dt>被评次数</dt>
-              <dd class="tabular-nums">{{ summary.sample.evaluatedCount }} 次</dd>
-            </div>
-            <div>
-              <dt>评价来源</dt>
-              <dd class="tabular-nums">督导 {{ summary.sample.supervisorCount }} · AI {{ summary.sample.agentCount }}</dd>
-            </div>
-            <div>
-              <dt>双源对齐</dt>
-              <dd class="tabular-nums">{{ summary.sample.alignedCount }} 场</dd>
-            </div>
-            <div>
-              <dt>口径版本</dt>
-              <dd>{{ summary.formulaVersion || '—' }}</dd>
-            </div>
-          </dl>
           <div v-if="flags.length" class="my-quality__flags">
             <el-alert
               v-for="flag in flags"
@@ -184,8 +168,38 @@ watch(semester, () => {
               show-icon
             />
           </div>
-          <p v-else class="my-quality__caliber-ok">样本与口径无异常提示</p>
-          <p class="my-quality__hint">进步幅度将在历史数据齐备后提供。</p>
+        </div>
+
+        <div class="my-quality__card">
+          <ScoreDimensionsCard :summary="summary" />
+        </div>
+
+        <div class="my-quality__card my-quality__card--ai">
+          <h2 class="my-quality__card-title">
+            提优分析
+            <el-tag size="small" effect="plain" round>AI · 示例</el-tag>
+          </h2>
+          <div class="my-quality__analysis">
+            <section class="my-quality__analysis-block">
+              <h3 class="my-quality__analysis-title">可提优方向</h3>
+              <ul class="my-quality__analysis-list">
+                <li v-for="(text, index) in improveAnalysis.directions" :key="`dir-${index}`">
+                  {{ text }}
+                </li>
+              </ul>
+            </section>
+            <section class="my-quality__analysis-block">
+              <h3 class="my-quality__analysis-title">提优建议</h3>
+              <ul class="my-quality__analysis-list">
+                <li v-for="(text, index) in improveAnalysis.suggestions" :key="`sug-${index}`">
+                  {{ text }}
+                </li>
+              </ul>
+            </section>
+          </div>
+          <p class="my-quality__analysis-hint">
+            <AiBadge text="AI 生成" /> 综合历次授课记录与评价信息生成，当前为示例内容，接口就绪后自动刷新。
+          </p>
         </div>
       </section>
 
@@ -226,52 +240,62 @@ watch(semester, () => {
         <p v-else class="my-quality__muted">本学期暂无课程评分</p>
       </section>
 
-      <!-- 全部评价流 -->
+      <!-- 授课快照：逐次授课卡片，颜色对应质量水平，标注亮点或不足 -->
       <section class="my-quality__block">
-        <h2 class="my-quality__title">全部评价流</h2>
-        <EvaluationTimeline :items="timeline" :loading="timelineLoading" empty-text="本学期暂无评价记录" />
-      </section>
-
-      <!-- AI 提优建议摘要（阶段③；当前为演示数据） -->
-      <section class="my-quality__block">
-        <h2 class="my-quality__title">
-          AI 提优建议摘要
-          <el-tag size="small" effect="plain" round>阶段③ · 演示数据</el-tag>
-        </h2>
-        <el-skeleton v-if="suggestionsLoading" :rows="3" animated />
-        <template v-else>
-          <ul v-if="suggestions.length" class="my-quality__suggestions">
-            <li
-              v-for="suggestion in suggestions"
-              :key="suggestion.id"
-              class="my-quality__suggestion"
-            >
-              <div class="my-quality__suggestion-head">
-                <AiBadge text="AI 建议" />
-                <span class="my-quality__suggestion-date tabular-nums">{{ suggestion.sessionDate }}</span>
-                <span class="my-quality__suggestion-course">
-                  {{ courseNameById.get(suggestion.courseId) || `课程 #${suggestion.courseId}` }}
-                  <template v-if="suggestion.topic"> · {{ suggestion.topic }}</template>
-                </span>
-                <span class="my-quality__suggestion-confidence">
-                  置信 {{ Math.round(suggestion.confidence * 100) }}%
+        <h2 class="my-quality__title">授课快照</h2>
+        <div v-if="timeline.length" class="my-quality__snapshots">
+          <article
+            v-for="item in timeline"
+            :key="item.sessionId"
+            class="my-quality__snapshot"
+            :style="{ '--snapshot-color': scoreColor(item) }"
+          >
+            <header class="my-quality__snapshot-head">
+              <div class="my-quality__snapshot-title">
+                <span class="my-quality__snapshot-course">{{ item.courseName }}</span>
+                <span class="my-quality__snapshot-meta">
+                  {{ item.sessionDate }} · {{ item.period || '—' }}
                 </span>
               </div>
-              <p class="my-quality__suggestion-text">{{ suggestion.summary }}</p>
-              <el-button
-                class="my-quality__improve-btn"
-                type="primary"
-                plain
-                size="small"
-                round
-                @click="goImprove(suggestion.courseId)"
-              >
-                进入提优页 →
-              </el-button>
-            </li>
-          </ul>
-          <p v-else class="my-quality__muted">暂无 AI 提优建议（本学期课程尚无智能体评价）</p>
-        </template>
+              <QualityBadge :score="item.compositeScore" />
+            </header>
+            <p class="my-quality__snapshot-topic">{{ item.topic || '未填写主题' }}</p>
+
+            <div class="my-quality__snapshot-score score-num" :style="{ color: scoreColor(item) }">
+              {{ formatScore(item.compositeScore) }}
+            </div>
+
+            <p
+              v-if="isHighScore(item) && snapshotHighlights(item)"
+              class="my-quality__snapshot-note my-quality__snapshot-note--good"
+            >
+              <span class="my-quality__snapshot-tag">亮点</span>
+              {{ snapshotHighlights(item) }}
+            </p>
+            <p
+              v-else-if="isLowScore(item) && snapshotImprovements(item)"
+              class="my-quality__snapshot-note my-quality__snapshot-note--warn"
+            >
+              <span class="my-quality__snapshot-tag">主要不足</span>
+              {{ snapshotImprovements(item) }}
+            </p>
+            <p v-else class="my-quality__snapshot-note my-quality__snapshot-note--muted">
+              {{ item.compositeScore === null ? '该次课暂无评价' : '常规授课，暂无特别标注' }}
+            </p>
+
+            <el-button
+              class="my-quality__improve-btn"
+              type="primary"
+              plain
+              size="small"
+              round
+              @click="goImprove(item.courseId)"
+            >
+              查看课程提优 →
+            </el-button>
+          </article>
+        </div>
+        <p v-else class="my-quality__muted">本学期暂无授课记录</p>
       </section>
     </template>
   </div>
@@ -285,7 +309,7 @@ watch(semester, () => {
 
   &__top {
     display: grid;
-    grid-template-columns: minmax(260px, 1fr) minmax(320px, 1.5fr) minmax(260px, 1fr);
+    grid-template-columns: minmax(260px, 1fr) minmax(320px, 1.5fr) minmax(280px, 1.2fr);
     gap: var(--spacing-4);
     margin-bottom: var(--spacing-4);
 
@@ -306,31 +330,21 @@ watch(semester, () => {
     border: 1px solid var(--color-divider);
     border-radius: var(--radius-lg);
     box-shadow: var(--shadow-card);
+
+    &--ai {
+      background: linear-gradient(180deg, var(--color-ai-bg, #f5f3ff) 0%, var(--color-bg-card) 62%);
+    }
   }
 
   &__card-title {
+    display: flex;
+    gap: var(--spacing-2);
+    align-items: center;
     margin-bottom: var(--spacing-3);
     padding-bottom: var(--spacing-2);
     font-size: var(--font-size-base);
     color: var(--color-text-primary);
     border-bottom: 1px solid var(--color-divider);
-  }
-
-  &__facts {
-    display: flex;
-    flex-direction: column;
-    gap: var(--spacing-3);
-
-    dt {
-      font-size: var(--font-size-xs);
-      color: var(--color-text-tertiary);
-    }
-
-    dd {
-      font-size: var(--font-size-sm);
-      font-weight: 500;
-      color: var(--color-text-primary);
-    }
   }
 
   &__flags {
@@ -340,14 +354,42 @@ watch(semester, () => {
     margin-top: var(--spacing-4);
   }
 
-  &__caliber-ok {
-    margin-top: var(--spacing-4);
-    font-size: var(--font-size-xs);
-    color: var(--color-text-tertiary);
+  &__analysis {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-4);
+    flex: 1;
   }
 
-  &__hint {
-    margin-top: var(--spacing-2);
+  &__analysis-block {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-2);
+  }
+
+  &__analysis-title {
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+    color: var(--color-ai, #6d28d9);
+  }
+
+  &__analysis-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-1);
+    padding-left: 1.1em;
+    margin: 0;
+    font-size: var(--font-size-sm);
+    line-height: 1.7;
+    color: var(--color-text-secondary);
+  }
+
+  &__analysis-hint {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--spacing-1);
+    align-items: center;
+    margin-top: var(--spacing-4);
     font-size: var(--font-size-xs);
     color: var(--color-text-tertiary);
   }
@@ -424,52 +466,105 @@ watch(semester, () => {
     margin-left: auto;
   }
 
-  &__suggestions {
-    display: flex;
-    flex-direction: column;
-    gap: var(--spacing-3);
-    padding: 0;
-    margin: 0;
-    list-style: none;
+  &__snapshots {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: var(--spacing-4);
+
+    @media (max-width: 1024px) {
+      grid-template-columns: 1fr;
+    }
   }
 
-  &__suggestion {
+  &__snapshot {
+    position: relative;
     display: flex;
     flex-direction: column;
     gap: var(--spacing-2);
-    padding: var(--spacing-3) var(--spacing-4);
-    background-color: var(--color-ai-bg);
-    border: 1px dashed var(--color-ai-bright);
-    border-radius: var(--radius-ai, var(--radius-md));
-    box-shadow: var(--shadow-ai, none);
+    padding: var(--spacing-4) var(--spacing-4) var(--spacing-4) var(--spacing-5);
+    overflow: hidden;
+    background-color: var(--color-bg-page);
+    border: 1px solid var(--color-divider);
+    border-radius: var(--radius-lg);
+
+    &::before {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      left: 0;
+      width: 4px;
+      content: '';
+      background-color: var(--snapshot-color);
+    }
   }
 
-  &__suggestion-head {
+  &__snapshot-head {
     display: flex;
-    flex-wrap: wrap;
     gap: var(--spacing-2);
     align-items: center;
-    font-size: var(--font-size-xs);
-    color: var(--color-text-secondary);
+    justify-content: space-between;
   }
 
-  &__suggestion-date {
+  &__snapshot-title {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  &__snapshot-course {
+    overflow: hidden;
+    font-size: var(--font-size-base);
     font-weight: 600;
     color: var(--color-text-primary);
+    white-space: nowrap;
+    text-overflow: ellipsis;
   }
 
-  &__suggestion-course {
-    color: var(--color-text-secondary);
-  }
-
-  &__suggestion-confidence {
-    margin-left: auto;
+  &__snapshot-meta {
+    font-size: var(--font-size-xs);
     color: var(--color-text-tertiary);
   }
 
-  &__suggestion-text {
-    line-height: 1.7;
+  &__snapshot-topic {
+    font-size: var(--font-size-sm);
     color: var(--color-text-secondary);
+  }
+
+  &__snapshot-score {
+    font-size: var(--font-size-score-lg);
+    font-weight: 600;
+    line-height: 1.1;
+  }
+
+  &__snapshot-note {
+    display: flex;
+    gap: var(--spacing-2);
+    align-items: flex-start;
+    font-size: var(--font-size-sm);
+    line-height: 1.6;
+    color: var(--color-text-secondary);
+
+    &--good {
+      color: var(--color-text-secondary);
+    }
+
+    &--warn {
+      color: var(--color-text-secondary);
+    }
+
+    &--muted {
+      color: var(--color-text-tertiary);
+    }
+  }
+
+  &__snapshot-tag {
+    flex-shrink: 0;
+    padding: 1px 8px;
+    font-size: var(--font-size-xs);
+    color: #ffffff;
+    background-color: var(--snapshot-color);
+    border-radius: 999px;
   }
 
   &__muted {

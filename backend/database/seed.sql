@@ -7,6 +7,7 @@ USE `aijiaoxue`;
 
 -- 幂等：重复执行先清空（注意外键顺序）
 SET FOREIGN_KEY_CHECKS = 0;
+TRUNCATE TABLE `evaluation_drafts`;
 TRUNCATE TABLE `evaluations`;
 TRUNCATE TABLE `teaching_sessions`;
 TRUNCATE TABLE `supervision_plans`;
@@ -69,30 +70,49 @@ INSERT INTO `resources` (`course_id`, `name`, `type`, `size`, `file_path`, `uplo
 (3, '第01讲-数据库绪论.pdf',     'pdf',  3145728,  'uploads/3/7d4e-demo-01.pdf', 4, '2026-09-04 16:20:00'),
 (5, '第01讲-机器学习概述.pdf',   'pdf',  4194304,  'uploads/5/9c6f-demo-01.pdf', 6, '2026-09-05 11:00:00');
 
--- 听评课安排（督导：陈静；覆盖 c1/c3/c5 三门已完成的听评）
-INSERT INTO `supervision_plans` (`course_id`, `supervisor_id`, `planned_date`, `status`) VALUES
-(1, 5, '2026-09-12', 'completed'),
-(2, 5, '2026-09-18', 'planned'),
-(3, 5, '2026-09-08', 'completed'),
-(5, 5, '2026-09-10', 'completed'),
-(6, 5, '2026-09-22', 'planned');
+-- 听评课安排（督导：陈静 id=5；一门课程配一位督导）
+--   - completed：已听评课程，关联授课记录后可在工作台直接「查看授课记录」；
+--   - planned 且 planned_date = CURDATE()：出现在工作台「今日」待评队列，可一键创建并评估；
+--   - 本周/本月计划用于演示队列分档（本周/本月不提供一键创建，避免未来日期建记录）。
+INSERT INTO `supervision_plans` (`id`,`course_id`,`supervisor_id`,`planned_date`,`status`) VALUES
+(1, 1, 5, '2026-09-12',                         'completed'),
+(2, 2, 5, CURDATE(),                            'planned'),
+(3, 3, 5, '2026-09-08',                         'completed'),
+(4, 4, 5, CURDATE(),                            'planned'),
+(5, 5, 5, '2026-09-10',                         'completed'),
+(6, 6, 5, DATE_ADD(CURDATE(), INTERVAL 2 DAY),  'planned'),
+(7, 5, 5, DATE_SUB(CURDATE(), INTERVAL 10 DAY), 'planned');
 
 -- ============================================================
 -- Sprint 2.1：授课记录与课堂评价（开发计划 §3.4）
--- 表结构由 migrations/V2 建；此处数据与 §3.4 对账基准一一对应：
---   第 1/2/3 次课督导总分 52.50 / 70.00 / 82.50，教师级 68.33；
---   智能体总分 60.71 / 67.86 / 75.00（objective 恒 NULL，验证维度可空融合）；
---   综合分 58.75 / 70.00 / 82.50，教师级 70.42（= 三次综合分的算术平均）。
+-- 表结构由 migrations/V2 建。本段数据为多教师、多课程、多记录的验收样本：
+--   覆盖 4 位教师（李明/张华/刘洋/赵磊）、6 门课程、14 次授课，每门课程配同一位督导（陈静）；
+--   每次课同时具备督导与智能体两侧评价，且两侧均覆盖五维（智能体 objective 不再留空，
+--   修复雷达图缺角）；单侧总分 = Σ w×dim（w=0.30/0.30/0.20/0.20，frontier 观测项权重 0）。
+--   综合分 = 各场次综合分（α=0.5 双源融合后加权）的算术平均（§2.5.2 恒等式）。
+--   数值由 pkg/scoring 口径离线计算得出，如算法变更需同步重算本段并更新注释。
 -- ============================================================
 
--- 为 c1（软件项目管理，教师李明 id=2）补 3 次授课记录与评价
+-- 授课记录：s1/2/3 c1、s4/5/6 c2、s7/8 c3、s9/10 c4、s11/12 c5、s13/14 c6
+-- plan_id 仅对「来自听评课计划且已完成」的记录回填，供工作台直达评估页。
 INSERT INTO `teaching_sessions`
-  (`course_id`,`class_id`,`teacher_id`,`session_date`,`period`,`topic`,`status`) VALUES
-(1, 0, 2, '2026-09-12', '3-4 节', '项目立项与章程',     'evaluated'),
-(1, 0, 2, '2026-09-19', '3-4 节', '需求调研与用户故事', 'evaluated'),
-(1, 0, 2, '2026-09-26', '3-4 节', '迭代计划与估点',     'evaluated');
+  (`id`,`course_id`,`class_id`,`teacher_id`,`session_date`,`period`,`topic`,`plan_id`,`status`) VALUES
+(1,  1, 0, 2, '2026-09-12', '3-4 节', '项目立项与章程',    1,    'evaluated'),
+(2,  1, 0, 2, '2026-09-19', '3-4 节', '需求调研与用户故事', NULL, 'evaluated'),
+(3,  1, 0, 2, '2026-09-26', '3-4 节', '迭代计划与估点',     NULL, 'evaluated'),
+(4,  2, 0, 3, '2026-09-13', '1-2 节', '进程与线程',         NULL, 'evaluated'),
+(5,  2, 0, 3, '2026-09-20', '1-2 节', '死锁与调度',         NULL, 'evaluated'),
+(6,  2, 0, 3, '2026-09-27', '1-2 节', '内存管理',           NULL, 'evaluated'),
+(7,  3, 0, 4, '2026-09-08', '3-4 节', '关系模型与范式',     3,    'evaluated'),
+(8,  3, 0, 4, '2026-09-15', '3-4 节', 'SQL 与查询优化',     NULL, 'evaluated'),
+(9,  4, 0, 2, '2026-09-17', '5-6 节', '软件生命周期',       NULL, 'evaluated'),
+(10, 4, 0, 2, '2026-09-24', '5-6 节', '需求工程',           NULL, 'evaluated'),
+(11, 5, 0, 6, '2026-09-10', '1-2 节', '监督学习概览',       5,    'evaluated'),
+(12, 5, 0, 6, '2026-09-17', '1-2 节', '模型评估指标',       NULL, 'evaluated'),
+(13, 6, 0, 4, '2026-09-14', '5-6 节', '指令系统',           NULL, 'evaluated'),
+(14, 6, 0, 4, '2026-09-21', '5-6 节', '存储层次',           NULL, 'evaluated');
 
--- 督导（陈静 id=5）评价：3 次，逐次提升以演示"趋势"
+-- 督导评价（陈静 id=5）：五维齐全；total_score 为单侧加权总分
 INSERT INTO `evaluations`
   (`session_id`,`evaluator_type`,`evaluator_id`,`objective_score`,`content_score`,
    `interaction_score`,`organization_score`,`frontier_score`,`total_score`,
@@ -102,13 +122,47 @@ INSERT INTO `evaluations`
 (2,'supervisor',5, 4,4,3,4,3, 70.00, '用户故事讲解透彻，小组讨论有效。',
    '小组讨论组织得当','个别小组偏离主题','为每组设定明确产出物'),
 (3,'supervisor',5, 5,4,4,4,3, 82.50, '估点练习设计巧妙，学生参与度高。',
-   '练习设计贴近实战','时间略紧','预留 5 分钟总结');
+   '练习设计贴近实战','时间略紧','预留 5 分钟总结'),
+(4,'supervisor',5, 5,4,3,4,2, 77.50, '进程模型讲解清晰，课堂节奏平稳。',
+   '概念对比清晰','形成性提问偏少','每讲插入一道课堂小测'),
+(5,'supervisor',5, 4,4,4,4,3, 75.00, '死锁案例生动，学生讨论投入。',
+   '案例贴近操作系统实践','讨论收敛稍慢','为讨论设置明确时限'),
+(6,'supervisor',5, 5,5,4,5,4, 95.00, '内存管理重点突出，练习反馈及时。',
+   '重难点处理到位','节奏偏快','给基础薄弱学生留缓冲'),
+(7,'supervisor',5, 3,3,2,3,2, 45.00, '范式概念铺垫充分，但互动不足。',
+   '概念铺垫完整','课堂互动薄弱','增加小组判断练习'),
+(8,'supervisor',5, 4,4,3,4,3, 70.00, 'SQL 优化讲解到位，示例贴近实战。',
+   '示例贴近实战','学生动手时间不足','安排随堂上机环节'),
+(9,'supervisor',5, 4,3,3,4,2, 62.50, '生命周期串讲完整，学生参与一般。',
+   '脉络清晰','案例略旧','引入近两年项目案例'),
+(10,'supervisor',5, 5,4,4,4,3, 82.50, '需求访谈演练扎实，产出物明确。',
+   '演练设计扎实','组间互评缺失','增加组间互评环节'),
+(11,'supervisor',5, 4,3,2,3,3, 52.50, '监督学习框架清晰，但等待时间偏短。',
+   '知识框架清晰','提问等待时间不足','延长等待至 3-5 秒'),
+(12,'supervisor',5, 5,5,4,4,4, 90.00, '模型评估指标讲解透彻，案例丰富。',
+   '指标讲解透彻','讲授时长偏多','压缩讲授增加练习'),
+(13,'supervisor',5, 4,3,3,3,2, 57.50, '指令系统讲解准确，节奏略快。',
+   '讲解准确','关键推导略快','放慢流水线推导'),
+(14,'supervisor',5, 5,4,4,4,4, 82.50, '存储层次结构清晰，举例恰当。',
+   '层次结构清晰','互动偏少','增加缓存命中问答');
 
--- 智能体评价（阶段二启用；objective 恒为 NULL，用于验收"维度可空"的融合逻辑）
+-- 智能体评价：五维全覆盖（含 objective），用于修复雷达图缺角并验收双源融合
 INSERT INTO `evaluations`
   (`session_id`,`evaluator_type`,`evaluator_id`,`ai_model_version`,
    `objective_score`,`content_score`,`interaction_score`,`organization_score`,`frontier_score`,
    `total_score`,`ai_confidence`) VALUES
-(1,'agent',0,'qwen-audio-v1', NULL,4,3,3,3, 60.71, 0.72),
-(2,'agent',0,'qwen-audio-v1', NULL,4,3,4,3, 67.86, 0.68),
-(3,'agent',0,'qwen-audio-v1', NULL,4,4,4,4, 75.00, 0.75);
+(1,'agent',0,'qwen-audio-v1', 4,4,3,3,3, 65.00, 0.70),
+(2,'agent',0,'qwen-audio-v1', 4,4,3,4,3, 70.00, 0.70),
+(3,'agent',0,'qwen-audio-v1', 4,4,4,4,4, 75.00, 0.70),
+(4,'agent',0,'qwen-audio-v1', 4,4,3,4,3, 70.00, 0.70),
+(5,'agent',0,'qwen-audio-v1', 4,5,4,4,4, 82.50, 0.70),
+(6,'agent',0,'qwen-audio-v1', 4,4,4,4,4, 75.00, 0.70),
+(7,'agent',0,'qwen-audio-v1', 3,3,2,3,3, 45.00, 0.70),
+(8,'agent',0,'qwen-audio-v1', 4,4,3,4,3, 70.00, 0.70),
+(9,'agent',0,'qwen-audio-v1', 4,4,3,4,3, 70.00, 0.70),
+(10,'agent',0,'qwen-audio-v1', 4,5,4,4,4, 82.50, 0.70),
+(11,'agent',0,'qwen-audio-v1', 4,4,3,3,4, 65.00, 0.70),
+(12,'agent',0,'qwen-audio-v1', 4,5,4,5,4, 87.50, 0.70),
+(13,'agent',0,'qwen-audio-v1', 4,4,3,3,3, 65.00, 0.70),
+(14,'agent',0,'qwen-audio-v1', 4,4,4,4,4, 75.00, 0.70);
+

@@ -1,4 +1,5 @@
 import type { Router } from 'vue-router'
+import { defaultRouteName } from '@/constants'
 import { useAuthStore } from '@/stores/auth'
 
 export function setupGuards(router: Router): void {
@@ -14,7 +15,12 @@ export function setupGuards(router: Router): void {
     }
 
     if (auth.isLoggedIn && to.name === 'login') {
-      return { name: 'dashboard' }
+      return { name: defaultRouteName(auth.role) }
+    }
+
+    // 教师端无「质量驾驶舱」：直接落到「我的质量档案」，避免信息重复。
+    if (auth.hasRole('teacher') && to.name === 'dashboard') {
+      return { name: 'profile-quality' }
     }
 
     const roles = to.meta.roles

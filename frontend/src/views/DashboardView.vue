@@ -1,42 +1,82 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import StatCard from '@/components/common/StatCard.vue'
-import CourseCard from '@/components/course/CourseCard.vue'
-import CoverageCard from '@/components/supervision/CoverageCard.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
-import QualityCompass from '@/components/evaluation/QualityCompass.vue'
+import QualityBadge from '@/components/common/QualityBadge.vue'
 import ScoreHeatmap from '@/components/evaluation/ScoreHeatmap.vue'
-import ScoreRadar, { type RadarItem } from '@/components/evaluation/ScoreRadar.vue'
 import EvaluationQueue from '@/components/supervision/EvaluationQueue.vue'
 import { fetchDashboardApi } from '@/api/dashboard'
-import { fetchTeacherScoresApi, fetchTeacherSummaryApi, fetchTeacherEvaluationsApi } from '@/api/teacher'
+import { fetchTeacherScoresApi } from '@/api/teacher'
+import { createSessionApi } from '@/api/session'
+import { fetchCoursesApi } from '@/api/course'
 import { useAuthStore } from '@/stores/auth'
+import { useDictStore } from '@/stores/dict'
 import { useSemester } from '@/composables/useSemester'
 import { EVALUATION_DIMENSIONS, getRoleMeta } from '@/constants'
-import { formatDate, formatDateTime } from '@/utils/format'
-import type { Course } from '@/types/course'
 import type { DashboardData, SupervisionPlan } from '@/types/supervision'
-import type { TeacherScoreItem, TeacherSummary, TeacherTimelineItem } from '@/types/teacher'
+import type { Course } from '@/types/course'
+import type { TeacherScoreItem } from '@/types/teacher'
 
+/**
+ * 工作台 / 质量驾驶舱。
+ *   - 主任：本室质量热力 + 重点关注（质量驾驶舱）；
+ *   - 督导：聚焦「记录课程并评估」的工作台——待评课队列 + 草稿箱。
+ * 教师端不设质量驾驶舱（信息与「我的质量档案」重复），登录后直达质量档案。
+ */
 const router = useRouter()
 const auth = useAuthStore()
+const dict = useDictStore()
 const { semester } = useSemester()
 
 const loading = ref(true)
 const error = ref(false)
 const data = ref<DashboardData | null>(null)
+const creatingPlanId = ref<number | null>(null)
+
+/* 督导：新增授课记录（替代教务系统录入环节） */
+const createVisible = ref(false)
+const createSubmitting = ref(false)
+const courses = ref<Course[]>([])
+const coursesLoading = ref(false)
+const createForm = reactive<{
+  teacherId: number | ''
+  courseId: number | ''
+  sessionDate: string
+  period: string
+  topic: string
+}>({
+  teacherId: '',
+  courseId: '',
+  sessionDate: '',
+  period: '',
+  topic: ''
+})
+
+/** 选定授课教师后，课程下拉只呈现该教师的课程（授课教师由课程决定，保证一致） */
+const filteredCourses = computed(() => {
+  if (createForm.teacherId === '') return courses.value
+  return courses.value.filter((course) => course.teacherId === createForm.teacherId)
+})
+
+watch(
+  () => createForm.teacherId,
+  () => {
+    if (
+      createForm.courseId !== '' &&
+      !filteredCourses.value.some((course) => course.id === createForm.courseId)
+    ) {
+      createForm.courseId = ''
+    }
+  }
+)
 
 /* 主任：本室教师评分（质量热力数据源） */
 const teacherScores = ref<TeacherScoreItem[]>([])
 const teacherScoresLoading = ref(false)
 
-/* 教师：本人质量档案摘要（罗盘 + 雷达）与最近评价流 */
-const mySummary = ref<TeacherSummary | null>(null)
-const mySummaryLoading = ref(false)
-const recentEvaluations = ref<TeacherTimelineItem[]>([])
-
 const roleLabel = computed(() => getRoleMeta(auth.user?.role)?.label ?? '')
+const workbenchTitle = computed(() => (auth.role === 'supervisor' ? '工作台' : '质量驾驶舱'))
 
 const greeting = computed(() => {
   const hour = new Date().getHours()
@@ -72,25 +112,6 @@ async function loadDirectorScores(): Promise<void> {
   }
 }
 
-async function loadTeacherQuality(): Promise<void> {
-  const id = auth.user?.id
-  if (!id) return
-  mySummaryLoading.value = true
-  try {
-    mySummary.value = await fetchTeacherSummaryApi(id, { semester: semester.value })
-  } catch {
-    mySummary.value = null
-  } finally {
-    mySummaryLoading.value = false
-  }
-  try {
-    const page = await fetchTeacherEvaluationsApi(id, { semester: semester.value, page: 1, pageSize: 3 })
-    recentEvaluations.value = page.list ?? []
-  } catch {
-    recentEvaluations.value = []
-  }
-}
-
 /* 主任侧「重点关注」：全部由 teacher-scores 单次响应派生，零额外请求 */
 const weakestDimension = computed(() => {
   const scored = teacherScores.value.filter((teacher) => teacher.compositeScore !== null)
@@ -111,24 +132,6 @@ const insufficientTeachers = computed(() =>
   teacherScores.value.filter((teacher) => teacher.compositeScore === null || !teacher.sample.sampleSufficient)
 )
 
-const radarItems = computed<RadarItem[]>(() =>
-  (mySummary.value?.dimensions ?? []).map((dim) => ({
-    key: dim.key,
-    name: EVALUATION_DIMENSIONS.find((item) => item.key === dim.key)?.shortName ?? dim.name,
-    score: dim.score,
-    isObservation: dim.isObservation
-  }))
-)
-
-function firstComment(item: TeacherTimelineItem): string {
-  const supervisor = item.supervisorEvaluations?.[0]
-  return (supervisor && supervisor.comment) || item.agentEvaluation?.comment || ''
-}
-
-function goCourseImprove(course: Course): void {
-  void router.push({ name: 'course-improve', params: { id: course.id } })
-}
-
 function goCourseList(): void {
   void router.push({ name: 'course-list' })
 }
@@ -141,38 +144,115 @@ function goTeacherList(): void {
   void router.push({ name: 'teacher-list' })
 }
 
-function goSupervision(): void {
-  void router.push({ name: 'supervision' })
-}
-
 function goTeacherQuality(teacherId: number): void {
   void router.push({ name: 'teacher-detail', params: { id: teacherId } })
 }
 
-function handleQueueCreate(plan: SupervisionPlan): void {
-  void router.push({
-    name: 'supervision',
-    query: { plan: String(plan.id), course: String(plan.courseId) }
-  })
-}
-
-function handleQueueViewCourse(plan: SupervisionPlan): void {
-  void router.push({ name: 'course-detail', params: { id: plan.courseId } })
-}
-
-function goUploadResource(): void {
-  const first = data.value?.courses?.[0]
-  if (first) {
-    void router.push({ name: 'course-detail', params: { id: first.id }, query: { tab: 'resource' } })
-  } else {
-    goCourseList()
+/** 今日待评课：一键创建授课记录并直达评估页（避免多级点击）。 */
+async function handleQueueCreate(plan: SupervisionPlan): Promise<void> {
+  creatingPlanId.value = plan.id
+  try {
+    const session = await createSessionApi({
+      courseId: plan.courseId,
+      sessionDate: plan.plannedDate,
+      period: '待定',
+      planId: plan.id
+    })
+    ElMessage.success('授课记录已创建，开始评估')
+    void router.push({ name: 'session-evaluation', params: { id: session.id } })
+  } catch {
+    // 错误提示由 api/http.ts 拦截器统一处理
+  } finally {
+    creatingPlanId.value = null
   }
+}
+
+/** 已评估课程：直达对应授课记录的评估页。 */
+function handleQueueView(plan: SupervisionPlan): void {
+  if (plan.sessionId === null) return
+  void router.push({ name: 'session-evaluation', params: { id: plan.sessionId } })
+}
+
+/** 授课记录已创建但未评价：直达评估页。 */
+function handleQueueEvaluate(plan: SupervisionPlan): void {
+  if (plan.sessionId === null) return
+  void router.push({ name: 'session-evaluation', params: { id: plan.sessionId } })
+}
+
+/** 待评估授课记录：直达评估页。 */
+function goPendingEvaluate(sessionId: number): void {
+  void router.push({ name: 'session-evaluation', params: { id: sessionId } })
+}
+
+async function ensureCourses(): Promise<void> {
+  if (courses.value.length) return
+  coursesLoading.value = true
+  try {
+    const page = await fetchCoursesApi({ page: 1, pageSize: 100 })
+    courses.value = page.list ?? []
+  } catch {
+    courses.value = []
+  } finally {
+    coursesLoading.value = false
+  }
+}
+
+async function openCreateSession(): Promise<void> {
+  createForm.teacherId = ''
+  createForm.courseId = ''
+  createForm.sessionDate = ''
+  createForm.period = ''
+  createForm.topic = ''
+  createVisible.value = true
+  await Promise.all([dict.load(), ensureCourses()])
+}
+
+function disabledFuture(date: Date): boolean {
+  return date.getTime() > Date.now()
+}
+
+async function submitCreateSession(): Promise<void> {
+  if (createForm.courseId === '') {
+    ElMessage.error('请选择课程')
+    return
+  }
+  if (!createForm.sessionDate) {
+    ElMessage.error('请选择授课日期')
+    return
+  }
+  if (!createForm.period.trim()) {
+    ElMessage.error('请填写节次')
+    return
+  }
+  createSubmitting.value = true
+  try {
+    await createSessionApi({
+      courseId: createForm.courseId,
+      sessionDate: createForm.sessionDate,
+      period: createForm.period.trim(),
+      topic: createForm.topic.trim()
+    })
+    ElMessage.success('授课记录已创建，可在「待评估授课记录」中评估')
+    createVisible.value = false
+    await loadData()
+  } catch {
+    // 错误提示由 api/http.ts 拦截器统一处理
+  } finally {
+    createSubmitting.value = false
+  }
+}
+
+function goDraftBox(): void {
+  void router.push({ name: 'draft-box' })
+}
+
+function goDraftEdit(sessionId: number): void {
+  void router.push({ name: 'session-evaluation', params: { id: sessionId }, query: { draft: '1' } })
 }
 
 function reloadQuality(): void {
   void loadData()
   if (auth.hasRole('director')) void loadDirectorScores()
-  if (auth.hasRole('teacher')) void loadTeacherQuality()
 }
 
 watch(semester, reloadQuality)
@@ -185,13 +265,13 @@ onMounted(reloadQuality)
     <div class="dashboard__greeting">
       <div>
         <h1 class="dashboard__hello">{{ greeting }}，{{ auth.user?.name }}</h1>
-        <p class="dashboard__role">{{ roleLabel }} · 欢迎回到质量驾驶舱（{{ semester }}）</p>
+        <p class="dashboard__role">{{ roleLabel }} · {{ workbenchTitle }}（{{ semester }}）</p>
       </div>
       <p class="dashboard__ethics">评分仅用于教学支持与改进，不作为考核依据</p>
     </div>
 
     <div v-if="error" class="dashboard__error">
-      <EmptyState description="驾驶舱数据加载失败">
+      <EmptyState description="工作台数据加载失败">
         <template #action>
           <el-button type="primary" @click="reloadQuality">重新加载</el-button>
         </template>
@@ -199,195 +279,255 @@ onMounted(reloadQuality)
     </div>
 
     <template v-else>
-      <div class="dashboard__stats">
-        <template v-if="loading">
-          <el-skeleton v-for="n in 4" :key="n" animated class="dashboard__stat-skeleton">
-            <template #template>
-              <el-skeleton-item variant="rect" style="height: 76px; border-radius: 12px" />
-            </template>
-          </el-skeleton>
-        </template>
-        <template v-else>
-          <StatCard
-            v-for="stat in data?.stats ?? []"
-            :key="stat.label"
-            :label="stat.label"
-            :value="stat.value"
-            :unit="stat.unit"
-            :icon="stat.icon"
-            :tone="stat.tone"
-          />
-        </template>
-      </div>
-
-      <!-- 主任视角：本室质量热力 + 重点关注 -->
-      <div v-if="auth.role === 'director'" class="dashboard__grid">
-        <section class="dashboard__panel">
-          <div class="dashboard__panel-head">
-            <h2 class="dashboard__panel-title">本室质量热力</h2>
-            <span class="dashboard__panel-sub">教师 × 五维 · 点行下钻教师画像</span>
-          </div>
-          <ScoreHeatmap
-            :teachers="teacherScores"
-            :loading="teacherScoresLoading"
-            @select="goTeacherQuality"
-          />
-        </section>
-
-        <aside class="dashboard__side">
-          <section class="dashboard__panel">
-            <h2 class="dashboard__panel-title">重点关注</h2>
-            <template v-if="!teacherScoresLoading && teacherScores.length">
-              <p v-if="weakestDimension" class="dashboard__focus-item">
-                <span class="dashboard__focus-label">维度均分最低</span>
-                <span class="dashboard__focus-value">
-                  {{ weakestDimension.shortName }}
-                  <QualityBadge :score="weakestDimension.avg ?? null" />
-                </span>
-              </p>
-              <p class="dashboard__focus-item">
-                <span class="dashboard__focus-label">需关注样本</span>
-                <span class="dashboard__focus-value">
-                  {{ insufficientTeachers.length }} 位教师暂无评价或样本不足
-                </span>
-              </p>
-              <el-button
-                v-if="insufficientTeachers.length"
-                text
-                type="primary"
-                class="dashboard__focus-link"
-                @click="goTeacherList"
-              >
-                前往教师画像逐一查看 →
-              </el-button>
-            </template>
-            <EmptyState v-else description="暂无教师评分数据" />
-          </section>
-
-          <section class="dashboard__panel">
-            <h2 class="dashboard__panel-title">快捷操作</h2>
-            <el-button type="primary" class="dashboard__quick" @click="goNewCourse">
-              新增课程
-            </el-button>
-            <el-button class="dashboard__quick" @click="goCourseList">进入课程库</el-button>
-            <el-button class="dashboard__quick" @click="goTeacherList">进入教师画像</el-button>
-          </section>
-        </aside>
-      </div>
-
-      <!-- 教师视角：我的质量总览 + 最近评价流 + 我的课程 -->
-      <div v-else-if="auth.role === 'teacher'" class="dashboard__grid">
-        <section class="dashboard__panel">
-          <div class="dashboard__panel-head">
-            <h2 class="dashboard__panel-title">我的教学质量</h2>
-            <router-link class="dashboard__panel-sub-link" :to="{ name: 'course-list' }">
-              课程视角明细见「我的课程」
-            </router-link>
-          </div>
-          <div class="dashboard__quality">
-            <QualityCompass
-              class="dashboard__compass"
-              :summary="mySummary"
-              :loading="mySummaryLoading"
-              size="lg"
-              title="本学期综合分"
+      <!-- 主任视角：统计卡 + 本室质量热力 + 重点关注 -->
+      <template v-if="auth.role === 'director'">
+        <div class="dashboard__stats">
+          <template v-if="loading">
+            <el-skeleton v-for="n in 4" :key="n" animated class="dashboard__stat-skeleton">
+              <template #template>
+                <el-skeleton-item variant="rect" style="height: 76px; border-radius: 12px" />
+              </template>
+            </el-skeleton>
+          </template>
+          <template v-else>
+            <StatCard
+              v-for="stat in data?.stats ?? []"
+              :key="stat.label"
+              :label="stat.label"
+              :value="stat.value"
+              :unit="stat.unit"
+              :icon="stat.icon"
+              :tone="stat.tone"
             />
-            <div class="dashboard__radar">
-              <ScoreRadar :items="radarItems" :max="100" :loading="mySummaryLoading" />
-            </div>
-          </div>
-        </section>
+          </template>
+        </div>
 
-        <aside class="dashboard__side">
+        <div class="dashboard__grid">
           <section class="dashboard__panel">
             <div class="dashboard__panel-head">
-              <h2 class="dashboard__panel-title">最近评价</h2>
-              <router-link class="dashboard__panel-sub-link" :to="{ name: 'profile-quality' }">
-                进入我的质量档案 →
-              </router-link>
+              <h2 class="dashboard__panel-title">本室质量热力</h2>
+              <span class="dashboard__panel-sub">教师 × 五维 · 点行下钻教师画像</span>
             </div>
-            <ul v-if="recentEvaluations.length" class="dashboard__feed">
-              <li
-                v-for="item in recentEvaluations"
-                :key="`${item.sessionId}-${item.courseId}`"
-                class="dashboard__feed-item"
-              >
-                <div class="dashboard__feed-head">
-                  <span class="dashboard__feed-course">{{ item.courseName }}</span>
-                  <QualityBadge :score="item.compositeScore" />
-                </div>
-                <p class="dashboard__feed-topic">
-                  {{ formatDate(item.sessionDate) }} · {{ item.topic || '—' }}
-                </p>
-                <p v-if="firstComment(item)" class="dashboard__feed-comment">
-                  {{ firstComment(item) }}
-                </p>
-              </li>
-            </ul>
-            <EmptyState v-else description="本学期暂无督导评价，请留意课堂安排" />
+            <ScoreHeatmap
+              :teachers="teacherScores"
+              :loading="teacherScoresLoading"
+              @select="goTeacherQuality"
+            />
           </section>
 
+          <aside class="dashboard__side">
+            <section class="dashboard__panel">
+              <h2 class="dashboard__panel-title">重点关注</h2>
+              <template v-if="!teacherScoresLoading && teacherScores.length">
+                <p v-if="weakestDimension" class="dashboard__focus-item">
+                  <span class="dashboard__focus-label">维度均分最低</span>
+                  <span class="dashboard__focus-value">
+                    {{ weakestDimension.shortName }}
+                    <QualityBadge :score="weakestDimension.avg ?? null" />
+                  </span>
+                </p>
+                <p class="dashboard__focus-item">
+                  <span class="dashboard__focus-label">需关注样本</span>
+                  <span class="dashboard__focus-value">
+                    {{ insufficientTeachers.length }} 位教师暂无评价或样本不足
+                  </span>
+                </p>
+                <el-button
+                  v-if="insufficientTeachers.length"
+                  text
+                  type="primary"
+                  class="dashboard__focus-link"
+                  @click="goTeacherList"
+                >
+                  前往教师画像逐一查看 →
+                </el-button>
+              </template>
+              <EmptyState v-else description="暂无教师评分数据" />
+            </section>
+
+            <section class="dashboard__panel">
+              <h2 class="dashboard__panel-title">快捷操作</h2>
+              <el-button type="primary" class="dashboard__quick" @click="goNewCourse">
+                新增课程
+              </el-button>
+              <el-button class="dashboard__quick" @click="goCourseList">进入课程库</el-button>
+              <el-button class="dashboard__quick" @click="goTeacherList">进入教师画像</el-button>
+            </section>
+          </aside>
+        </div>
+      </template>
+
+      <!-- 督导视角：待评课队列 + 草稿箱 + 待评估授课记录 -->
+      <template v-else-if="auth.role === 'supervisor'">
+        <div class="dashboard__grid dashboard__grid--workbench">
           <section class="dashboard__panel">
-            <h2 class="dashboard__panel-title">资源快捷入口</h2>
-            <el-button type="primary" class="dashboard__quick" @click="goUploadResource">
-              上传课程资源
-            </el-button>
-            <ul v-if="(data?.recentResources ?? []).length" class="dashboard__recent">
-              <li
-                v-for="resource in data?.recentResources ?? []"
-                :key="resource.id"
-                class="dashboard__recent-item"
-              >
-                <span class="dashboard__recent-name">{{ resource.name }}</span>
-                <span class="dashboard__recent-meta">
-                  {{ formatDateTime(resource.uploadedAt) }}
-                </span>
-              </li>
-            </ul>
+            <div class="dashboard__panel-head">
+              <h2 class="dashboard__panel-title">待评课队列</h2>
+              <div class="dashboard__panel-actions">
+                <span class="dashboard__panel-sub">按今日 / 本周 / 本月切换安排</span>
+                <el-button type="primary" size="small" @click="openCreateSession">
+                  新增授课记录
+                </el-button>
+              </div>
+            </div>
+            <EvaluationQueue
+              :plans="data?.plans ?? []"
+              :loading="loading"
+              @create="handleQueueCreate"
+              @view="handleQueueView"
+              @evaluate="handleQueueEvaluate"
+            />
           </section>
-        </aside>
-      </div>
 
-      <!-- 督导视角：待评课队列第一行 -->
-      <div v-else-if="auth.role === 'supervisor'" class="dashboard__grid dashboard__grid--queue">
-        <section class="dashboard__panel">
+          <aside class="dashboard__side">
+            <section class="dashboard__panel">
+              <div class="dashboard__panel-head">
+                <h2 class="dashboard__panel-title">草稿箱</h2>
+                <el-button link type="primary" @click="goDraftBox">更多&gt;&gt;</el-button>
+              </div>
+              <ul v-if="(data?.recentDrafts ?? []).length" class="dashboard__drafts">
+                <li
+                  v-for="draft in data?.recentDrafts ?? []"
+                  :key="draft.id"
+                  class="dashboard__draft"
+                  @click="goDraftEdit(draft.sessionId)"
+                >
+                  <div class="dashboard__draft-head">
+                    <span class="dashboard__draft-course">{{ draft.courseName }}</span>
+                    <el-tag size="small" effect="plain" round>草稿</el-tag>
+                  </div>
+                  <p class="dashboard__draft-meta">
+                    {{ draft.sessionDate }} · {{ draft.period || '—' }}
+                  </p>
+                </li>
+              </ul>
+              <EmptyState v-else description="暂无草稿">
+                <template #action>
+                  <el-button link type="primary" @click="goDraftBox">前往草稿箱</el-button>
+                </template>
+              </EmptyState>
+            </section>
+          </aside>
+        </div>
+
+        <!-- 待评估授课记录：手动新增或尚未评价的授课记录，直接去评估 -->
+        <section class="dashboard__panel dashboard__panel--pending">
           <div class="dashboard__panel-head">
-            <h2 class="dashboard__panel-title">待评课队列</h2>
-            <el-button link type="primary" @click="goSupervision">课堂评估页</el-button>
+            <h2 class="dashboard__panel-title">待评估授课记录</h2>
+            <span class="dashboard__panel-sub">手动新增或尚未评价的授课记录 · 点击「去评估」进入</span>
           </div>
-          <EvaluationQueue
-            :plans="data?.plans ?? []"
-            :loading="loading"
-            @create="handleQueueCreate"
-            @view-course="handleQueueViewCourse"
-          />
+          <el-table
+            v-if="(data?.pendingSessions ?? []).length"
+            :data="data?.pendingSessions ?? []"
+            row-key="sessionId"
+            stripe
+          >
+            <el-table-column label="授课日期" min-width="120">
+              <template #default="{ row }">
+                <span class="tabular-nums">{{ row.sessionDate }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="节次" min-width="100">
+              <template #default="{ row }">{{ row.period || '—' }}</template>
+            </el-table-column>
+            <el-table-column label="课程" min-width="200">
+              <template #default="{ row }">
+                <span class="dashboard__pending-course">{{ row.courseName }}</span>
+                <el-tag v-if="row.courseCode" size="small" effect="plain">
+                  {{ row.courseCode }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="teacherName" label="授课教师" min-width="120" />
+            <el-table-column label="主题" min-width="160">
+              <template #default="{ row }">{{ row.topic || '—' }}</template>
+            </el-table-column>
+            <el-table-column label="状态" width="100">
+              <template #default>
+                <el-tag size="small" type="warning" effect="plain">未评估</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="110" fixed="right">
+              <template #default="{ row }">
+                <el-button link type="primary" @click="goPendingEvaluate(row.sessionId)">
+                  去评估
+                </el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+          <EmptyState v-else description="暂无待评估授课记录" />
         </section>
-
-        <aside class="dashboard__side">
-          <CoverageCard :overall="data?.coverage ?? null" :loading="loading" />
-        </aside>
-      </div>
-
-      <!-- 教师：我的课程卡带 -->
-      <div v-if="auth.role === 'teacher'" class="dashboard__panel dashboard__panel--courses">
-        <div class="dashboard__panel-head">
-          <h2 class="dashboard__panel-title">我的课程</h2>
-          <el-button link type="primary" @click="goCourseList">查看全部</el-button>
-        </div>
-        <div v-if="loading" class="dashboard__cards">
-          <el-skeleton v-for="n in 4" :key="n" animated :rows="4" />
-        </div>
-        <div v-else-if="(data?.courses ?? []).length" class="dashboard__cards">
-          <CourseCard
-            v-for="course in data?.courses ?? []"
-            :key="course.id"
-            :course="course"
-            @click="goCourseImprove"
-          />
-        </div>
-        <EmptyState v-else description="本学期暂无授课课程" />
-      </div>
+      </template>
     </template>
+
+    <!-- 新增授课记录（督导，替代教务系统录入环节） -->
+    <el-dialog v-model="createVisible" title="新增授课记录" width="520px">
+      <el-form label-width="88px">
+        <el-form-item label="授课教师" required>
+          <el-select
+            v-model="createForm.teacherId"
+            placeholder="请选择授课教师"
+            filterable
+            class="dashboard__dialog-field"
+          >
+            <el-option
+              v-for="teacher in dict.teachers"
+              :key="teacher.id"
+              :label="teacher.name"
+              :value="teacher.id"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="课程" required>
+          <el-select
+            v-model="createForm.courseId"
+            placeholder="请选择课程"
+            filterable
+            :loading="coursesLoading"
+            class="dashboard__dialog-field"
+          >
+            <el-option
+              v-for="course in filteredCourses"
+              :key="course.id"
+              :label="`${course.name}（${course.code}）`"
+              :value="course.id"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="授课日期" required>
+          <el-date-picker
+            v-model="createForm.sessionDate"
+            type="date"
+            placeholder="不得晚于今天"
+            value-format="YYYY-MM-DD"
+            :disabled-date="disabledFuture"
+            class="dashboard__dialog-field"
+          />
+        </el-form-item>
+        <el-form-item label="节次" required>
+          <el-input
+            v-model="createForm.period"
+            placeholder="如 3-4 节"
+            maxlength="32"
+            class="dashboard__dialog-field"
+          />
+        </el-form-item>
+        <el-form-item label="主题">
+          <el-input
+            v-model="createForm.topic"
+            placeholder="本次课主题（选填）"
+            maxlength="128"
+            class="dashboard__dialog-field"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="createVisible = false">取消</el-button>
+        <el-button type="primary" :loading="createSubmitting" @click="submitCreateSession">
+          创建
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -447,8 +587,8 @@ onMounted(reloadQuality)
     gap: var(--spacing-6);
     align-items: start;
 
-    &--queue {
-      grid-template-columns: 1.6fr 1fr;
+    &--workbench {
+      grid-template-columns: 1.7fr 1fr;
     }
 
     @media (max-width: 1280px) {
@@ -465,10 +605,6 @@ onMounted(reloadQuality)
 
     & + & {
       margin-top: var(--spacing-4);
-    }
-
-    &--courses {
-      margin-top: var(--spacing-6);
     }
   }
 
@@ -490,9 +626,24 @@ onMounted(reloadQuality)
     color: var(--color-text-tertiary);
   }
 
-  &__panel-sub-link {
-    font-size: var(--font-size-xs);
-    color: var(--color-primary);
+  &__panel-actions {
+    display: flex;
+    gap: var(--spacing-3);
+    align-items: center;
+  }
+
+  &__panel--pending {
+    margin-top: var(--spacing-4);
+  }
+
+  &__pending-course {
+    margin-right: var(--spacing-2);
+    font-weight: 600;
+    color: var(--color-text-primary);
+  }
+
+  &__dialog-field {
+    width: 100%;
   }
 
   &__side {
@@ -541,31 +692,24 @@ onMounted(reloadQuality)
     }
   }
 
-  &__quality {
-    display: grid;
-    grid-template-columns: auto 1fr;
-    gap: var(--spacing-8);
-    align-items: center;
-
-    @media (max-width: 1024px) {
-      grid-template-columns: 1fr;
-      justify-items: center;
-    }
-  }
-
-  &__radar {
-    min-width: 0;
-  }
-
-  &__feed {
+  &__drafts {
     display: flex;
     flex-direction: column;
-    gap: var(--spacing-3);
+    gap: var(--spacing-2);
+    padding: 0;
+    margin: 0;
+    list-style: none;
+  }
 
-    &-item {
-      padding: var(--spacing-2) var(--spacing-3);
-      background-color: var(--color-bg-page);
-      border-radius: var(--radius-md);
+  &__draft {
+    padding: var(--spacing-3);
+    cursor: pointer;
+    background-color: var(--color-bg-page);
+    border-radius: var(--radius-md);
+    transition: box-shadow var(--duration-fast) ease;
+
+    &:hover {
+      box-shadow: var(--shadow-card-hover);
     }
 
     &-head {
@@ -584,67 +728,11 @@ onMounted(reloadQuality)
       text-overflow: ellipsis;
     }
 
-    &-topic {
+    &-meta {
       margin-top: 2px;
       font-size: var(--font-size-xs);
       color: var(--color-text-tertiary);
     }
-
-    &-comment {
-      margin-top: var(--spacing-1);
-      display: -webkit-box;
-      overflow: hidden;
-      font-size: var(--font-size-sm);
-      line-height: 1.6;
-      color: var(--color-text-secondary);
-      -webkit-box-orient: vertical;
-      -webkit-line-clamp: 2;
-    }
-  }
-
-  &__cards {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: var(--spacing-4);
-
-    @media (max-width: 1024px) {
-      grid-template-columns: 1fr;
-    }
-  }
-
-  &__recent {
-    display: flex;
-    flex-direction: column;
-    gap: var(--spacing-2);
-    margin-top: var(--spacing-3);
-  }
-
-  &__recent-item {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--spacing-3);
-    padding: var(--spacing-2) var(--spacing-3);
-    border-radius: var(--radius-md);
-    transition: background-color 0.2s ease;
-
-    &:hover {
-      background-color: var(--color-primary-bg);
-    }
-  }
-
-  &__recent-name {
-    overflow: hidden;
-    font-size: var(--font-size-sm);
-    color: var(--color-text-secondary);
-    white-space: nowrap;
-    text-overflow: ellipsis;
-  }
-
-  &__recent-meta {
-    flex-shrink: 0;
-    font-size: var(--font-size-xs);
-    color: var(--color-text-tertiary);
   }
 }
 </style>

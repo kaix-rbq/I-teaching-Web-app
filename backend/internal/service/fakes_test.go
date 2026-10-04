@@ -244,6 +244,7 @@ type fakeSessionRepo struct {
 	getDetail       func(ctx context.Context, id uint64) (*repository.SessionDetailRow, error)
 	existsDuplicate func(ctx context.Context, courseID, classID uint64, date time.Time, period string, excludeID uint64) (bool, error)
 	listByCourse    func(ctx context.Context, p repository.SessionListParams) ([]repository.SessionListRow, int64, error)
+	listPending     func(ctx context.Context, limit int) ([]repository.PendingSessionRow, error)
 	updateStatus    func(ctx context.Context, id uint64, status string) error
 	planExists      func(ctx context.Context, planID uint64) (bool, error)
 	lastStatus      string
@@ -288,6 +289,13 @@ func (f *fakeSessionRepo) ListByCourse(
 	return f.listByCourse(ctx, p)
 }
 
+func (f *fakeSessionRepo) ListPending(ctx context.Context, limit int) ([]repository.PendingSessionRow, error) {
+	if f.listPending == nil {
+		return nil, nil
+	}
+	return f.listPending(ctx, limit)
+}
+
 func (f *fakeSessionRepo) UpdateStatus(ctx context.Context, id uint64, status string) error {
 	f.lastStatus = status
 	if f.updateStatus == nil {
@@ -301,6 +309,59 @@ func (f *fakeSessionRepo) PlanExists(ctx context.Context, planID uint64) (bool, 
 		return false, nil
 	}
 	return f.planExists(ctx, planID)
+}
+
+type fakeDraftRepo struct {
+	upsert       func(ctx context.Context, d *model.EvaluationDraft) error
+	getBySession func(ctx context.Context, sessionID, supervisorID uint64) (*model.EvaluationDraft, error)
+	getByID      func(ctx context.Context, id, supervisorID uint64) (*repository.DraftListRow, error)
+	list         func(ctx context.Context, p repository.DraftListParams) ([]repository.DraftListRow, int64, error)
+	recent       func(ctx context.Context, supervisorID uint64, limit int) ([]repository.DraftListRow, error)
+	delete       func(ctx context.Context, id, supervisorID uint64) error
+	deletedID    uint64
+}
+
+func (f *fakeDraftRepo) Upsert(ctx context.Context, d *model.EvaluationDraft) error {
+	if f.upsert == nil {
+		return nil
+	}
+	return f.upsert(ctx, d)
+}
+
+func (f *fakeDraftRepo) GetBySession(ctx context.Context, sessionID, supervisorID uint64) (*model.EvaluationDraft, error) {
+	if f.getBySession == nil {
+		return nil, repository.ErrNotImplemented
+	}
+	return f.getBySession(ctx, sessionID, supervisorID)
+}
+
+func (f *fakeDraftRepo) GetByID(ctx context.Context, id, supervisorID uint64) (*repository.DraftListRow, error) {
+	if f.getByID == nil {
+		return nil, repository.ErrNotImplemented
+	}
+	return f.getByID(ctx, id, supervisorID)
+}
+
+func (f *fakeDraftRepo) ListBySupervisor(ctx context.Context, p repository.DraftListParams) ([]repository.DraftListRow, int64, error) {
+	if f.list == nil {
+		return nil, 0, nil
+	}
+	return f.list(ctx, p)
+}
+
+func (f *fakeDraftRepo) RecentBySupervisor(ctx context.Context, supervisorID uint64, limit int) ([]repository.DraftListRow, error) {
+	if f.recent == nil {
+		return nil, nil
+	}
+	return f.recent(ctx, supervisorID, limit)
+}
+
+func (f *fakeDraftRepo) Delete(ctx context.Context, id, supervisorID uint64) error {
+	f.deletedID = id
+	if f.delete == nil {
+		return nil
+	}
+	return f.delete(ctx, id, supervisorID)
 }
 
 type fakeEvalRepo struct {
