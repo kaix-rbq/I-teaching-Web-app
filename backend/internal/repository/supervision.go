@@ -17,6 +17,8 @@ type DeptCoverageRow struct {
 }
 
 // PlanRow 是听评课安排的联表查询结果。
+// SessionID 为该计划关联的授课记录（可为空：计划尚未创建授课记录），
+// 用于工作台「查看授课记录」直接跳转评估页，免去多级点击。
 type PlanRow struct {
 	ID             uint64    `gorm:"column:id"`
 	CourseID       uint64    `gorm:"column:course_id"`
@@ -25,6 +27,9 @@ type PlanRow struct {
 	SupervisorName string    `gorm:"column:supervisor_name"`
 	PlannedDate    time.Time `gorm:"column:planned_date"`
 	Status         string    `gorm:"column:status"`
+	SessionID      *uint64   `gorm:"column:session_id"`
+	// Evaluated：该计划关联的授课记录是否已完成督导评价（决定工作台是否暴露评估入口）。
+	Evaluated bool `gorm:"column:evaluated"`
 }
 
 // PlanListParams 是听评课安排分页参数。
@@ -126,7 +131,11 @@ func (r *supervisionRepository) ListPlans(ctx context.Context, p PlanListParams)
 	var rows []PlanRow
 	err := r.planBase(ctx, p).
 		Select(`sp.id, sp.course_id, c.name AS course_name, tu.name AS teacher_name,
-			su.name AS supervisor_name, sp.planned_date, sp.status`).
+			su.name AS supervisor_name, sp.planned_date, sp.status,
+			(SELECT ts.id FROM teaching_sessions AS ts
+				WHERE ts.plan_id = sp.id ORDER BY ts.id DESC LIMIT 1) AS session_id,
+			EXISTS(SELECT 1 FROM teaching_sessions AS ts
+				WHERE ts.plan_id = sp.id AND ts.status = 'evaluated') AS evaluated`).
 		Order("sp.planned_date ASC, sp.id ASC").
 		Offset((p.Page - 1) * p.PageSize).
 		Limit(p.PageSize).

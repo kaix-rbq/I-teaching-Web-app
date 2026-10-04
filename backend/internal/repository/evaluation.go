@@ -126,7 +126,7 @@ func (r *evaluationRepository) ListBySessionIDs(ctx context.Context, sessionIDs 
 
 // ListSessionDimRows 是教师级/课程级聚合的数据出口（§2.5.4）。
 // 三处易错点均已按计划处理：
-//  1. 侧别计数用 MAX(CASE...THEN 1 ELSE 0)，不能 COUNT(列)——agent 的 objective 恒为 NULL；
+//  1. 侧别计数用 MAX(CASE...THEN 1 ELSE 0)，不能 COUNT(列)——允许某侧维度为 NULL（如早期 agent 的 objective）；
 //  2. 同场次多督导取 AVG，不是 MAX；
 //  3. 口径版本在 JOIN 条件里隔离，公式混杂时不混入旧口径数据。
 func (r *evaluationRepository) ListSessionDimRows(ctx context.Context, f SessionDimFilter) ([]SessionDimRow, error) {

@@ -46,6 +46,21 @@ type SessionListItem struct {
 	EvaluationCount int      `json:"evaluationCount"`
 }
 
+// PendingSessionItem 是督导工作台「待评估授课记录」行（手动新增或尚未评价的授课记录）。
+// 新建授课记录 status=scheduled，评价提交后转为 evaluated 并从本列表消失。
+type PendingSessionItem struct {
+	SessionID   uint64 `json:"sessionId"`
+	CourseID    uint64 `json:"courseId"`
+	CourseCode  string `json:"courseCode"`
+	CourseName  string `json:"courseName"`
+	TeacherID   uint64 `json:"teacherId"`
+	TeacherName string `json:"teacherName"`
+	SessionDate string `json:"sessionDate"`
+	Period      string `json:"period"`
+	Topic       string `json:"topic"`
+	Status      string `json:"status"`
+}
+
 // SupervisorEvaluationReq 是 PUT /sessions/:id/supervisor-evaluation 的请求体。
 // 督导评分强制 5 个维度全部录入：维度分 1-5 整数，任一维度缺失返回 40002，越界返回 40001。
 // （仅智能体侧允许维度为 null，见开发计划 §2.1。）

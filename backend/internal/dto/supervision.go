@@ -15,14 +15,18 @@ type CoverageDTO struct {
 }
 
 // PlanItem 是听评课安排行。
+// SessionID 为关联授课记录（null = 尚无授课记录，需先创建再评估）；
+// Evaluated 表示关联授课记录是否已完成督导评价（前端据此暴露/隐藏「去评估」入口）。
 type PlanItem struct {
-	ID             uint64 `json:"id"`
-	CourseID       uint64 `json:"courseId"`
-	CourseName     string `json:"courseName"`
-	TeacherName    string `json:"teacherName"`
-	SupervisorName string `json:"supervisorName"`
-	PlannedDate    string `json:"plannedDate"`
-	Status         string `json:"status"`
+	ID             uint64  `json:"id"`
+	CourseID       uint64  `json:"courseId"`
+	CourseName     string  `json:"courseName"`
+	TeacherName    string  `json:"teacherName"`
+	SupervisorName string  `json:"supervisorName"`
+	PlannedDate    string  `json:"plannedDate"`
+	Status         string  `json:"status"`
+	SessionID      *uint64 `json:"sessionId"`
+	Evaluated      bool    `json:"evaluated"`
 }
 
 // PlanListQuery 是 GET /supervision/plans 的查询参数。

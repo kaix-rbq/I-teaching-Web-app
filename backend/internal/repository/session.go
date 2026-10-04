@@ -50,6 +50,20 @@ type SessionListParams struct {
 	PageSize int
 }
 
+// PendingSessionRow 是「待评估授课记录」行（含课程/教师上下文，供督导工作台直接展示与跳转）。
+type PendingSessionRow struct {
+	ID          uint64    `gorm:"column:id"`
+	CourseID    uint64    `gorm:"column:course_id"`
+	CourseCode  string    `gorm:"column:course_code"`
+	CourseName  string    `gorm:"column:course_name"`
+	TeacherID   uint64    `gorm:"column:teacher_id"`
+	TeacherName string    `gorm:"column:teacher_name"`
+	SessionDate time.Time `gorm:"column:session_date"`
+	Period      string    `gorm:"column:period"`
+	Topic       string    `gorm:"column:topic"`
+	Status      string    `gorm:"column:status"`
+}
+
 // SessionRepository 定义授课记录数据访问。
 type SessionRepository interface {
 	Create(ctx context.Context, s *model.TeachingSession) error
@@ -57,6 +71,7 @@ type SessionRepository interface {
 	GetDetail(ctx context.Context, id uint64) (*SessionDetailRow, error)
 	ExistsDuplicate(ctx context.Context, courseID, classID uint64, date time.Time, period string, excludeID uint64) (bool, error)
 	ListByCourse(ctx context.Context, p SessionListParams) ([]SessionListRow, int64, error)
+	ListPending(ctx context.Context, limit int) ([]PendingSessionRow, error)
 	UpdateStatus(ctx context.Context, id uint64, status string) error
 	PlanExists(ctx context.Context, planID uint64) (bool, error)
 }
@@ -150,6 +165,27 @@ func (r *sessionRepository) ListByCourse(ctx context.Context, p SessionListParam
 		return nil, 0, err
 	}
 	return rows, total, nil
+}
+
+// ListPending 返回尚未评估的授课记录（status <> evaluated），最新在前。
+// 供督导工作台「新增授课记录」后直接找到待评估入口。
+func (r *sessionRepository) ListPending(ctx context.Context, limit int) ([]PendingSessionRow, error) {
+	var rows []PendingSessionRow
+	err := r.db.WithContext(ctx).
+		Table("teaching_sessions AS ts").
+		Select(`ts.id, ts.course_id, ts.session_date, ts.period, ts.topic, ts.status,
+			c.code AS course_code, c.name AS course_name,
+			ts.teacher_id, u.name AS teacher_name`).
+		Joins("JOIN courses AS c ON c.id = ts.course_id").
+		Joins("JOIN users AS u ON u.id = ts.teacher_id").
+		Where("ts.status <> ?", model.SessionStatusEvaluated).
+		Order("ts.session_date DESC, ts.id DESC").
+		Limit(limit).
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	return rows, nil
 }
 
 func (r *sessionRepository) UpdateStatus(ctx context.Context, id uint64, status string) error {

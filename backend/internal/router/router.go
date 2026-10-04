@@ -27,16 +27,18 @@ func New(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) *gin.Engine {
 	sessionRepo := repository.NewSessionRepository(db)
 	evaluationRepo := repository.NewEvaluationRepository(db)
 	recordingRepo := repository.NewRecordingRepository(db)
+	draftRepo := repository.NewDraftRepository(db)
 
 	authSvc := service.NewAuthService(userRepo, jwt)
 	courseSvc := service.NewCourseService(courseRepo, userRepo)
 	resourceSvc := service.NewResourceService(resourceRepo, courseRepo, cfg.Upload)
 	supervisionSvc := service.NewSupervisionService(supervisionRepo)
-	dashboardSvc := service.NewDashboardService(courseRepo, userRepo, resourceRepo, supervisionRepo)
+	dashboardSvc := service.NewDashboardService(courseRepo, userRepo, resourceRepo, supervisionRepo, draftRepo, sessionRepo)
 	dictSvc := service.NewDictService(userRepo)
 	sessionSvc := service.NewSessionService(sessionRepo, evaluationRepo, courseRepo, userRepo, cfg.Evaluation)
 	teacherScoreSvc := service.NewTeacherScoreService(userRepo, courseRepo, evaluationRepo, cfg.Evaluation)
 	recordingSvc := service.NewRecordingService(recordingRepo, sessionRepo, cfg.Upload, cfg.Transcription)
+	draftSvc := service.NewDraftService(draftRepo, sessionSvc)
 
 	authH := handler.NewAuthHandler(authSvc)
 	courseH := handler.NewCourseHandler(courseSvc)
@@ -47,6 +49,7 @@ func New(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) *gin.Engine {
 	sessionH := handler.NewSessionHandler(sessionSvc, recordingSvc)
 	teacherScoreH := handler.NewTeacherScoreHandler(teacherScoreSvc)
 	recordingH := handler.NewRecordingHandler(recordingSvc)
+	draftH := handler.NewDraftHandler(draftSvc)
 
 	gin.SetMode(cfg.Server.Mode)
 	r := gin.New()
@@ -94,7 +97,12 @@ func New(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) *gin.Engine {
 		GET("/supervision/plans", supervisionH.Plans).
 		POST("/sessions", sessionH.Create).
 		PUT("/sessions/:id/supervisor-evaluation", sessionH.Submit).
-		POST("/sessions/:id/recording", recordingH.Upload)
+		POST("/sessions/:id/recording", recordingH.Upload).
+		GET("/sessions/:id/draft", draftH.GetBySession).
+		PUT("/sessions/:id/draft", draftH.Save).
+		GET("/drafts", draftH.List).
+		DELETE("/drafts/:id", draftH.Delete).
+		POST("/drafts/:id/submit", draftH.Submit)
 
 	authed.Group("", middleware.RequireRoles(service.RoleDirector, service.RoleSupervisor)).
 		GET("/teacher-scores", teacherScoreH.List)

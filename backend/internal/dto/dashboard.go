@@ -21,12 +21,10 @@ type TeacherDashboard struct {
 }
 
 // SupervisorDashboard 是督导工作台聚合数据。
-// ByDepartment 为前端 CoverageCard「按教研室覆盖率排行」所需的补充字段。
+// 只保留督导核心任务「记录课程并评估」所需的信息：待评课队列 + 最近草稿。
+// 课程数 / 覆盖率等统计已移除（与听评课核心任务无关）。
 type SupervisorDashboard struct {
-	CourseCount    int        `json:"courseCount"`
-	PlanCount      int        `json:"planCount"`
-	CompletedCount int        `json:"completedCount"`
-	CoverageRate   float64    `json:"coverageRate"`
-	RecentPlans    []PlanItem `json:"recentPlans"`
-	ByDepartment   []DeptRate `json:"byDepartment"`
+	RecentPlans     []PlanItem           `json:"recentPlans"`
+	RecentDrafts    []DraftDTO           `json:"recentDrafts"`
+	PendingSessions []PendingSessionItem `json:"pendingSessions"`
 }
