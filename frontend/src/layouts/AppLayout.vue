@@ -4,7 +4,6 @@ import { useRoute, useRouter } from 'vue-router'
 import {
   ArrowDown,
   Collection,
-  DataAnalysis,
   Expand,
   Fold,
   Medal,
@@ -35,39 +34,43 @@ const collapsed = ref(false)
 
 const menuItems = computed<MenuItem[]>(() => {
   const role = auth.user?.role
-  const courseLabel =
-    role === 'director' ? '课程库' : role === 'supervisor' ? '全校课程库' : '我的课程'
 
-  const items: MenuItem[] = [
-    { index: 'dashboard', label: '质量驾驶舱', icon: markRaw(Odometer) }
-  ]
-
+  // 教师端无「质量驾驶舱」，以「我的质量档案」为首页。
   if (role === 'teacher') {
-    items.push({ index: 'profile-quality', label: '我的质量档案', icon: markRaw(Medal) })
+    return [
+      { index: 'profile-quality', label: '我的质量档案', icon: markRaw(Medal) },
+      { index: 'course-list', label: '我的课程', icon: markRaw(Collection) },
+      { index: 'profile', label: '个人中心', icon: markRaw(User) }
+    ]
   }
 
-  items.push({ index: 'course-list', label: courseLabel, icon: markRaw(Collection) })
-
-  if (role === 'director') {
-    items.push({ index: 'teacher-list', label: '教师画像', icon: markRaw(UserFilled) })
-  }
-
+  // 督导端聚焦「听评课」核心任务：工作台、草稿箱、个人中心三栏。
   if (role === 'supervisor') {
-    items.push({ index: 'supervision', label: '课堂评估', icon: markRaw(DataAnalysis) })
+    return [
+      { index: 'dashboard', label: '工作台', icon: markRaw(Odometer) },
+      { index: 'draft-box', label: '草稿箱', icon: markRaw(Collection) },
+      { index: 'profile', label: '个人中心', icon: markRaw(User) }
+    ]
   }
 
-  items.push({ index: 'profile', label: '个人中心', icon: markRaw(User) })
-  return items
+  return [
+    { index: 'dashboard', label: '质量驾驶舱', icon: markRaw(Odometer) },
+    { index: 'course-list', label: '课程库', icon: markRaw(Collection) },
+    { index: 'teacher-list', label: '教师画像', icon: markRaw(UserFilled) },
+    { index: 'profile', label: '个人中心', icon: markRaw(User) }
+  ]
 })
 
 const activeMenu = computed(() => {
   const name = String(route.name ?? '')
+  if (name === 'session-evaluation') {
+    return auth.role === 'supervisor' ? 'dashboard' : 'course-list'
+  }
   if (
     name === 'course-detail' ||
     name === 'course-new' ||
     name === 'course-edit' ||
-    name === 'course-improve' ||
-    name === 'session-evaluation'
+    name === 'course-improve'
   ) {
     return 'course-list'
   }

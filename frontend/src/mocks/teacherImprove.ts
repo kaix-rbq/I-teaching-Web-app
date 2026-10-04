@@ -21,11 +21,11 @@ const DEMO_SESSIONS = [
 
 /** 各维度逐次观测分（0-100 制，与聚合接口一致；frontier 为观测项） */
 const DIMENSION_TREND: Record<string, { name: string; isObservation: boolean; values: number[] }> = {
-  objective: { name: '教学目标与内容准确性', isObservation: false, values: [80, 80, 100] },
-  content: { name: '内容质量与深度', isObservation: false, values: [60, 80, 80] },
-  interaction: { name: '学生互动与参与', isObservation: false, values: [40, 60, 80] },
-  organization: { name: '课堂组织与节奏', isObservation: false, values: [60, 80, 80] },
-  frontier: { name: '前沿与交叉学科', isObservation: true, values: [40, 60, 60] }
+  objective: { name: '教学目标与内容准确性', isObservation: false, values: [75, 75, 87.5] },
+  content: { name: '内容质量与深度', isObservation: false, values: [62.5, 75, 75] },
+  interaction: { name: '学生互动与参与', isObservation: false, values: [37.5, 50, 75] },
+  organization: { name: '课堂组织与节奏', isObservation: false, values: [50, 75, 75] },
+  frontier: { name: '前沿与交叉学科', isObservation: true, values: [37.5, 50, 62.5] }
 }
 
 /**
@@ -40,7 +40,7 @@ export function mockScoreTrend(): ScoreTrendSeries[] {
     key: 'composite',
     name: '综合分',
     isObservation: false,
-    points: [58.75, 70.0, 82.5].map((value, index) => ({
+    points: [58.75, 70.0, 78.75].map((value, index) => ({
       label: labels[index],
       date: dates[index],
       value
@@ -139,7 +139,7 @@ export function mockAgentChatReply(question: string): string {
     return '针对「前沿与交叉学科」：本次课未涉及学科前沿，但该维度为观测项、不单独扣分。若想用作亮点，可在引入环节用 2 分钟关联一个最新研究或行业动态即可，不必强求。'
   }
   if (/趋势|进步|提升/.test(text)) {
-    return '从近 3 次课看，你的综合分由 58.75 → 70.00 → 82.50 稳步上升，互动维度提升最明显（40 → 60 → 80）。建议保持当前的提问—讨论设计，并重点补齐「内容深度」的案例支撑。'
+    return '从近 3 次课看，你的综合分由 58.75 → 70.00 → 78.75 稳步上升，互动维度提升最明显（37.5 → 50 → 75）。建议保持当前的提问—讨论设计，并重点补齐「内容深度」的案例支撑。'
   }
 
   return '收到。结合本次课的转写与评分，我建议优先关注「学生互动」与「内容深度」两个维度：互动上延长提问后的等待时间，内容上每个知识点补充一个真实案例。需要我针对某个维度给出更具体的课堂动作清单吗？'

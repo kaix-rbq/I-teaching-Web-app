@@ -24,6 +24,15 @@ export function getRoleMeta(role?: Role): RoleMeta | undefined {
   return ROLES.find((item) => item.value === role)
 }
 
+/**
+ * 各角色登录后的默认落点。
+ * 教师端不设「质量驾驶舱」，直接以「我的质量档案」作为首页（信息不重复）。
+ */
+export function defaultRouteName(role?: Role): string {
+  if (role === 'teacher') return 'profile-quality'
+  return 'dashboard'
+}
+
 export interface OptionMeta<T extends string> {
   value: T
   label: string

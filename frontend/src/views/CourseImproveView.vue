@@ -1,19 +1,18 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import PageHeader from '@/components/common/PageHeader.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import AiBadge from '@/components/common/AiBadge.vue'
 import ResourceList from '@/components/course/ResourceList.vue'
 import ResourceUploader from '@/components/course/ResourceUploader.vue'
-import QualityCompass from '@/components/evaluation/QualityCompass.vue'
-import ScoreDimensionsCard from '@/components/evaluation/ScoreDimensionsCard.vue'
+import ScoreRadar from '@/components/evaluation/ScoreRadar.vue'
 import EvaluationTimeline from '@/components/evaluation/EvaluationTimeline.vue'
 import ScoreTrendChart from '@/components/evaluation/ScoreTrendChart.vue'
 import AgentSuggestionList from '@/components/evaluation/AgentSuggestionList.vue'
 import AgentChat from '@/components/evaluation/AgentChat.vue'
 import { fetchCourseDetailApi, fetchCourseEvaluationSummaryApi } from '@/api/course'
-import { fetchTeacherEvaluationsApi, fetchTeacherSummaryApi } from '@/api/teacher'
+import { fetchTeacherEvaluationsApi } from '@/api/teacher'
 import { fetchAgentSuggestionsApi, fetchScoreTrendApi } from '@/api/agent'
 import {
   deleteResourceApi,
@@ -26,15 +25,25 @@ import { useAuthStore } from '@/stores/auth'
 import { useDictStore } from '@/stores/dict'
 import {
   CURRENT_SEMESTER,
+  EVALUATION_DIMENSIONS,
   getCourseStatusMeta,
   MAX_RESOURCE_SIZE,
   RESOURCE_ACCEPT
 } from '@/constants'
+import { scoreTone, scoreToneColor } from '@/utils/format'
 import type { Course, CourseEvaluationSummary } from '@/types/course'
 import type { Resource } from '@/types/resource'
 import type { AgentSuggestion } from '@/types/agent'
-import type { ScoreTrendSeries, TeacherSummary, TeacherTimelineItem } from '@/types/teacher'
+import type { ScoreTrendSeries, TeacherTimelineItem } from '@/types/teacher'
 
+/**
+ * 教学提优页（教师）。
+ * 排版原则（避免与「我的质量档案」重复）：
+ *   1. 课程基本信息置顶；
+ *   2. 「本课程综合评分」：五维双源横向柱条（增长动画）+ 综合分雷达；
+ *   3. 督导评语流 / 智能体提优建议 / 分数趋势自上而下；
+ *   4. 资源管理入口置于页面最下方。
+ */
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
@@ -44,19 +53,18 @@ const courseId = computed(() => String(route.params.id ?? ''))
 
 const course = ref<Course | null>(null)
 const courseSummary = ref<CourseEvaluationSummary | null>(null)
-const teacherSummary = ref<TeacherSummary | null>(null)
 const timeline = ref<TeacherTimelineItem[]>([])
 const suggestions = ref<AgentSuggestion[]>([])
 const trend = ref<ScoreTrendSeries[]>([])
 
 const loading = ref(true)
 const error = ref(false)
-const scoreLoading = ref(false)
 const commentLoading = ref(false)
 const improveLoading = ref(false)
 const semester = ref('')
 const trendDimension = ref('composite')
 const chatVisible = ref(false)
+const barsReady = ref(false)
 
 const resources = ref<Resource[]>([])
 const resourceLoading = ref(false)
@@ -64,17 +72,6 @@ const uploading = ref(false)
 const uploadProgress = ref(0)
 
 const { messages, streaming, send, stop } = useAgentChat()
-
-const FLAG_TEXT: Record<string, string> = {
-  no_data: '暂无评价',
-  sample_insufficient: '样本不足，当前分数代表性有限',
-  disjoint: '督导与智能体评价尚未对齐，当前分数代表性有限',
-  formula_mixed: '口径版本混杂，请谨慎解读'
-}
-
-function flagText(flag: string): string {
-  return FLAG_TEXT[flag] ?? flag
-}
 
 const canManageResources = computed(
   () => auth.role === 'teacher' && course.value?.teacherId === auth.user?.id
@@ -89,7 +86,6 @@ const summaryItems = computed(() => {
   return [
     { label: '学分', value: course.value.credit, unit: '分' },
     { label: '学时', value: course.value.hours, unit: '学时' },
-    { label: '学期', value: course.value.semester, unit: '' },
     {
       label: '班级',
       value: course.value.classes?.length ?? course.value.classCount,
@@ -98,6 +94,35 @@ const summaryItems = computed(() => {
     { label: '学生人次', value: course.value.studentCount, unit: '人次' }
   ]
 })
+
+const compositeScore = computed(() => courseSummary.value?.compositeScore ?? null)
+const compositeColor = computed(() => scoreToneColor(scoreTone(compositeScore.value)))
+
+/** 五维双源柱条：每维督导 / AI 两条，宽度为 0-100 分。 */
+const dimensionRows = computed(() =>
+  EVALUATION_DIMENSIONS.map((meta) => {
+    const dim = courseSummary.value?.dimensions.find((item) => item.key === meta.key)
+    return {
+      ...meta,
+      supervisorScore: dim?.supervisorScore ?? null,
+      agentScore: dim?.agentScore ?? null,
+      score: dim?.score ?? null,
+      supervisorRatio: barsReady.value ? Math.max(0, Math.min(100, dim?.supervisorScore ?? 0)) : 0,
+      agentRatio: barsReady.value ? Math.max(0, Math.min(100, dim?.agentScore ?? 0)) : 0
+    }
+  })
+)
+
+const courseRadarItems = computed(() =>
+  (courseSummary.value?.dimensions ?? []).map((dim) => ({
+    key: dim.key,
+    name: EVALUATION_DIMENSIONS.find((item) => item.key === dim.key)?.shortName ?? dim.name,
+    score: dim.score,
+    supervisorScore: dim.supervisorScore,
+    agentScore: dim.agentScore,
+    isObservation: dim.isObservation
+  }))
+)
 
 /** 本课程的历次评价（按课次倒序），用于督导评语区块 */
 const courseTimeline = computed(() =>
@@ -118,7 +143,11 @@ const activeTrend = computed(
 
 const activeTrendPoints = computed(() => activeTrend.value?.points ?? [])
 
-async function loadCourse(): Promise<void> {
+function formatScore(score: number | null | undefined): string {
+  return score === null || score === undefined ? '—' : score.toFixed(2)
+}
+
+async function loadPage(): Promise<void> {
   loading.value = true
   error.value = false
   try {
@@ -128,23 +157,17 @@ async function loadCourse(): Promise<void> {
     error.value = true
     course.value = null
     loading.value = false
+    return
   }
+  loading.value = false
+  await Promise.all([loadResources(), loadScores(), loadImprove()])
+  await nextTick()
+  barsReady.value = true
 }
 
 async function loadScores(): Promise<void> {
   const params = semester.value ? { semester: semester.value } : {}
-  scoreLoading.value = true
-  try {
-    courseSummary.value = await fetchCourseEvaluationSummaryApi(
-      courseId.value,
-      params
-    ).catch(() => null)
-    teacherSummary.value = auth.user?.id
-      ? await fetchTeacherSummaryApi(auth.user.id, params).catch(() => null)
-      : null
-  } finally {
-    scoreLoading.value = false
-  }
+  courseSummary.value = await fetchCourseEvaluationSummaryApi(courseId.value, params).catch(() => null)
 
   commentLoading.value = true
   try {
@@ -179,14 +202,6 @@ async function loadImprove(): Promise<void> {
   } finally {
     improveLoading.value = false
   }
-}
-
-async function loadPage(): Promise<void> {
-  loading.value = true
-  await loadCourse()
-  if (error.value) return
-  loading.value = false
-  await Promise.all([loadResources(), loadScores(), loadImprove()])
 }
 
 function handleSemesterChange(): void {
@@ -278,7 +293,7 @@ onMounted(async () => {
           </el-tag>
         </div>
       </template>
-      <template #subtitle>课程质量驾驶舱 · 督导评分与 AI 建议双源驱动</template>
+      <template #subtitle>本课程提优 · 督导评分与 AI 建议双源驱动</template>
       <template #actions>
         <el-select
           v-model="semester"
@@ -287,12 +302,7 @@ onMounted(async () => {
           class="course-improve__semester"
           @change="handleSemesterChange"
         >
-          <el-option
-            v-for="item in dict.semesters"
-            :key="item"
-            :label="item"
-            :value="item"
-          />
+          <el-option v-for="item in dict.semesters" :key="item" :label="item" :value="item" />
         </el-select>
       </template>
     </PageHeader>
@@ -315,187 +325,174 @@ onMounted(async () => {
     </EmptyState>
 
     <template v-else>
-      <!-- 驾驶舱层：本课程质量第一眼（罗盘 | 雷达 | 样本口径） -->
-      <section class="course-improve__cockpit">
-        <div class="course-improve__cockpit-card">
-          <h2 class="course-improve__card-title">本课程综合分 · 双源罗盘</h2>
-          <QualityCompass :summary="courseSummary" :loading="scoreLoading" size="lg" />
+      <!-- 1. 课程基本信息置顶 -->
+      <section class="course-improve__info">
+        <div class="course-improve__info-main">
+          <div class="course-improve__info-head">
+            <h2 class="course-improve__info-name">{{ course.name }}</h2>
+            <el-tag effect="plain">{{ course.code }}</el-tag>
+          </div>
+          <p class="course-improve__info-desc">{{ course.description || '暂无课程简介' }}</p>
+          <p class="course-improve__info-meta">
+            <span>所属教研室：{{ course.department }}</span>
+            <span>授课教师：{{ course.teacherName }}</span>
+            <span>学期：{{ course.semester }}</span>
+          </p>
         </div>
-
-        <div class="course-improve__cockpit-card">
-          <ScoreDimensionsCard :summary="courseSummary" title="本课程五维评分 · 双源叠加" />
-        </div>
-
-        <div class="course-improve__cockpit-card">
-          <h2 class="course-improve__card-title">样本与口径</h2>
-          <template v-if="courseSummary">
-            <dl class="course-improve__facts">
-              <div>
-                <dt>本课程已评</dt>
-                <dd class="tabular-nums">
-                  {{ courseSummary.sample.evaluatedCount }} / {{ courseSummary.sample.sessionCount }} 场
-                </dd>
-              </div>
-              <div>
-                <dt>评价来源</dt>
-                <dd class="tabular-nums">
-                  督导 {{ courseSummary.sample.supervisorCount }} · AI
-                  {{ courseSummary.sample.agentCount }}
-                </dd>
-              </div>
-              <div>
-                <dt>双源对齐</dt>
-                <dd class="tabular-nums">{{ courseSummary.sample.alignedCount }} 场</dd>
-              </div>
-              <div>
-                <dt>融合权重</dt>
-                <dd>
-                  督导 {{ Math.round(courseSummary.weights.supervisor * 100) }}% / 智能体
-                  {{ Math.round(courseSummary.weights.agent * 100) }}%
-                </dd>
-              </div>
-              <div>
-                <dt>口径版本</dt>
-                <dd>{{ courseSummary.formulaVersion || '—' }}</dd>
-              </div>
-            </dl>
-            <div v-if="courseSummary.flags.length" class="course-improve__flags">
-              <el-alert
-                v-for="flag in courseSummary.flags"
-                :key="flag"
-                :title="flagText(flag)"
-                type="warning"
-                :closable="false"
-                show-icon
-              />
-            </div>
-            <p v-else class="course-improve__caliber-ok">样本与口径无异常提示</p>
-          </template>
-          <p v-else class="course-improve__muted">本课程暂无评价</p>
+        <div class="course-improve__info-stats">
+          <div v-for="item in summaryItems" :key="item.label" class="course-improve__info-stat">
+            <span class="course-improve__info-value tabular-nums">
+              {{ item.value }}<em v-if="item.unit">{{ item.unit }}</em>
+            </span>
+            <span class="course-improve__info-label">{{ item.label }}</span>
+          </div>
         </div>
       </section>
 
-      <!-- 明细层：左 = 我的表现 + 督导评语流；右 = 资源 + 基本信息（折叠卡） -->
-      <div class="course-improve__detail">
-        <div class="course-improve__detail-main">
-          <section class="course-improve__block">
-            <h2 class="course-improve__block-title">我的教学表现（本学期全部课程口径）</h2>
-            <ScoreDimensionsCard :summary="teacherSummary" title="五维评分 · 双源叠加" />
-            <p class="course-improve__muted course-improve__compare">
-              进步幅度将在历史数据齐备后提供。
-            </p>
-          </section>
-
-          <section class="course-improve__block">
-            <h2 class="course-improve__block-title">督导评语流</h2>
-            <EvaluationTimeline
-              :items="courseTimeline"
-              :loading="commentLoading"
-              empty-text="本课程暂无督导评语"
-            />
-          </section>
-        </div>
-
-        <div class="course-improve__detail-side">
-          <section class="course-improve__block">
-            <h2 class="course-improve__block-title">课程资源</h2>
-            <ResourceUploader
-              v-if="canManageResources"
-              :accept="RESOURCE_ACCEPT"
-              :max-size="MAX_RESOURCE_SIZE"
-              :uploading="uploading"
-              :progress="uploadProgress"
-              @file="handleUpload"
-            />
-            <div class="course-improve__resource-list">
-              <ResourceList
-                :resources="resources"
-                :can-manage="canManageResources"
-                :loading="resourceLoading"
-                @download="handleDownload"
-                @delete="handleDelete"
-              />
+      <!-- 2. 本课程综合评分：五维双源柱条（增长动画） + 综合分雷达 -->
+      <section class="course-improve__score">
+        <div class="course-improve__score-main">
+          <div class="course-improve__score-head">
+            <h2 class="course-improve__section-title">您在当前课程获得的综合评分</h2>
+            <div class="course-improve__legend">
+              <span class="course-improve__legend-item">
+                <i class="course-improve__swatch course-improve__swatch--sup" />督导评价
+              </span>
+              <span class="course-improve__legend-item">
+                <i class="course-improve__swatch course-improve__swatch--ai" />AI 智能体评价
+              </span>
             </div>
-          </section>
+          </div>
 
-          <section class="course-improve__block course-improve__block--flush">
-            <el-collapse class="course-improve__info-collapse">
-              <el-collapse-item name="info">
-                <template #title>
-                  <span class="course-improve__block-title course-improve__block-title--inline">
-                    课程基本信息
-                  </span>
-                </template>
-                <div class="course-improve__summary">
-                  <div
-                    v-for="item in summaryItems"
-                    :key="item.label"
-                    class="course-improve__summary-item"
-                  >
-                    <span class="course-improve__summary-value tabular-nums">
-                      {{ item.value }}<em v-if="item.unit">{{ item.unit }}</em>
-                    </span>
-                    <span class="course-improve__summary-label">{{ item.label }}</span>
-                  </div>
+          <ul v-if="dimensionRows.length" class="course-improve__dims">
+            <li v-for="row in dimensionRows" :key="row.key" class="course-improve__dim">
+              <div class="course-improve__dim-head">
+                <span class="course-improve__dim-name">
+                  {{ row.name }}
+                  <el-tag v-if="row.isObservation" type="warning" size="small" effect="light" round>
+                    观测项
+                  </el-tag>
+                  <el-tag v-else type="info" size="small" effect="plain" round>
+                    {{ Math.round(row.weight * 100) }}%
+                  </el-tag>
+                </span>
+                <span class="course-improve__dim-score tabular-nums">
+                  {{ formatScore(row.score) }}
+                </span>
+              </div>
+
+              <div class="course-improve__bar-row">
+                <span class="course-improve__bar-label">督导</span>
+                <div class="course-improve__bar-track">
+                  <i
+                    class="course-improve__bar-fill course-improve__bar-fill--sup"
+                    :style="{ width: `${row.supervisorRatio}%` }"
+                  />
                 </div>
-                <p class="course-improve__info">
-                  <span>所属教研室：{{ course.department }}</span>
-                  <span>授课教师：{{ course.teacherName }}</span>
-                  <span>学期：{{ course.semester }}</span>
-                </p>
-              </el-collapse-item>
-            </el-collapse>
-          </section>
+                <span class="course-improve__bar-value tabular-nums">
+                  {{ formatScore(row.supervisorScore) }}
+                </span>
+              </div>
+
+              <div class="course-improve__bar-row">
+                <span class="course-improve__bar-label">AI</span>
+                <div class="course-improve__bar-track">
+                  <i
+                    class="course-improve__bar-fill course-improve__bar-fill--ai"
+                    :style="{ width: `${row.agentRatio}%` }"
+                  />
+                </div>
+                <span class="course-improve__bar-value tabular-nums">
+                  {{ formatScore(row.agentScore) }}
+                </span>
+              </div>
+            </li>
+          </ul>
+          <EmptyState v-else description="本课程暂无评价" />
         </div>
-      </div>
 
-      <!-- AI 层：建议卡 + 趋势折线 + 对话抽屉入口 -->
-      <div class="course-improve__ai">
-        <section class="course-improve__block">
-          <div class="course-improve__block-head">
-            <h2 class="course-improve__block-title course-improve__block-title--inline">
-              <AiBadge text="AI 建议" />
-              智能体提优建议
-            </h2>
-            <el-button
-              type="primary"
-              plain
-              round
-              size="small"
-              @click="chatVisible = true"
-            >
-              与 AI 助手对话 →
-            </el-button>
+        <aside class="course-improve__score-side">
+          <div class="course-improve__composite">
+            <span class="course-improve__composite-label">综合分</span>
+            <span class="course-improve__composite-value score-num" :style="{ color: compositeColor }">
+              {{ formatScore(compositeScore) }}
+            </span>
+            <span class="course-improve__composite-sample">
+              已评 {{ courseSummary?.sample.evaluatedCount ?? 0 }} / {{ courseSummary?.sample.sessionCount ?? 0 }} 场
+            </span>
           </div>
-          <AgentSuggestionList :items="suggestions" :loading="improveLoading" />
-        </section>
+          <ScoreRadar :items="courseRadarItems" :max="100" />
+        </aside>
+      </section>
 
-        <section class="course-improve__block">
-          <div class="course-improve__block-head">
-            <h2 class="course-improve__block-title course-improve__block-title--inline">
-              <AiBadge text="AI 趋势" />
-              分数趋势
-            </h2>
-            <el-radio-group v-model="trendDimension" size="small">
-              <el-radio-button
-                v-for="option in trendOptions"
-                :key="option.key"
-                :value="option.key"
-              >
-                {{ option.name }}
-              </el-radio-button>
-            </el-radio-group>
-          </div>
-          <ScoreTrendChart
-            :points="activeTrendPoints"
-            :dimension-name="activeTrend?.name"
-            :loading="improveLoading"
+      <!-- 3. 督导评语流 -->
+      <section class="course-improve__block">
+        <h2 class="course-improve__section-title">督导评语流</h2>
+        <EvaluationTimeline
+          :items="courseTimeline"
+          :loading="commentLoading"
+          empty-text="本课程暂无督导评语"
+        />
+      </section>
+
+      <!-- 4. 智能体提优建议 -->
+      <section class="course-improve__block">
+        <div class="course-improve__block-head">
+          <h2 class="course-improve__section-title course-improve__section-title--inline">
+            <AiBadge text="AI 建议" />
+            智能体提优建议
+          </h2>
+          <el-button type="primary" plain round size="small" @click="chatVisible = true">
+            与 AI 助手对话 →
+          </el-button>
+        </div>
+        <AgentSuggestionList :items="suggestions" :loading="improveLoading" />
+      </section>
+
+      <!-- 5. 分数趋势 -->
+      <section class="course-improve__block">
+        <div class="course-improve__block-head">
+          <h2 class="course-improve__section-title course-improve__section-title--inline">
+            <AiBadge text="AI 趋势" />
+            分数趋势
+          </h2>
+          <el-radio-group v-model="trendDimension" size="small">
+            <el-radio-button v-for="option in trendOptions" :key="option.key" :value="option.key">
+              {{ option.name }}
+            </el-radio-button>
+          </el-radio-group>
+        </div>
+        <ScoreTrendChart
+          :points="activeTrendPoints"
+          :dimension-name="activeTrend?.name"
+          :loading="improveLoading"
+        />
+      </section>
+
+      <!-- 6. 资源管理入口置底 -->
+      <section class="course-improve__block">
+        <h2 class="course-improve__section-title">课程资源</h2>
+        <ResourceUploader
+          v-if="canManageResources"
+          :accept="RESOURCE_ACCEPT"
+          :max-size="MAX_RESOURCE_SIZE"
+          :uploading="uploading"
+          :progress="uploadProgress"
+          @file="handleUpload"
+        />
+        <div class="course-improve__resource-list">
+          <ResourceList
+            :resources="resources"
+            :can-manage="canManageResources"
+            :loading="resourceLoading"
+            @download="handleDownload"
+            @delete="handleDelete"
           />
-        </section>
-      </div>
+        </div>
+      </section>
     </template>
 
-    <!-- 右下角常驻提优助手（四芒星徽标，点开 420px 抽屉流式对话） -->
+    <!-- 右下角常驻提优助手 -->
     <button
       v-if="course"
       type="button"
@@ -512,13 +509,7 @@ onMounted(async () => {
       <span>提优助手</span>
     </button>
 
-    <el-drawer
-      v-model="chatVisible"
-      title="课程提优助手"
-      direction="rtl"
-      size="420px"
-      append-to-body
-    >
+    <el-drawer v-model="chatVisible" title="课程提优助手" direction="rtl" size="420px" append-to-body>
       <template #header>
         <div class="course-improve__drawer-head">
           <AiBadge text="AI 助手" />
@@ -552,155 +543,73 @@ onMounted(async () => {
     margin-bottom: var(--spacing-4);
   }
 
-  &__cockpit {
+  /* 课程基本信息置顶 */
+  &__info {
     display: grid;
-    grid-template-columns: minmax(260px, 1fr) minmax(320px, 1.5fr) minmax(260px, 1fr);
-    gap: var(--spacing-4);
+    grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+    gap: var(--spacing-6);
+    padding: var(--spacing-6);
     margin-bottom: var(--spacing-4);
-
-    @media (max-width: 1280px) {
-      grid-template-columns: 1fr 1fr;
-    }
-
-    @media (max-width: 960px) {
-      grid-template-columns: 1fr;
-    }
-  }
-
-  &__cockpit-card {
-    display: flex;
-    flex-direction: column;
-    padding: var(--spacing-5);
     background-color: var(--color-bg-card);
     border: 1px solid var(--color-divider);
     border-radius: var(--radius-lg);
     box-shadow: var(--shadow-card);
+
+    @media (max-width: 1024px) {
+      grid-template-columns: 1fr;
+    }
   }
 
-  &__card-title {
-    margin-bottom: var(--spacing-3);
-    padding-bottom: var(--spacing-2);
-    font-size: var(--font-size-base);
-    color: var(--color-text-primary);
-    border-bottom: 1px solid var(--color-divider);
-  }
-
-  &__facts {
+  &__info-head {
     display: flex;
-    flex-direction: column;
     gap: var(--spacing-3);
-
-    dt {
-      font-size: var(--font-size-xs);
-      color: var(--color-text-tertiary);
-    }
-
-    dd {
-      font-size: var(--font-size-sm);
-      font-weight: 500;
-      color: var(--color-text-primary);
-    }
+    align-items: center;
   }
 
-  &__flags {
+  &__info-name {
+    font-size: var(--font-size-2xl);
+    color: var(--color-text-primary);
+  }
+
+  &__info-desc {
+    margin-top: var(--spacing-2);
+    font-size: var(--font-size-sm);
+    line-height: 1.7;
+    color: var(--color-text-secondary);
+  }
+
+  &__info-meta {
     display: flex;
-    flex-direction: column;
-    gap: var(--spacing-2);
-    margin-top: var(--spacing-4);
-  }
-
-  &__caliber-ok {
-    margin-top: var(--spacing-4);
-    font-size: var(--font-size-xs);
+    flex-wrap: wrap;
+    gap: var(--spacing-5);
+    margin-top: var(--spacing-3);
+    font-size: var(--font-size-sm);
     color: var(--color-text-tertiary);
   }
 
-  &__detail {
+  &__info-stats {
     display: grid;
-    grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr);
-    gap: var(--spacing-4);
-    align-items: start;
-    margin-bottom: var(--spacing-4);
-
-    @media (max-width: 1280px) {
-      grid-template-columns: 1fr;
-    }
-  }
-
-  &__detail-main,
-  &__detail-side {
-    display: flex;
-    flex-direction: column;
-    gap: var(--spacing-4);
-    min-width: 0;
-  }
-
-  &__ai {
-    display: flex;
-    flex-direction: column;
-    gap: var(--spacing-4);
-  }
-
-  &__block {
-    padding: var(--spacing-6);
-    background-color: var(--color-bg-card);
-    border: 1px solid var(--color-divider);
-    border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-card);
-
-    &--flush {
-      padding: var(--spacing-3) var(--spacing-5);
-    }
-  }
-
-  &__block-head {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: space-between;
+    grid-template-columns: repeat(4, 1fr);
     gap: var(--spacing-3);
-    margin-bottom: var(--spacing-4);
-  }
+    align-content: center;
+    padding-left: var(--spacing-6);
+    border-left: 1px solid var(--color-divider);
 
-  &__block-title {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--spacing-2);
-    align-items: center;
-    margin-bottom: var(--spacing-4);
-    font-size: var(--font-size-xl);
-    color: var(--color-text-primary);
-
-    &--inline {
-      margin-bottom: 0;
-      font-size: var(--font-size-lg);
+    @media (max-width: 1024px) {
+      padding-left: 0;
+      border-left: none;
     }
   }
 
-  &__compare {
-    margin-top: var(--spacing-3);
-  }
-
-  &__summary {
-    display: grid;
-    grid-template-columns: repeat(5, 1fr);
-    gap: var(--spacing-4);
-    padding: var(--spacing-4) 0;
-
-    @media (max-width: 1280px) {
-      grid-template-columns: repeat(3, 1fr);
-    }
-  }
-
-  &__summary-item {
+  &__info-stat {
     display: flex;
     flex-direction: column;
-    align-items: center;
     gap: var(--spacing-1);
+    text-align: center;
   }
 
-  &__summary-value {
-    font-size: var(--font-size-stat);
+  &__info-value {
+    font-size: var(--font-size-xl);
     font-weight: 600;
     color: var(--color-text-primary);
 
@@ -713,36 +622,213 @@ onMounted(async () => {
     }
   }
 
-  &__summary-label {
-    font-size: var(--font-size-sm);
+  &__info-label {
+    font-size: var(--font-size-xs);
     color: var(--color-text-tertiary);
   }
 
-  &__info {
+  /* 综合评分区 */
+  &__score {
+    display: grid;
+    grid-template-columns: minmax(0, 1.8fr) minmax(240px, 1fr);
+    gap: var(--spacing-4);
+    margin-bottom: var(--spacing-4);
+
+    @media (max-width: 1024px) {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  &__score-main,
+  &__score-side {
+    padding: var(--spacing-6);
+    background-color: var(--color-bg-card);
+    border: 1px solid var(--color-divider);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-card);
+  }
+
+  &__score-head {
     display: flex;
     flex-wrap: wrap;
-    gap: var(--spacing-6);
-    margin-top: var(--spacing-4);
-    font-size: var(--font-size-sm);
+    gap: var(--spacing-3);
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: var(--spacing-5);
+  }
+
+  &__section-title {
+    font-size: var(--font-size-xl);
+    color: var(--color-text-primary);
+
+    &--inline {
+      display: flex;
+      gap: var(--spacing-2);
+      align-items: center;
+    }
+  }
+
+  &__legend {
+    display: flex;
+    gap: var(--spacing-4);
+    font-size: var(--font-size-xs);
     color: var(--color-text-secondary);
   }
 
-  &__info-collapse {
-    border: none;
+  &__legend-item {
+    display: inline-flex;
+    gap: 6px;
+    align-items: center;
+  }
 
-    :deep(.el-collapse-item__header) {
-      font-size: var(--font-size-lg);
-      font-weight: 600;
-      color: var(--color-text-primary);
+  &__swatch {
+    display: inline-block;
+    width: 18px;
+    height: 8px;
+    border-radius: 999px;
+
+    &--sup {
+      background-color: var(--color-primary);
     }
 
-    :deep(.el-collapse-item__wrap) {
-      background-color: transparent;
+    &--ai {
+      background-color: var(--color-ai-bright);
+    }
+  }
+
+  &__dims {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-4);
+    padding: 0;
+    margin: 0;
+    list-style: none;
+  }
+
+  &__dim {
+    padding-bottom: var(--spacing-3);
+    border-bottom: 1px dashed var(--color-divider);
+
+    &:last-child {
+      padding-bottom: 0;
+      border-bottom: none;
+    }
+  }
+
+  &__dim-head {
+    display: flex;
+    gap: var(--spacing-2);
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: var(--spacing-2);
+  }
+
+  &__dim-name {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--spacing-2);
+    align-items: center;
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+    color: var(--color-text-primary);
+  }
+
+  &__dim-score {
+    font-size: var(--font-size-lg);
+    font-weight: 600;
+    color: var(--color-text-primary);
+  }
+
+  &__bar-row {
+    display: grid;
+    grid-template-columns: 40px 1fr 48px;
+    gap: var(--spacing-2);
+    align-items: center;
+    margin-bottom: var(--spacing-1);
+  }
+
+  &__bar-label {
+    font-size: var(--font-size-xs);
+    color: var(--color-text-tertiary);
+  }
+
+  &__bar-track {
+    height: 10px;
+    overflow: hidden;
+    background-color: var(--color-bg-page);
+    border: 1px solid var(--color-divider);
+    border-radius: 999px;
+  }
+
+  &__bar-fill {
+    display: block;
+    height: 100%;
+    border-radius: 999px;
+    transition: width 0.9s var(--ease-out-soft, ease);
+
+    &--sup {
+      background-color: var(--color-primary);
     }
 
-    :deep(.el-collapse-item__content) {
-      padding-bottom: var(--spacing-2);
+    &--ai {
+      background-color: var(--color-ai-bright);
     }
+  }
+
+  &__bar-value {
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+    color: var(--color-text-secondary);
+    text-align: right;
+  }
+
+  &__score-side {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+  }
+
+  &__composite {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    margin-bottom: var(--spacing-2);
+  }
+
+  &__composite-label {
+    font-size: var(--font-size-xs);
+    color: var(--color-text-tertiary);
+  }
+
+  &__composite-value {
+    font-size: var(--font-size-score-xl);
+    font-weight: 600;
+    line-height: 1.1;
+  }
+
+  &__composite-sample {
+    margin-top: 2px;
+    font-size: var(--font-size-xs);
+    color: var(--color-text-tertiary);
+  }
+
+  &__block {
+    padding: var(--spacing-6);
+    margin-bottom: var(--spacing-4);
+    background-color: var(--color-bg-card);
+    border: 1px solid var(--color-divider);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-card);
+  }
+
+  &__block-head {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--spacing-3);
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: var(--spacing-4);
   }
 
   &__resource-list {
@@ -791,11 +877,6 @@ onMounted(async () => {
     font-size: var(--font-size-lg);
     font-weight: 600;
     color: var(--color-text-primary);
-  }
-
-  &__muted {
-    font-size: var(--font-size-sm);
-    color: var(--color-text-tertiary);
   }
 }
 </style>
