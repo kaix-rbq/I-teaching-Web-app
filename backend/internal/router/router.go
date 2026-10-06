@@ -68,7 +68,7 @@ func New(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) (*gin.Engine, se
 
 	gin.SetMode(cfg.Server.Mode)
 	r := gin.New()
-	r.Use(middleware.Recovery(), middleware.Logger(), middleware.CORS(cfg.CORS.Origins))
+	r.Use(middleware.Recovery(), middleware.Logger(), middleware.CORS(cfg.CORS.Origins, cfg.CORS.AllowAnyOrigin))
 
 	// 运维探活（同时挂在根路径与 /api/v1 下，兼容验收脚本）
 	r.GET("/healthz", handler.Health)
