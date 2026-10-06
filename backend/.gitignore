@@ -1,6 +1,12 @@
 # 本地配置（含密钥），只提交 config.example.yaml
 config.yaml
 
+# 本地环境变量（含 ASR API Key 等真实凭据），严禁入库
+.env
+.env.local
+.env.*.local
+*.local.env
+
 # 上传的课程资源文件
 uploads/
 

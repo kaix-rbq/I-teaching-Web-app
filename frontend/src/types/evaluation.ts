@@ -103,6 +103,12 @@ export interface RecordingDTO {
   size: number
   durationSec: number
   streamUrl: string
+  /**
+   * 带短时播放票据的流式地址，可直接交给 <audio src>。
+   * 浏览器播放期间的 Range 请求无法携带 Authorization 头，只能靠查询串鉴权；
+   * 仅督导侧返回（教师侧为空串）。
+   */
+  playbackUrl: string
 }
 
 export interface TranscriptSegment {

@@ -162,7 +162,12 @@ const media = ref<Awaited<ReturnType<typeof fetchSessionTranscriptApi>>>({ recor
 const mediaLoading = ref(false)
 const uploadProgress = ref(0)
 let pollTimer: ReturnType<typeof setTimeout> | undefined
-const recordingURL = computed(() => media.value.recording ? `${import.meta.env.VITE_API_BASE_URL || '/api/v1'}${media.value.recording.streamUrl}` : '')
+// 优先用带短时票据的 playbackUrl：<audio> 的 Range 请求带不了 Authorization 头。
+// 教师侧服务端不签发票据（playbackUrl 为空），此时退回空串即不渲染播放器。
+const recordingURL = computed(() => {
+  const url = media.value.recording?.playbackUrl
+  return url ? `${import.meta.env.VITE_API_BASE_URL || '/api/v1'}${url}` : ''
+})
 
 async function loadMedia(): Promise<void> {
   mediaLoading.value = true

@@ -1,26 +1,20 @@
 <script setup lang="ts">
-import { onBeforeUnmount, ref, watch } from 'vue'
-import { TOKEN_KEY } from '@/constants'
-
-const props = defineProps<{ src: string; name?: string }>()
-const playableSrc = ref('')
-let objectURL = ''
-async function load(): Promise<void> {
-  if (!props.src) return
-  const response = await fetch(props.src, { headers: { Authorization: `Bearer ${localStorage.getItem(TOKEN_KEY) || ''}` } })
-  if (!response.ok) return
-  if (objectURL) URL.revokeObjectURL(objectURL)
-  objectURL = URL.createObjectURL(await response.blob())
-  playableSrc.value = objectURL
-}
-watch(() => props.src, () => { void load() }, { immediate: true })
-onBeforeUnmount(() => { if (objectURL) URL.revokeObjectURL(objectURL) })
+/**
+ * 课堂录音播放器。
+ *
+ * src 应为带短时票据的播放地址（RecordingDTO.playbackUrl）：<audio> 发出的 Range 请求
+ * 无法携带 Authorization 头，因此服务端为流式路由额外接受 ?ticket= 查询串鉴权。
+ *
+ * 不再使用 fetch + Blob 的旧实现：那样必须整包下载完才能播放，等于废掉 Range，
+ * 45 分钟音频会出现长时间空白且内存峰值很高。
+ */
+defineProps<{ src: string; name?: string }>()
 </script>
 
 <template>
   <div class="audio-player">
     <span class="audio-player__name">{{ name || '课堂录音' }}</span>
-    <audio :src="playableSrc" controls preload="metadata" />
+    <audio v-if="src" :src="src" controls preload="metadata" />
   </div>
 </template>
 

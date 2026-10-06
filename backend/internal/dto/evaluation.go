@@ -115,6 +115,10 @@ type RecordingDTO struct {
 	Size         int64  `json:"size"`
 	DurationSec  int    `json:"durationSec"`
 	StreamURL    string `json:"streamUrl"`
+	// PlaybackURL 是带短时票据的流式播放地址，可直接交给 <audio src>：
+	// 浏览器播放期间会持续发出 Range 请求，无法携带 Authorization 头，只能靠查询串鉴权。
+	// 仅对 supervisor 返回（教师侧恒为空串）；票据绑定录音 id，见 §8.9。
+	PlaybackURL string `json:"playbackUrl"`
 }
 
 type TranscriptSegment struct {

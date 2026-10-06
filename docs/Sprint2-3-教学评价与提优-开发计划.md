@@ -406,8 +406,8 @@ CREATE TABLE `transcripts` (
   `recording_id`   BIGINT UNSIGNED NOT NULL,
   `content`        MEDIUMTEXT NOT NULL COMMENT '纯文本全文（脱敏后）',
   `segments`       JSON NULL COMMENT '[{start,end,speaker,text}]',
-  `engine`         VARCHAR(32) NOT NULL DEFAULT '' COMMENT 'qwen-audio / whisper',
-  `engine_version` VARCHAR(32) NOT NULL DEFAULT '',
+  `engine`         VARCHAR(64) NOT NULL DEFAULT '' COMMENT 'qwen-audio / whisper',
+  `engine_version` VARCHAR(64) NOT NULL DEFAULT '',
   `status`         ENUM('pending','running','done','failed') NOT NULL DEFAULT 'pending',
   `error_message`  VARCHAR(255) NOT NULL DEFAULT '',
   `created_at`     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -426,6 +426,7 @@ CREATE TABLE `transcripts` (
 4. **JSON 列禁止写入空串。** `evaluations.evidence` 是 `JSON` 列，MySQL 8 严格模式对 `''` 抛 `ERROR 3140 Invalid JSON text: "The document is empty"`。Go 模型字段必须用指针（`*string`），督导行写 `NULL`，不能依赖零值 `""`。
 5. **DATE 列比较必须按 `YYYY-MM-DD` 绑定。** 直接把 `time.Time` 交给驱动会被带上时区换算后的时分秒（`2026-09-12 08:00:00`），与 `DATE` 值不相等 → 唯一性预检漏判，最后由数据库 1062 兜底（用户看到 50001 而不是 40901）。仓储层比较 `session_date` 时先 `Format("2006-01-02")`。
 6. **种子 `INSERT` 的列数与值数必须逐行核对。** §3.4 督导评价曾漏 `suggestions` 列，导致 `ERROR 1136 Column count doesn't match value count`，种子数据整体加载失败。
+7. **`engine_version` 必须 ≥ 模型名长度（V6 已放宽到 64）。** 原设计 `VARCHAR(32)`，而真实模型名 `qwen-audio-3.1-asr-flash-filetrans` 有 34 字符，触发 `ERROR 1406 Data too long`——**整条 UPDATE 回滚**，表现为「识别成功、文本已拿到，但 content/segments 全没落库且 status 卡在 running，前端无限轮询」，而这次 ASR 已经计费。见 `migrations/6_transcripts_engine_width.up.sql`。
 
 ### 3.4 演示种子数据（阶段一联调用）
 
