@@ -15,7 +15,44 @@ import (
 type Claims struct {
 	Role   string `json:"role"`
 	DeptID uint64 `json:"did"`
+	// Scope 区分令牌用途：空 = 会话令牌；"playback" = 音频播放票据。
+	Scope string `json:"scp,omitempty"`
+	// RecID 是播放票据绑定的录音 id，杜绝用 A 的票据听 B 的录音。
+	RecID uint64 `json:"rid,omitempty"`
 	jwt.RegisteredClaims
+}
+
+// PlaybackScope 是音频播放票据的 Scope 取值。
+const PlaybackScope = "playback"
+
+// IsPlaybackTicket 判断是否为音频播放票据。
+func (c *Claims) IsPlaybackTicket() bool { return c.Scope == PlaybackScope }
+
+// SignPlayback 签发短时音频播放票据。
+//
+// 用途：<audio> 标签无法携带 Authorization 头，只能把凭据放进查询串，
+// 因此不能直接复用 24h 的会话令牌（会经浏览器历史/Referer/日志长期外泄）。
+// 票据把影响面收敛到「一条录音 × ttl」，且绑定 RecID 防止横向重放。
+//
+// 注意 ttl 必须覆盖整段播放：浏览器播放期间会持续发出多个 Range 请求，
+// 每个请求都会重新校验，票据中途过期会导致播放中断。
+func (m *Manager) SignPlayback(userID uint64, role string, deptID, recordingID uint64, ttl time.Duration, now time.Time) (string, error) {
+	claims := Claims{
+		Role:   role,
+		DeptID: deptID,
+		Scope:  PlaybackScope,
+		RecID:  recordingID,
+		RegisteredClaims: jwt.RegisteredClaims{
+			Subject:   strconv.FormatUint(userID, 10),
+			IssuedAt:  jwt.NewNumericDate(now),
+			ExpiresAt: jwt.NewNumericDate(now.Add(ttl)),
+		},
+	}
+	signed, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(m.secret)
+	if err != nil {
+		return "", fmt.Errorf("jwtutil: 签发播放票据失败: %w", err)
+	}
+	return signed, nil
 }
 
 // UserID 从 Subject 解析出用户 id。
