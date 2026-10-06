@@ -5,6 +5,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
+	"aijiaoxue-api/internal/asr"
 	"aijiaoxue-api/internal/config"
 	"aijiaoxue-api/internal/dto"
 	"aijiaoxue-api/internal/handler"
@@ -17,7 +18,10 @@ import (
 // New 组装 repository → service → handler 并返回唯一的 gin 引擎。
 //
 // 中间件生效顺序：Recovery → Logger → CORS → [Auth → RBAC]（按分组挂载）。
-func New(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) *gin.Engine {
+//
+// 同时返回 recordingSvc：进程重启时需要由 main 驱动一次 RequeueStuck
+// （重新入队中断的转写任务）。路由层不承担生命周期副作用，故不在此处自行启动。
+func New(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) (*gin.Engine, service.RecordingService) {
 	dto.RegisterValidators()
 
 	userRepo := repository.NewUserRepository(db)
@@ -37,7 +41,18 @@ func New(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) *gin.Engine {
 	dictSvc := service.NewDictService(userRepo)
 	sessionSvc := service.NewSessionService(sessionRepo, evaluationRepo, courseRepo, userRepo, cfg.Evaluation)
 	teacherScoreSvc := service.NewTeacherScoreService(userRepo, courseRepo, evaluationRepo, cfg.Evaluation)
-	recordingSvc := service.NewRecordingService(recordingRepo, sessionRepo, cfg.Upload, cfg.Transcription)
+	// ⚠️ 不能写 Transcriber(asr.NewClient(...))：把 nil 的 *asr.Client 装进接口会得到
+	// 非 nil 接口（holds-nil-pointer），service 里的 `s.transcriber == nil` 判断会失效，
+	// 调用时直接空指针 panic。必须显式判空后再赋值。
+	var transcriber service.Transcriber
+	if client := asr.NewClient(cfg.Transcription); client != nil {
+		transcriber = client
+	}
+	recordingSvc := service.NewRecordingService(
+		recordingRepo, sessionRepo,
+		cfg.Upload, cfg.Transcription,
+		jwt, transcriber,
+	)
 	draftSvc := service.NewDraftService(draftRepo, sessionSvc)
 
 	authH := handler.NewAuthHandler(authSvc)
@@ -62,6 +77,12 @@ func New(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) *gin.Engine {
 	v1.GET("/healthz", handler.Health)
 	v1.POST("/auth/login", authH.Login)
 
+	// 🔴 音频流必须挂在 v1 上，不能放进下面的 authed 组：
+	// <audio> 无法携带 Authorization 头，只能靠 ?ticket= 查询串鉴权。
+	// 若放进 authed 组，组上的 Auth 会先执行并直接 401，票据中间件根本没机会运行。
+	// 角色与数据范围校验仍由 RecordingService.Stream 在 service 层强制（教师 403）。
+	v1.GET("/recordings/:id/stream", middleware.AuthOrPlaybackTicket(jwt), recordingH.Stream)
+
 	authed := v1.Group("", middleware.Auth(jwt))
 	authed.GET("/auth/me", authH.Me)
 	authed.POST("/auth/logout", authH.Logout)
@@ -80,7 +101,6 @@ func New(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) *gin.Engine {
 	authed.GET("/sessions/:id/evaluation", sessionH.Evaluation)
 	authed.GET("/sessions/:id/transcript", recordingH.Transcript)
 	authed.POST("/sessions/:id/transcript/retry", recordingH.Retry)
-	authed.GET("/recordings/:id/stream", recordingH.Stream)
 	authed.GET("/teachers/:id/evaluation-summary", teacherScoreH.TeacherSummary)
 	authed.GET("/teachers/:id/evaluations", teacherScoreH.TeacherEvaluations)
 
@@ -107,5 +127,5 @@ func New(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) *gin.Engine {
 	authed.Group("", middleware.RequireRoles(service.RoleDirector, service.RoleSupervisor)).
 		GET("/teacher-scores", teacherScoreH.List)
 
-	return r
+	return r, recordingSvc
 }

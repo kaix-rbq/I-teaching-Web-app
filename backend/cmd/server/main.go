@@ -45,8 +45,27 @@ func main() {
 		os.Exit(1)
 	}
 
+	// 转写配置只记录掩码后的 Key，禁止把原始 APIKey 写进日志。
+	slog.Info("transcription config",
+		"enabled", cfg.Transcription.Enabled,
+		"engine", cfg.Transcription.Engine,
+		"model", cfg.Transcription.Model,
+		"apiKey", cfg.Transcription.MaskedAPIKey(),
+		"maxConcurrency", cfg.Transcription.Concurrency(),
+		"diarization", cfg.Transcription.Diarization,
+	)
+
 	jwtManager := jwtutil.New(cfg.JWT.Secret, cfg.JWT.TTLDuration())
-	engine := router.New(db, cfg, jwtManager)
+	engine, recordingSvc := router.New(db, cfg, jwtManager)
+
+	// 进程重启会把中断的转写永久卡在 running：启动时重新入队（幂等）。
+	recoverCtx, cancelRecover := context.WithTimeout(context.Background(), 10*time.Second)
+	if n, err := recordingSvc.RequeueStuck(recoverCtx); err != nil {
+		slog.Error("requeue stuck transcripts failed", "error", err)
+	} else if n > 0 {
+		slog.Info("requeued stuck transcripts", "count", n)
+	}
+	cancelRecover()
 
 	srv := &http.Server{
 		Addr:              fmt.Sprintf(":%d", cfg.Server.Port),
