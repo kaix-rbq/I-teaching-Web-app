@@ -515,6 +515,60 @@ type DraftDTO struct {
 - 唯一聚合出口：教师级与课程级都调用 `pkg/scoring.Aggregate`，禁止"先算课程级再对课程取平均"。
 - 综合分取**综合均值**口径（各场次综合分的算术平均）；默认数据双侧对齐时与维度加权求和自洽。详见开发计划 §2.5.2。
 
+### 8.9 课堂录音与转写（Sprint 2.2 阶段②，已实现）
+
+> 权限依据见开发计划 §5.1：**音频对教师不可见**（音频中人声不可分割），教师端只开放已脱敏的转写文本。
+
+| 方法 路径 | 权限 | 说明 |
+|-----------|------|------|
+| POST `/sessions/:id/recording` | supervisor | multipart 上传音频（`mp3/wav/m4a`，≤ `upload.maxSize`）；一节课一条主录音，重复上传 40901 |
+| GET `/sessions/:id/transcript` | 登录（数据裁剪） | 返回 `{recording, transcript}`；转写未完成时由 `transcript.status` 供前端轮询 |
+| POST `/sessions/:id/transcript/retry` | supervisor | 转写失败后重新入队（`status` 回到 `pending`） |
+| GET `/recordings/:id/stream` | supervisor | 音频流式播放，支持 Range；**额外允许 `?ticket=` 短时票据**（见下） |
+
+```go
+// RecordingDTO —— 阶段②新增 playbackUrl
+type RecordingDTO struct {
+    ID           uint64 `json:"id"`
+    OriginalName string `json:"originalName"`
+    Format       string `json:"format"`      // mp3 / wav / m4a
+    Size         int64  `json:"size"`
+    DurationSec  int    `json:"durationSec"` // ASR 返回后回写；未完成时为 0
+    StreamURL    string `json:"streamUrl"`   // 需 Authorization 头
+    // PlaybackURL 是带短时票据的流式播放地址，可直接交给 <audio src>：
+    // 浏览器播放期间会持续发出 Range 请求，无法携带 Authorization 头，只能靠查询串鉴权。
+    // 仅对 supervisor 返回（教师侧恒为空串）；票据绑定录音 id，TTL 4 小时。
+    PlaybackURL  string `json:"playbackUrl"`
+}
+
+type TranscriptDTO struct {
+    ID            uint64              `json:"id"`
+    Status        string              `json:"status"` // pending|running|done|failed
+    Content       string              `json:"content"` // 纯文本全文（已脱敏）
+    Segments      []TranscriptSegment `json:"segments"`
+    Engine        string              `json:"engine"`
+    EngineVersion string              `json:"engineVersion"`
+    ErrorMessage  string              `json:"errorMessage"`
+}
+type TranscriptSegment struct {
+    Start   float64 `json:"start"` // 秒
+    End     float64 `json:"end"`   // 秒
+    Speaker string  `json:"speaker"`
+    Text    string  `json:"text"`
+}
+```
+
+- 🔴 **播放票据**：`?ticket=` 只对 `AuthOrPlaybackTicket` 中间件生效（仅挂在流式路由），
+  `scope=playback` 且 `rid` 必须等于路径 `:id`，防止拿 A 的票据听 B 的录音；
+  播放票据**不能**用作会话令牌——`Auth` 中间件显式拒绝 `scope=playback` 的令牌。
+- 🔴 **日志脱敏**：`Logger` 中间件必须把 `ticket`/`token` 等查询参数掩码后再落盘，
+  否则票据进日志等于鉴权形同虚设（见 §9）。
+- **转写异步且解耦**：`transcripts.status` 状态机 `pending→running→done/failed`；
+  ASR 失败只写 `failed` + `error_message`，映射 50003，**绝不影响督导评分主流程**。
+- **进程重启恢复**：启动时 `RequeueStuck` 把遗留的 `pending/running` 转写重新入队（幂等）。
+- **脱敏强制**：写入 `transcripts.content` / `segments` 前必须过 `Scrubber`；
+  当前实现为「称谓正则 + 可选词典」，学生名册建立后可替换为 NER 实现，调用点不变。
+
 ## 9. 中间件规范（`internal/middleware/`）
 
 注册顺序（`router.go` 中唯一生效顺序）：
@@ -527,7 +581,7 @@ Recovery → Logger → CORS → [Auth → RBAC]（按分组挂载）
 |--------|------|------|
 | Recovery | panic 兜底 | 返回 500 + code 50001，日志含堆栈 |
 | Logger | 请求日志（slog JSON） | method/path/status/耗时/user_id（Auth 之后才有 user_id，可将用户注入 context 由 Logger 在响应后输出） |
-| CORS | 白名单放行 | origins 来自配置；允许 `Authorization` 头 |
+| CORS | 白名单放行 | origins 来自配置；允许 `Authorization` 头。`cors.allowAnyOrigin=true` 时回显任意来源（**仅本地联调，生产必须 false**）；因 `AllowCredentials=true`，禁用 `AllowOrigins:["*"]`（会 panic），必须用 `AllowOriginFunc` |
 | Auth | 解析 Bearer token | claims 注入 `c.Set("userID"/"role"/"deptID")`；失败返回 40101 |
 | RequireRoles(roles...) | 角色守卫 | 不匹配返回 40301；`router` 分组挂载，禁止散落在 handler 里判断角色 |
 
