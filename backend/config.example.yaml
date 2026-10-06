@@ -21,13 +21,36 @@ upload:
   maxSize: 104857600 # 100MB
   allowExt: [".pdf", ".doc", ".docx", ".ppt", ".pptx", ".mp4", ".zip"]
 
+# 课堂音频转写（ASR，Sprint 2.2 阶段②）
+#
+# 🔴 API Key 只走环境变量，禁止写入本文件、禁止入库：
+#     export AIJIAOXUE_TRANSCRIPTION_API_KEY="sk-xxxxxxxx"
+#     export AIJIAOXUE_TRANSCRIPTION_WORKSPACE_ID="ws-xxxxxxxx"
+# ⚠️ 变量名是 AIJIAOXUE_TRANSCRIPTION_API_KEY（带下划线）——由 config.Load 中
+#    的 BindEnv 显式绑定；若依赖 AutomaticEnv 自动推导会得到 ..._APIKEY（连写）而失效。
+# enabled=true 但 Key 为空时，服务会在启动阶段直接报错退出（Fail-Fast）。
 transcription:
   enabled: false
-  engine: ""
-  engineVersion: ""
+  engine: "dashscope-qwen-audio-asr" # 写入 transcripts.engine
+  engineVersion: "qwen-audio-3.1-asr-flash-filetrans"
+  model: "qwen-audio-3.1-asr-flash-filetrans"
+  apiKey: "" # 永远留空，由环境变量覆盖
+  workspaceId: "" # 百炼业务空间 ID，如 ws-xxxxxxxx
+  baseUrl: "" # 留空则按 workspaceId 推导；跨地域/代理时再填
+  timeout: "30m" # 45 分钟音频留足余量
+  pollInterval: "5s"
+  maxConcurrency: 2 # 并发转写上限，防止内存与配额被打爆
+  diarization: false # 说话人分离：仅支持单声道音频
+  studentNames: [] # 脱敏词典；为空时仅用称谓正则（开发计划 §5.2-5）
 
 cors:
   origins: ["http://localhost:5173", "http://127.0.0.1:5173"] # 前端 dev 地址
+  # allowAnyOrigin: 放行任意来源，仅限本地/局域网联调。
+  # 为什么需要：Vite dev server 除 localhost 外还监听内网 IP（Network 地址），
+  # 用内网地址打开页面时浏览器带 `Origin: http://<内网IP>:5173`，
+  # 若不在 origins 白名单里，登录等 POST 会被 CORS 拦成 403（页面能开、一点登录就失败）。
+  # 🔴 生产必须为 false：本服务 AllowCredentials=true，放行任意来源等于放弃跨域保护。
+  allowAnyOrigin: false
 
 # 课堂评价计分口径（开发计划 §2.2）。权重合计必须为 1.00，服务启动时校验。
 # 变更口径时必须递增 formulaVersion：历史分按旧口径保留，聚合按版本隔离。
