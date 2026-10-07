@@ -542,6 +542,52 @@ type SampleDTO struct { // 响应内嵌，聚合接口共用
     SampleSufficient bool `json:"sampleSufficient"`
 }
 
+// EvaluationDTO：单条评价（督导行与 agent 行同结构，靠 evaluatorType 区分）。
+// 用于 GET /sessions/:id/evaluation 的 supervisorScores[] / agentScore，
+// 以及 GET /teachers/:id/evaluations 时间线的 supervisorEvaluations[] / agentEvaluation。
+type EvaluationDTO struct {
+    EvaluatorID    uint64  `json:"evaluatorId"`
+    EvaluatorName  string  `json:"evaluatorName"` // agent 行为空串
+    EvaluatorType  string  `json:"evaluatorType"` // supervisor | agent
+    AIModelVersion string  `json:"aiModelVersion"`
+    AIConfidence   *float64 `json:"aiConfidence"` // 整条置信度 0-1，仅 agent
+    FormulaVersion string  `json:"formulaVersion"`
+    // 五维 1-5；仅 agent 侧允许 null（无法观测该维度）
+    Objective    *int `json:"objective"`
+    Content      *int `json:"content"`
+    Interaction  *int `json:"interaction"`
+    Organization *int `json:"organization"`
+    Frontier     *int `json:"frontier"`
+    TotalScore   *float64 `json:"totalScore"`
+    Comment      string `json:"comment"`
+    Highlights   string `json:"highlights"`
+    Improvements string `json:"improvements"`
+    Suggestions  string `json:"suggestions"`
+    // Evidence：仅 agent 行非空，督导行为 null。DB 列是 JSON，此处做结构化投影，
+    // 供评估页渲染「分数→转写原文」的可追溯引用（无证据不采信）。
+    Evidence  *EvidenceDTO `json:"evidence"`
+    CreatedAt string       `json:"createdAt"`
+    UpdatedAt string       `json:"updatedAt"`
+}
+
+// EvidenceDTO 是 evaluations.evidence 的结构化投影（schemaVersion 1）。
+type EvidenceDTO struct {
+    SchemaVersion int                          `json:"schemaVersion"`
+    CitedChunks   []string                     `json:"citedChunks"`   // 引用的知识库片段，如 kb-rubric#3
+    Dimensions    map[string]EvidenceDimension `json:"dimensions"`    // key ∈ 五维
+    NotObservable []string                     `json:"notObservable"` // 显式声明无法评价的维度
+    PromptVersion string                       `json:"promptVersion"`
+}
+type EvidenceDimension struct {
+    Confidence float64         `json:"confidence"`
+    Quotes     []EvidenceQuote `json:"quotes"`
+}
+type EvidenceQuote struct {
+    Start float64 `json:"start"` // 秒，与 transcripts.segments 对齐
+    End   float64 `json:"end"`
+    Quote string  `json:"quote"` // 必须能在脱敏转写中定位到
+}
+
 // 评估草稿（evaluation_drafts 表；与正式评价分表，不进入聚合口径）
 type DraftUpsertReq struct {
     Objective    *int   `json:"objective" binding:"omitempty,min=1,max=5"` // 草稿允许为空
@@ -580,6 +626,7 @@ type DraftDTO struct {
 ```
 
 - 🔴 **路由命名**：教师评分列表是 `GET /teacher-scores`；`GET /teachers` 永远是 Sprint 1 的**教师字典**（前端课程表单依赖）。二者不得混用。
+- 🔴 **evidence 只属于 agent 行**：督导行必须为 `NULL`（JSON 列禁写空串，见 §13 实现陷阱）。读取时从 JSON 列结构化为 `EvidenceDTO`，不得原样透传字符串。每个非 `null` 维度至少 1 条能在脱敏转写中定位的引用；智能体无法观测的维度写 `null` 并在 `notObservable` 中声明——**禁止对无法观测的维度强行给分**。
 - 唯一聚合出口：教师级与课程级都调用 `pkg/scoring.Aggregate`，禁止"先算课程级再对课程取平均"。
 - 综合分取**综合均值**口径（各场次综合分的算术平均）；默认数据双侧对齐时与维度加权求和自洽。详见开发计划 §2.5.2。
 

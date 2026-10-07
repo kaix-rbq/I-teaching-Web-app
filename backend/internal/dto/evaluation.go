@@ -94,8 +94,35 @@ type EvaluationDTO struct {
 	Highlights     string   `json:"highlights"`
 	Improvements   string   `json:"improvements"`
 	Suggestions    string   `json:"suggestions"`
-	CreatedAt      string   `json:"createdAt"`
-	UpdatedAt      string   `json:"updatedAt"`
+	// Evidence 仅 agent 行非空，督导行为 null，供评估页渲染「分数→转写原文」的可追溯引用。
+	Evidence  *EvidenceDTO `json:"evidence"`
+	CreatedAt string       `json:"createdAt"`
+	UpdatedAt string       `json:"updatedAt"`
+}
+
+// EvidenceDTO 是 evaluations.evidence（JSON 列）的结构化投影，schemaVersion 1。
+//
+// 逐维置信度与引用内嵌在 JSON 中而不另建维度级表：维度级统计暂无需索引，
+// 待出现「按维度筛选低置信」类查询需求时再拆表。
+type EvidenceDTO struct {
+	SchemaVersion int                          `json:"schemaVersion"`
+	CitedChunks   []string                     `json:"citedChunks"`
+	Dimensions    map[string]EvidenceDimension `json:"dimensions"`
+	NotObservable []string                     `json:"notObservable"`
+	PromptVersion string                       `json:"promptVersion"`
+}
+
+// EvidenceDimension 是单个维度的证据：置信度 + 可定位的转写引用。
+type EvidenceDimension struct {
+	Confidence float64         `json:"confidence"`
+	Quotes     []EvidenceQuote `json:"quotes"`
+}
+
+// EvidenceQuote 是一段引用，Start/End 单位为秒，与 transcripts.segments 对齐。
+type EvidenceQuote struct {
+	Start float64 `json:"start"`
+	End   float64 `json:"end"`
+	Quote string  `json:"quote"`
 }
 
 // SessionEvaluation 是 GET /sessions/:id/evaluation 的响应：当堂课评估页聚合。
