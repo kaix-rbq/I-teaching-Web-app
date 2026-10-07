@@ -224,9 +224,14 @@ func TestAggregateMissingMatrix(t *testing.T) {
 			wantFlags:     []string{"sup_only"},
 		},
 		{
-			name:          "仅智能体 → ai_only",
-			items:         []SessionScore{{SessionID: 1, Agent: aiOnly}},
-			wantComposite: f(42.50),
+			name: "仅智能体 → ai_only",
+			items: []SessionScore{
+				{SessionID: 1, Agent: aiOnly},
+			},
+			// 口径补充（2026-10）：场次综合分按可评价维度归一化。此处 objective 双侧皆缺，
+			// 归一化后综合分等于智能体侧总分（60.71）——[单侧场次的综合分 ≡ 该侧总分] 是本
+			// 决议带来的自洽性；归一化前会得到 42.50（把缺失的 objective 按 0 分计入）。
+			wantComposite: f(60.71),
 			wantAgent:     f(60.71),
 			wantFlags:     []string{"ai_only"},
 		},
@@ -241,12 +246,14 @@ func TestAggregateMissingMatrix(t *testing.T) {
 			wantFlags:     []string{},
 		},
 		{
-			name: "双侧都有但场次不对齐 → disjoint（综合均值口径：两场次综合分 75/42.5 的均值）",
+			name: "双侧都有但场次不对齐 → disjoint（综合均值口径：两场次综合分 75/60.71 的均值）",
 			items: []SessionScore{
 				{SessionID: 1, Supervisor: supOnly},
 				{SessionID: 2, Agent: aiOnly},
 			},
-			wantComposite: f(58.75),
+			// 两场次综合分：督导场次 = 75（督导侧总分）；智能体场次 = 60.71（见上一条，
+			// 归一化后单侧场次的综合分恒等于该侧总分）。均值 = (75 + 60.71) / 2。
+			wantComposite: f(67.86),
 			wantAgent:     f(60.71),
 			wantFlags:     []string{"disjoint"},
 		},
@@ -289,8 +296,55 @@ func TestAggregateIdentityNonAligned(t *testing.T) {
 		sum += *c
 	}
 	assert.InDelta(t, *s.Composite, sum/float64(len(items)), 1e-9)
-	assert.Equal(t, 15.00, round2(*s.Composite), "旧口径会得到 22.5，新口径必须是场次综合分的均值 15")
+	// 口径补充（2026-10，§2.5.2）：场次综合分在「双侧皆缺某维度」时必须重新归一化。
+	// 本例两场都只有 objective 可评价（其余四维双侧皆缺），故场次综合分等于 objective 的
+	// 维度分本身：场次 1 双侧 objective=5 → 100；场次 2 督导 objective=1 → 0；均值 50。
+	// 归一化前会把其余维度权重当作已计入，得到 0.30×100 与 0.30×0 的均值 15——即把
+	// 「无法观测」按 0 分计价，属被本决议修正的缺陷。
+	assert.Equal(t, 50.00, round2(*s.Composite), "场次综合分需按可评价维度归一化后再取均值")
 	assert.Equal(t, 2, s.Sample.EvaluatedCount)
+}
+
+// TestCompositeNormalizesBothSidesMissing 锁定口径补充（2026-10 决议，开发计划 §2.5.2）：
+// 融合后仍为 nil 的维度表示「双侧都无法观测」，不得按 0 分计入。
+//
+// 反例说明：interaction 权重 0.20，若不归一化，单维满分只能得到 20 分——
+// 一个「唯一可评价维度是满分」的场次会被打成不及格，并连带拖低教师级综合分。
+func TestCompositeNormalizesBothSidesMissing(t *testing.T) {
+	w := defaultWeights()
+
+	// 仅智能体评价，且只给出 interaction 一维；其余四维督导与智能体都没给分。
+	onlyInteraction := []SessionScore{
+		{SessionID: 1, Agent: NewDimensionScores(nil, nil, i(5), nil, nil)},
+	}
+	s := Aggregate(onlyInteraction, w, 0.5)
+	require.NotNil(t, s.Composite)
+	assert.Equal(t, 100.00, round2(*s.Composite),
+		"唯一可评价维度为满分时综合分应为 100，不得因缺失维度被稀释成 20")
+
+	// 同一维度给最低分时，归一化后应为 0（而不是恒为 20 的"保底分"）。
+	onlyInteractionLow := []SessionScore{
+		{SessionID: 1, Agent: NewDimensionScores(nil, nil, i(1), nil, nil)},
+	}
+	low := Aggregate(onlyInteractionLow, w, 0.5)
+	require.NotNil(t, low.Composite)
+	assert.Equal(t, 0.00, round2(*low.Composite))
+
+	// 满覆盖数据必须与归一化前的加权和逐位相等：Σw = 1.00，归一化是空操作。
+	full := []SessionScore{
+		{SessionID: 1,
+			Supervisor: NewDimensionScores(i(5), i(4), i(3), i(2), i(1)),
+			Agent:      NewDimensionScores(i(5), i(4), i(3), i(2), i(1))},
+	}
+	fullAgg := Aggregate(full, w, 0.5)
+	require.NotNil(t, fullAgg.Composite)
+	var weighted float64
+	for _, d := range fullAgg.Dimensions {
+		require.NotNil(t, d.Score)
+		weighted += d.Weight * *d.Score
+	}
+	assert.InDelta(t, round2(weighted), round2(*fullAgg.Composite), 1e-9,
+		"五维齐全时归一化不得改变结果（Σw = 1.00）")
 }
 
 // TestAggregateEvaluatedCount 覆盖 F5：已评价场次只统计至少有一侧评价的场次。
