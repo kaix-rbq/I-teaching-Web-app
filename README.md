@@ -135,7 +135,7 @@ brew services restart mysql   sudo systemctl restart mysql      bash .devtools/m
 cd backend
 
 # 启动（推荐：air 热重载，保存 .go 文件自动重编译重启）
-make run
+set -a && source .env.local && set +a && make run
 #   air 未安装时 make run 会自动回退为 go run ./cmd/server
 
 # 启动（不用热重载 / 排查启动期问题时）
