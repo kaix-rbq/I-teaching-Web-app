@@ -10,7 +10,9 @@ import EmptyState from '@/components/common/EmptyState.vue'
  * 通过「今日 / 本周 / 本月 / 未评」按钮切换卡片内容：
  *   - 评估入口按授课日期闸门控制：**未来课次仅预览（不开放评估）**；
  *     到达/超过授课日期后自动暴露「去评估」（未建档则「创建授课记录并评估」）；
- *   - 「未评」专门列出**已过授课日期且尚未评价**的记录（不含今日），便于补录过去课程评分。
+ *   - 「未评」专门列出**已过授课日期且尚未评价**的记录（不含今日），便于补录过去课程评分；
+ *   - **已评估的听评课安排一律不再出现**：提交评分后授课记录状态变为 evaluated，
+ *     从本队列清除，改由「课程列表 → 课程综合评分 → 历史授课记录」查看。
  */
 const props = withDefaults(
   defineProps<{
@@ -22,7 +24,6 @@ const props = withDefaults(
 
 const emit = defineEmits<{
   create: [plan: SupervisionPlan]
-  view: [plan: SupervisionPlan]
   evaluate: [plan: SupervisionPlan]
 }>()
 
@@ -41,23 +42,23 @@ const rangedPlans = computed<SupervisionPlan[]>(() => {
   const today = dayjs()
   return props.plans
     .filter((plan) => {
+      // 已评估 → 已从待评课队列清除（不在主工作台展示）
+      if (plan.evaluated) return false
       const date = dayjs(plan.plannedDate)
       if (range.value === 'day') return date.isSame(today, 'day')
       if (range.value === 'week') return date.isSame(today, 'week')
       if (range.value === 'month') return date.isSame(today, 'month')
       // 未评：已过授课日期（严格早于今天，不与「今日」重合）且尚未评估
-      return date.isBefore(today, 'day') && !plan.evaluated
+      return date.isBefore(today, 'day')
     })
     .sort((a, b) => dayjs(a.plannedDate).valueOf() - dayjs(b.plannedDate).valueOf())
 })
 
-const pendingCount = computed(
-  () => rangedPlans.value.filter((item) => !item.evaluated).length
-)
+const pendingCount = computed(() => rangedPlans.value.length)
 
 const emptyText = computed(() => {
   if (range.value === 'pending') return '暂无已过日期且未评课的记录'
-  return `${RANGES.find((r) => r.key === range.value)?.label}暂无听评课安排`
+  return `${RANGES.find((r) => r.key === range.value)?.label}暂无待评课安排`
 })
 
 /** 授课日期是否已到达/超过（date <= 今天）——未来课程不开放评估入口 */
@@ -81,10 +82,6 @@ function handleEvaluateClick(plan: SupervisionPlan): void {
   } else {
     emit('evaluate', plan)
   }
-}
-
-function canView(plan: SupervisionPlan): boolean {
-  return plan.evaluated && plan.sessionId !== null
 }
 </script>
 
@@ -119,10 +116,10 @@ function canView(plan: SupervisionPlan): boolean {
           <el-tag
             class="evaluation-queue__status"
             size="small"
-            :type="plan.evaluated ? 'success' : isFuture(plan) ? 'info' : 'warning'"
+            :type="isFuture(plan) ? 'info' : 'warning'"
             effect="plain"
           >
-            {{ plan.evaluated ? '已评估' : isFuture(plan) ? '未开始' : '待评估' }}
+            {{ isFuture(plan) ? '未开始' : '待评估' }}
           </el-tag>
 
           <span class="evaluation-queue__actions">
@@ -133,9 +130,6 @@ function canView(plan: SupervisionPlan): boolean {
               @click="handleEvaluateClick(plan)"
             >
               去评估
-            </el-button>
-            <el-button v-else-if="canView(plan)" size="small" text type="primary" @click="emit('view', plan)">
-              查看授课记录
             </el-button>
             <span v-else-if="isFuture(plan)" class="evaluation-queue__preview">
               未到授课日期 · 仅预览
