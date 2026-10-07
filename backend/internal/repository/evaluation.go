@@ -71,20 +71,31 @@ func NewEvaluationRepository(db *gorm.DB) EvaluationRepository {
 	return &evaluationRepository{db: db}
 }
 
+// evaluationConflictColumns 对应 evaluations 表的 uk_eval(session_id, evaluator_type, evaluator_id)。
+var evaluationConflictColumns = []clause.Column{
+	{Name: "session_id"}, {Name: "evaluator_type"}, {Name: "evaluator_id"},
+}
+
+// evaluationUpsertColumns 是 evaluations 表按 uk_eval 幂等覆盖时需要更新的列。
+//
+// 🔴 必须由督导（EvaluationRepository.Upsert）与智能体（RecordingRepository.UpsertAgentEvaluation）
+// 两条写入路径共用同一份清单：此前两处各自维护列清单，智能体侧漏掉了四个评语列，
+// 导致重复触发 AI 评价时 comment/highlights/improvements/suggestions 被**静默丢弃**
+// （分数与证据更新了，评语还停留在上一轮）。见 TestEvaluationUpsertColumns。
+var evaluationUpsertColumns = []string{
+	"formula_version", "ai_model_version",
+	"objective_score", "content_score", "interaction_score",
+	"organization_score", "frontier_score", "total_score", "ai_confidence",
+	"evidence", "comment", "highlights", "improvements", "suggestions",
+}
+
 // Upsert 按 uk_eval(session_id, evaluator_type, evaluator_id) 幂等覆盖：
 // 督导重复提交时整行更新而非报错（§3.1 无草稿态约定，写入即生效）。
 func (r *evaluationRepository) Upsert(ctx context.Context, e *model.Evaluation) error {
 	return r.db.WithContext(ctx).
 		Clauses(clause.OnConflict{
-			Columns: []clause.Column{
-				{Name: "session_id"}, {Name: "evaluator_type"}, {Name: "evaluator_id"},
-			},
-			DoUpdates: clause.AssignmentColumns([]string{
-				"formula_version", "ai_model_version",
-				"objective_score", "content_score", "interaction_score",
-				"organization_score", "frontier_score", "total_score", "ai_confidence",
-				"evidence", "comment", "highlights", "improvements", "suggestions",
-			}),
+			Columns:   evaluationConflictColumns,
+			DoUpdates: clause.AssignmentColumns(evaluationUpsertColumns),
 		}).Create(e).Error
 }
 
