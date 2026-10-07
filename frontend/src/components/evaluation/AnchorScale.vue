@@ -5,7 +5,7 @@ import type { DimensionKey } from '@/types/evaluation'
 import { rawScoreTone, scoreToneColor } from '@/utils/format'
 
 /**
- * 锚点刻度条（《前端设计-new》§4.4.3）——把 1-5 李克特量表外化为「仪器刻度」。
+ * 锚点刻度条（docs/frontend_AGENTS.md §8.4 / §9.0）——把 1-5 李克特量表外化为「仪器刻度」。
  * 五档刻度联动质量色阶，悬停逐档显示行为锚点（DIMENSION_ANCHORS 已冻结）。
  * 替代 EvaluationForm 原有的 Radio 组；键盘可达（原生 radio）。
  */

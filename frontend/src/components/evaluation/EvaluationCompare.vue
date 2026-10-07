@@ -5,7 +5,7 @@ import AiBadge from '@/components/common/AiBadge.vue'
 import type { DimensionKey, EvaluationDTO } from '@/types/evaluation'
 
 /**
- * 督导 × 智能体分维对照（《前端设计-new》§4.5 / §5.5）。
+ * 督导 × 智能体分维对照（docs/frontend_AGENTS.md §8.4 / §9.0）。
  * AI 侧统一走「AI 琥珀语法」：AiBadge 徽标 + 浅紫虚线卡 + 置信度可视化。
  * 红线继承：低置信（<0.4）标警示；阶段②未接入时显示预告卡，不得显示 0 分。
  */

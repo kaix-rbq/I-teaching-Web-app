@@ -4,7 +4,7 @@ import type { ScoreSummary } from '@/types/teacher'
 import { scoreLevelLabel, scoreTone, scoreToneColor } from '@/utils/format'
 
 /**
- * 双源罗盘 —— 全站「综合分」的统一签名图形（《前端设计-new》§4.4.1）。
+ * 双源罗盘 —— 全站「综合分」的统一签名图形（docs/frontend_AGENTS.md §9.0 / §9.1）。
  * 外弧 = 督导分（靛蓝），内弧 = AI 分（亮紫），中心 = 综合分 + 等级。
  * 红线：compositeScore === null 时显示灰环「暂无评价」，禁止画 0；
  * 样本量 / flags 必须露出，不得静默。

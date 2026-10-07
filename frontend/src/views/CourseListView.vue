@@ -28,19 +28,29 @@ const {
   reset,
   handlePageChange,
   handlePageSizeChange
-} = useCourseList()
+} = useCourseList({ mine: auth.role === 'supervisor' })
 
 const pageTitle = computed(() => {
   if (auth.role === 'director') return '课程管理'
-  if (auth.role === 'supervisor') return '全校课程'
+  if (auth.role === 'supervisor') return '课程列表'
   return '我的课程'
 })
+
+const pageSubtitle = computed(() =>
+  auth.role === 'supervisor'
+    ? '本人负责评估的课程 · 点击课程进入综合评分与授课记录评估'
+    : '查看课程简介与开课情况'
+)
 
 const canFilterTeacher = computed(() => auth.role === 'director' || auth.role === 'supervisor')
 
 function goDetail(course: Course): void {
   if (auth.role === 'teacher') {
     void router.push({ name: 'course-improve', params: { id: course.id } })
+    return
+  }
+  if (auth.role === 'supervisor') {
+    void router.push({ name: 'supervisor-course', params: { id: course.id } })
     return
   }
   void router.push({ name: 'course-detail', params: { id: course.id } })
@@ -61,7 +71,7 @@ onMounted(() => {
 
 <template>
   <div class="course-list">
-    <PageHeader :title="pageTitle" subtitle="查看课程简介与开课情况">
+    <PageHeader :title="pageTitle" :subtitle="pageSubtitle">
       <template #actions>
         <el-button v-if="auth.role === 'director'" type="primary" @click="goNew">
           新增课程

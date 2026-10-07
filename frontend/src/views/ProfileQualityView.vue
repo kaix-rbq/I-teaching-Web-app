@@ -94,6 +94,14 @@ function goImprove(courseId: number): void {
   void router.push({ name: 'course-improve', params: { id: courseId } })
 }
 
+/**
+ * 授课快照 → 当堂课（授课记录）评价页：查看该次课的督导与 AI 智能体评价，
+ * 以及当堂课的转写文本入口，帮助教师回顾授课细节。
+ */
+function goSessionRecord(sessionId: number): void {
+  void router.push({ name: 'session-evaluation', params: { id: sessionId } })
+}
+
 /* ===== 授课快照：按质量水平标注亮点或主要不足 ===== */
 
 function scoreColor(item: TeacherTimelineItem): string {
@@ -289,9 +297,9 @@ watch(semester, () => {
               plain
               size="small"
               round
-              @click="goImprove(item.courseId)"
+              @click="goSessionRecord(item.sessionId)"
             >
-              查看课程提优 →
+              查看详细记录 →
             </el-button>
           </article>
         </div>

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
  * AI 徽标：一切智能体产出内容的「准入证」——四芒星 + 渐变紫 + 文字徽章。
- * 规范见 docs/前端设计-new.md §4.5：AI 内容必带徽标，与人类督导产出形成语法对比。
+ * 规范见 docs/frontend_AGENTS.md §9.0 / §9.1：AI 内容必带徽标，与人类督导产出形成语法对比。
  */
 withDefaults(defineProps<{ text?: string }>(), { text: 'AI 参考' })
 </script>

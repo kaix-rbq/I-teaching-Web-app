@@ -7,8 +7,11 @@ type CourseListQuery struct {
 	TeacherID    uint64 `form:"teacherId"`
 	Status       string `form:"status" binding:"omitempty,oneof=open draft closed"`
 	Keyword      string `form:"keyword"`
-	Page         int    `form:"page"`
-	PageSize     int    `form:"pageSize"`
+	// Mine=true 时只返回「本人负责评估的课程」（supervision_plans.supervisor_id = 当前用户）。
+	// 仅对督导生效；主任 / 教师的数据范围由角色裁剪决定，该参数被忽略。
+	Mine     bool `form:"mine"`
+	Page     int  `form:"page"`
+	PageSize int  `form:"pageSize"`
 }
 
 // CourseListItem 是课程列表行。

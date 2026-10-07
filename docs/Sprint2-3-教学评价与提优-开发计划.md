@@ -1,22 +1,43 @@
 # 「爱教学」Sprint 2 / Sprint 3 开发计划 —— 课堂评价与教学提优
 
-> **文档定位**：本文件是 Sprint 2「看课堂」与 Sprint 3「帮教师」的功能与设计事实源，承接 `docs/backend_AGENTS.md`、`docs/frontend_AGENTS.md`、`docs/MySQL数据库创建指导.md` 的 Sprint 1 基线。
-> **版本**：v1.2
-> 
->**使用方式**：本文件只描述**要开发什么、按什么规范做**。§10 汇总了必须遵守的硬性约定，变更任一条需先更新本文档再改代码（契约先行）。
-> 任务分发用的简短清单见 [`Sprint2-3-任务清单.md`](./Sprint2-3-任务清单.md)。
+> **文档定位**：本文件是 Sprint 2「看课堂」与 Sprint 3「帮教师」的 **迭代范围 / 评分体系 / 权限隐私合规 / 任务与状态 / DoD / 后续方向** 的唯一事实源。
+> 其他主题各有归属，本文件不再复制其内容，只给索引：
+>
+> - **接口契约** → [`docs/backend_AGENTS.md`](./backend_AGENTS.md) §8（§8.8 授课记录与评价聚合 · §8.9 课堂录音与转写）
+> - **建表 DDL / 迁移** → [`backend/database/schema.sql`](../backend/database/schema.sql) + [`backend/migrations/`](../backend/migrations/)
+> - **页面 / 路由 / 组件** → [`docs/frontend_AGENTS.md`](./frontend_AGENTS.md) §6 / §7
+> - **建库 / 种子 / 备份** → [`docs/MySQL数据库创建指导.md`](./MySQL数据库创建指导.md)
+> - **种子数据** → [`backend/database/seed.sql`](../backend/database/seed.sql)
+>
+> **版本**：v1.4（2026-10-07 合并任务清单、DDL/接口/页面规格改为指向单一事实源，见文末「更新记录」）
+> **使用方式**：本文件只描述**要开发什么、按什么规范做**。§10 汇总了必须遵守的硬性约定，变更任一条需先更新本文档再改代码（契约先行）。
 
 ---
 
 ## 1. 范围与目标
 
-### 1.1 三阶段推进（正式排期）
+### 1.1 三阶段推进（正式排期与当前状态）
 
-| 阶段 | 主题 | 核心内容 | 是否依赖智能体 |
-|------|------|---------|--------------|
-| **阶段一**（Sprint 2.1） | 评价闭环 | 授课记录 · 督导评分 · 结构化评语 · 三级聚合 · 主任教师管理 · 教师提优页（只读督导分） | ❌ 不依赖 |
-| **阶段二**（Sprint 2.2） | 智能体接入 | 课堂录音 · 异步转写 · 智能体评分 · 综合分（双侧融合）· 督导页智能体参考面板 | ✅ |
-| **阶段三**（Sprint 3） | 帮教师 | 智能体提优建议 · 对话（SSE）· 趋势视图 · 申诉复核 · 质量报告导出 | ✅ |
+| 阶段 | 主题 | 核心内容 | 是否依赖智能体 | 当前状态 |
+|------|------|---------|--------------|---------|
+| **阶段一**（Sprint 2.1） | 评价闭环 | 授课记录 · 督导评分 · 结构化评语 · 三级聚合 · 教师画像 · 教师提优页（只读督导分） | ❌ 不依赖 | ✅ **已实现** |
+| **阶段二**（Sprint 2.2） | 智能体接入 | 课堂录音 · 异步转写 · 智能体评分 · 综合分（双侧融合）· 督导页智能体参考面板 | ✅ | 🟡 **部分实现** |
+| **阶段三**（Sprint 3） | 帮教师 | 智能体提优建议 · 对话（SSE）· 趋势视图 · 申诉复核 · 质量报告导出 | ✅ | ❌ **未实现** |
+
+**阶段二的实现边界（逐项对照代码，不得按"已完成"整体对待）**：
+
+| 子项 | 状态 | 证据（路径:行） |
+|------|------|----------------|
+| 录音上传 / 流式播放（短时票据） | ✅ | `backend/internal/service/recording.go:81,166`；票据路由 `backend/internal/router/router.go:84` |
+| 异步转写（状态机 + 失败重试 + 启动重排） | ✅ | `service/recording.go:188,214,239`；`repository/recording.go:71` |
+| ASR 适配（Qwen-Audio / 百炼） | ✅ | `backend/internal/asr/client.go:70,99` |
+| 转写脱敏（学生姓名替换） | ✅ | `backend/internal/service/desensitize.go:147`；调用点 `service/recording.go:296` |
+| 播放审计（谁听了谁的课） | ✅ | `backend/internal/repository/recording.go:82`；调用点 `service/recording.go:184` |
+| 前端播放器 / 转写查看器 / 双源对照面板 | ✅ | `frontend/src/views/SessionEvaluationView.vue:499,517,523` |
+| **智能体评分写入 `evaluations` 的 agent 行** | ❌ **未接入** | `repository/recording.go:79` `UpsertAgentEvaluation` **无任何调用方** |
+
+> 🔴 **阶段二的真实缺口**：智能体评分无写入通道 → 运行期除种子数据外 `evaluations` 只有 `supervisor` 行。聚合侧已支持 `agent` 侧（§2.5.4），但线上综合分实际仍为督导单侧。
+> 🔴 `router.go` 中**没有任何 `/agent/*` 路由**，`50002`（`NotImplemented`）虽在 `pkg/errcode` 定义并映射 HTTP 501，但**无调用方**（详见 §4.4）。
 
 > **核心架构：评分源可插拔**
 > `supervisor` 与 `agent` 只是 `evaluations.evaluator_type` 的两个取值，向同一张表写同样的结构；聚合层只认该表，不关心分数从哪来。
@@ -29,7 +50,7 @@
 | S6.1 | 一 | 督导 | 为一次课建立授课记录（课程/班级/日期/节次/主题），以便评价有落点 | M | `POST /sessions` |
 | S6.2 | 一 | 任一 | 在课程详情页查看该课程的历史授课记录列表 | M | `GET /courses/:id/sessions` |
 | S6.3 | 一 | 督导 | 在当堂课评估页按 5 个维度打分并留下结构化评语 | M | `PUT /sessions/:id/supervisor-evaluation` |
-| S6.4 | 一 | 主任 | 在教师管理页查看本室教师综合评分列表 | M | `GET /teachers` |
+| S6.4 | 一 | 主任 | 在教师画像页查看本室教师综合评分列表 | M | `GET /teacher-scores` |
 | S6.5 | 一 | 主任 | 点击教师查看其评分数据面板（综合分 + 分维度 + 分课程） | M | `GET /teachers/:id/evaluation-summary` |
 | S6.6 | 一 | 教师 | 在教学提优页查看本人各维度评分与督导评语 | M | `GET /courses/:id/evaluation-summary` |
 | S6.7 | 一 | 督导 | 工作台与「听评课管理」页分离，完整安排列表可分页筛选 | S | `GET /supervision/plans` |
@@ -38,11 +59,12 @@
 | S7.3 | 二 | 任一 | 综合分 = 督导评分与智能体评分的加权融合 | M | 聚合服务 |
 | S7.4 | 二 | 教师 | 在教学提优页看到综合分随智能体接入而变化 | S | 同 S6.6 |
 | S8.1 | 三 | 教师 | 查看智能体针对课堂记录给出的提优建议 | M | 评估聚合 |
-| S8.2 | 三 | 教师 | 与智能体就课堂改进对话 | C | `POST /agent/chat`（SSE） |
-| S8.3 | 三 | 教师 | 查看本人各维度分数的历史趋势 | S | 新增趋势接口 |
-| S8.4 | 三 | 教师 | 对评分提出申诉，督导复核 | S | 新增申诉表 |
+| S8.2 | 三 | 教师 | 与智能体就课堂改进对话 | C | 新增 `POST /agent/chat`（SSE，**未实现**，见 §4.4） |
+| S8.3 | 三 | 教师 | 查看本人各维度分数的历史趋势 | S | 新增趋势接口（**未实现**） |
+| S8.4 | 三 | 教师 | 对评分提出申诉，督导复核 | S | 新增申诉表（**未实现**） |
 
 > `[M]` Must；`[S]` Should；`[C]` Could。
+> `S6.4` 的落点是 `GET /teacher-scores`（**不是** `GET /teachers`，后者永远是教师字典，见 §4.2）。
 
 ### 1.3 范围边界（本轮 Won't）
 
@@ -57,6 +79,8 @@
 ---
 
 ## 2. 评分体系
+
+> 本节是本文件最核心、不可外移的内容：维度、权重、锚点、单次总分、三级聚合与缺失处理，其他文档只引用不复制。
 
 ### 2.1 评分维度（冻结版 v1）
 
@@ -154,7 +178,7 @@ total = 0.30×100 + 0.30×75 + 0.20×50 + 0.20×100 + 0×25
 
 ```
 场次级 score_j  ──聚合──▶  课程级  ──聚合──▶  教师级
- （单次评价）              （教学提优页）       （教师管理面板）
+ （单次评价）              （教学提优页）       （教师画像面板）
 ```
 
 #### 2.5.1 聚合函数（服务层纯函数，两级共用）
@@ -315,263 +339,119 @@ GROUP BY teacher_id;
 
 ---
 
-## 3. 数据模型与建表 DDL
+## 3. 数据模型（DDL 事实源索引）
 
-> **迁移方式**：按 MySQL 文档 §9，从 Sprint 2 起引入 `golang-migrate`。新增表全部**只新增、不改存量表**（`supervision_plans` 完全不动，关联通过 `teaching_sessions.plan_id` 反向指回）。
+> **事实源**：Sprint 1 存量表 → [`backend/database/schema.sql`](../backend/database/schema.sql)；Sprint 2 起新增表 → [`backend/migrations/`](../backend/migrations/)。本文件**不再复制 DDL**，只保留 SQL 里看不见的建表顺序、命名约定与非显然陷阱。
+>
+> **迁移方式**：按 `docs/MySQL数据库创建指导.md` §9，从 Sprint 2 起使用 `golang-migrate`，脚本以 `embed` 打包（`backend/migrations/migrations.go:12`）。
 >
 > 🔴 **文件命名必须遵循 golang-migrate 默认约定**：`<版本>_<名称>.up.sql` / `.down.sql`（正则 `^([0-9]+)_(.*)\.(up|down)\.(.*)$`），例如 `1_baseline_sprint1.up.sql`、`2_teaching_sessions_and_evaluations.up.sql`。
 > **Flyway 风格的 `V2__xxx.up.sql` 不被识别为迁移**，会让 `migrate up` 直接报 `first .: file does not exist`（工具能加载目录但没有可用迁移）。历史上本项目曾用该命名，修复时已改名——**不得改回**。
 
-### 3.1 `migrations/2_teaching_sessions_and_evaluations.up.sql`（阶段一）
+### 3.1 阶段一迁移：`migrations/2_teaching_sessions_and_evaluations.up.sql`
 
-```sql
--- ① 授课记录：一切评价的落点
--- 定义："某年某月某日第几节，某班级，某教师上的那一次课"
-CREATE TABLE `teaching_sessions` (
-  `id`           BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  `course_id`    BIGINT UNSIGNED NOT NULL,
-  `class_id`     BIGINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '开课班级；0=未指定',
-  `teacher_id`   BIGINT UNSIGNED NOT NULL COMMENT '冗余自 courses，避免每次联表',
-  `session_date` DATE            NOT NULL,
-  `period`       VARCHAR(32)     NOT NULL DEFAULT '' COMMENT '节次，如 3-4 节',
-  `topic`        VARCHAR(128)    NOT NULL DEFAULT '' COMMENT '本次课主题',
-  `plan_id`      BIGINT UNSIGNED NULL COMMENT '来源听评课计划（可空）',
-  `status`       ENUM('scheduled','recorded','evaluated') NOT NULL DEFAULT 'scheduled',
-  `created_at`   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `updated_at`   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_session` (`course_id`,`class_id`,`session_date`,`period`),
-  KEY `idx_session_course` (`course_id`),
-  KEY `idx_session_teacher_date` (`teacher_id`,`session_date`),
-  CONSTRAINT `fk_session_course` FOREIGN KEY (`course_id`) REFERENCES `courses` (`id`),
-  CONSTRAINT `fk_session_plan`   FOREIGN KEY (`plan_id`)   REFERENCES `supervision_plans` (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='授课记录';
+| 表 | 作用 | 关键约定（详见迁移脚本） |
+|----|------|------------------------|
+| `teaching_sessions` | 授课记录（一切评价的落点） | `class_id BIGINT UNSIGNED NOT NULL DEFAULT 0`；`uk_session(course_id,class_id,session_date,period)`；`plan_id` 反向指回 `supervision_plans` |
+| `evaluations` | 课堂评价：督导与智能体同表，靠 `evaluator_type` 区分 | `uk_eval(session_id,evaluator_type,evaluator_id)`；五维 `TINYINT UNSIGNED NULL`；`evidence JSON NULL`（仅 agent）；`total_score DECIMAL(5,2)`；`formula_version` |
 
--- ② 评价：督导与智能体同表，靠 evaluator_type 区分（可插拔 scorer 的落地）
-CREATE TABLE `evaluations` (
-  `id`                BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  `session_id`        BIGINT UNSIGNED NOT NULL,
-  `evaluator_type`    ENUM('supervisor','agent') NOT NULL,
-  `evaluator_id`      BIGINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '督导 user_id；agent 固定 0',
-  `ai_model_version`  VARCHAR(32) NOT NULL DEFAULT '' COMMENT '仅 agent',
-  `formula_version`   VARCHAR(16) NOT NULL DEFAULT 'v1' COMMENT '计分口径版本',
-  -- 维度分 1-5；NULL = 该评分源无法评价此维度
-  `objective_score`    TINYINT UNSIGNED NULL,
-  `content_score`      TINYINT UNSIGNED NULL,
-  `interaction_score`  TINYINT UNSIGNED NULL,
-  `organization_score` TINYINT UNSIGNED NULL,
-  `frontier_score`     TINYINT UNSIGNED NULL,
-  `total_score`       DECIMAL(5,2) NULL COMMENT '按 formula_version 算出的单次总分；仅用于排序与展示，非聚合来源',
-  `ai_confidence`     DECIMAL(3,2) NULL COMMENT '仅 agent',
-  `evidence`          JSON NULL COMMENT '仅 agent：维度→转写片段引用',
-  -- 结构化评语
-  `comment`           TEXT NULL,
-  `highlights`        TEXT NULL COMMENT '亮点',
-  `improvements`      TEXT NULL COMMENT '待改进',
-  `suggestions`       TEXT NULL COMMENT '建议 / 智能体提优建议',
-  `created_at`        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `updated_at`        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_eval` (`session_id`,`evaluator_type`,`evaluator_id`),
-  KEY `idx_eval_session` (`session_id`),
-  CONSTRAINT `fk_eval_session` FOREIGN KEY (`session_id`) REFERENCES `teaching_sessions` (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='课堂评价';
-```
+- **可插拔评分源的落地**：`supervisor` 与 `agent` 只是 `evaluator_type` 的两个取值，写同样的结构；聚合层只认该表（§1.1）。
+- **正式评价无草稿态**：`evaluations` 不设 `status` / `submitted_at`——写入即生效，`created_at` 即提交时间。督导评分通过 `PUT /sessions/:id/supervisor-evaluation` 幂等覆盖，不产生中间态。
+- **草稿独立成表**：督导草稿存于 `migrations/5_evaluation_drafts.up.sql` 的 `evaluation_drafts`（`uk_draft(session_id,supervisor_id)`，维度分允许 `NULL`），**不进聚合口径**；提交时由 service 强制五维齐全。
+- **为什么用列式而非 EAV**（`evaluation_scores(evaluation_id, dimension_key, score)`）：维度已冻结 → 列式可直接 `AVG(content_score)`、类型安全、索引友好；EAV 每次聚合都要 PIVOT，SQL 复杂且极易出错。代价是新增维度需 `ALTER TABLE`，在"维度冻结"前提下可接受。
 
-> **无草稿态**：`evaluations` 不设 `status` / `submitted_at`——写入即生效，`created_at` 即提交时间。督导评分通过 `PUT /sessions/:id/supervisor-evaluation` 幂等覆盖，不产生中间态。
+### 3.2 阶段二迁移：`migrations/3_recordings_and_transcripts.up.sql`（+4 补默认值 / 6 放宽列宽）
 
-### 3.2 `migrations/3_recordings_and_transcripts.up.sql`（阶段二）
+| 表 | 作用 | 关键约定（详见迁移脚本） |
+|----|------|------------------------|
+| `recordings` | 课堂录音 | `uk_rec_session(session_id)`：一次课一条主录音；FK → `teaching_sessions` / `users` |
+| `transcripts` | 异步转写产物 | `uk_tr_session`；`status ENUM(pending,running,done,failed)`；`content MEDIUMTEXT`（V4 补 `DEFAULT ('')`，防绕过 GORM 的写入触发 1364）；`engine` / `engine_version` `VARCHAR(64)`（V6 放宽，见 §3.3-6） |
+| `recording_playback_logs` | **播放审计**（谁在何时听了谁的课） | `recording_id` + `user_id` + `started_at`；由 `RecordingService.Stream` 落库 |
 
-```sql
--- ③ 课堂录音
-CREATE TABLE `recordings` (
-  `id`            BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  `session_id`    BIGINT UNSIGNED NOT NULL,
-  `file_path`     VARCHAR(255) NOT NULL,
-  `original_name` VARCHAR(128) NOT NULL,
-  `format`        VARCHAR(16)  NOT NULL COMMENT 'mp3/wav/m4a',
-  `size`          BIGINT UNSIGNED NOT NULL DEFAULT 0,
-  `duration_sec`  INT UNSIGNED NOT NULL DEFAULT 0,
-  `uploaded_by`   BIGINT UNSIGNED NOT NULL,
-  `uploaded_at`   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_rec_session` (`session_id`) COMMENT '一次课一条主录音',
-  CONSTRAINT `fk_rec_session` FOREIGN KEY (`session_id`) REFERENCES `teaching_sessions` (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='课堂录音';
+- **转写必须异步**：45 分钟音频的 ASR 需数分钟，同步 HTTP 必然超时。`transcripts.status` 即为此设计，前端轮询；`failed` 必须可重试（`POST /sessions/:id/transcript/retry`），进程重启由 `RequeueStuck` 重排 `pending/running`。
 
--- ④ 转写文本（异步任务产物）
-CREATE TABLE `transcripts` (
-  `id`             BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  `session_id`     BIGINT UNSIGNED NOT NULL,
-  `recording_id`   BIGINT UNSIGNED NOT NULL,
-  `content`        MEDIUMTEXT NOT NULL COMMENT '纯文本全文（脱敏后）',
-  `segments`       JSON NULL COMMENT '[{start,end,speaker,text}]',
-  `engine`         VARCHAR(64) NOT NULL DEFAULT '' COMMENT 'qwen-audio / whisper',
-  `engine_version` VARCHAR(64) NOT NULL DEFAULT '',
-  `status`         ENUM('pending','running','done','failed') NOT NULL DEFAULT 'pending',
-  `error_message`  VARCHAR(255) NOT NULL DEFAULT '',
-  `created_at`     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `updated_at`     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_tr_session` (`session_id`),
-  CONSTRAINT `fk_tr_session` FOREIGN KEY (`session_id`) REFERENCES `teaching_sessions` (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='课堂转写';
-```
+### 3.3 必须写进迁移说明的实现陷阱（每条均已在迁移/代码中核对）
 
-### 3.3 必须写进迁移说明的实现陷阱
+1. **建表顺序 = 外键依赖顺序。** 迁移按版本号顺序执行：V1 建 `departments` → `users` → `courses` → `course_classes` → `resources` → `supervision_plans`，V2 才能建引用 `courses` / `supervision_plans` 的 `teaching_sessions`，以及引用 `teaching_sessions` 的 `evaluations`；V3 引用 V2。被引用表必须先存在，倒序建表直接失败。
+2. **`class_id` 必须 `NOT NULL DEFAULT 0`。** MySQL 唯一索引**对 NULL 不去重**——若 `class_id` 可空，`uk_session` 形同虚设，同一节课能建出无数条记录。此坑只会在线上暴露。（`migrations/2_teaching_sessions_and_evaluations.up.sql:11,21`）
+3. **JSON 列禁止写入空串。** `evaluations.evidence` 是 `JSON` 列，MySQL 8 严格模式对 `''` 抛 `ERROR 3140 Invalid JSON text: "The document is empty"`。Go 模型字段必须用指针（`*string`），督导行写 `NULL`，不能依赖零值 `""`。（`backend/internal/model/evaluation.go:21-24`）
+4. **种子 `INSERT` 的列数与值数必须逐行核对。** 督导评价段曾漏 `suggestions` 列，导致 `ERROR 1136 Column count doesn't match value count`，种子数据整体加载失败（现 `backend/database/seed.sql` 已逐行对齐）。
+5. **DATE 列比较必须按 `YYYY-MM-DD` 绑定。** 直接把 `time.Time` 交给驱动会被带上时区换算后的时分秒（`2026-09-12 08:00:00`），与 `DATE` 值不相等 → 唯一性预检漏判，最后由数据库 1062 兜底（用户看到 50001 而不是 40901）。仓储层比较 `session_date` 时先 `Format("2006-01-02")`。（`backend/internal/repository/session.go:119-137`、`repository/errors.go:16-23`）
+6. **`engine_version` 必须 ≥ 模型名长度（V6 已放宽到 64）。** 原设计 `VARCHAR(32)`，而真实模型名 `qwen-audio-3.1-asr-flash-filetrans` 有 34 字符，触发 `ERROR 1406 Data too long`——**整条 UPDATE 回滚**，表现为「识别成功、文本已拿到，但 content/segments 全没落库且 status 卡在 running，前端无限轮询」，而这次 ASR 已经计费。**必须在库侧放宽**（MySQL 8 严格模式超长即报错而非截断）。（`migrations/6_transcripts_engine_width.up.sql:3-11`）
 
-1. **`class_id` 必须 `NOT NULL DEFAULT 0`。** MySQL 唯一索引**对 NULL 不去重**——若 `class_id` 可空，`uk_session` 形同虚设，同一节课能建出无数条记录。此坑只会在线上暴露。
-2. **转写必须异步。** 45 分钟音频的 ASR 需数分钟，同步 HTTP 必然超时。`transcripts.status` 即为此设计，前端轮询；`failed` 状态必须可重试。
-3. **为什么用列式而非 EAV**（`evaluation_scores(evaluation_id, dimension_key, score)`）：维度已冻结 → 列式可直接 `AVG(content_score)`、类型安全、索引友好；EAV 每次聚合都要 PIVOT，SQL 复杂且极易出错。代价是新增维度需 `ALTER TABLE`，在"维度冻结"前提下可接受。
-4. **JSON 列禁止写入空串。** `evaluations.evidence` 是 `JSON` 列，MySQL 8 严格模式对 `''` 抛 `ERROR 3140 Invalid JSON text: "The document is empty"`。Go 模型字段必须用指针（`*string`），督导行写 `NULL`，不能依赖零值 `""`。
-5. **DATE 列比较必须按 `YYYY-MM-DD` 绑定。** 直接把 `time.Time` 交给驱动会被带上时区换算后的时分秒（`2026-09-12 08:00:00`），与 `DATE` 值不相等 → 唯一性预检漏判，最后由数据库 1062 兜底（用户看到 50001 而不是 40901）。仓储层比较 `session_date` 时先 `Format("2006-01-02")`。
-6. **种子 `INSERT` 的列数与值数必须逐行核对。** §3.4 督导评价曾漏 `suggestions` 列，导致 `ERROR 1136 Column count doesn't match value count`，种子数据整体加载失败。
-7. **`engine_version` 必须 ≥ 模型名长度（V6 已放宽到 64）。** 原设计 `VARCHAR(32)`，而真实模型名 `qwen-audio-3.1-asr-flash-filetrans` 有 34 字符，触发 `ERROR 1406 Data too long`——**整条 UPDATE 回滚**，表现为「识别成功、文本已拿到，但 content/segments 全没落库且 status 卡在 running，前端无限轮询」，而这次 ASR 已经计费。见 `migrations/6_transcripts_engine_width.up.sql`。
+### 3.4 种子数据与对账基准（事实源 `backend/database/seed.sql`）
 
-### 3.4 演示种子数据（阶段一联调用）
+覆盖 **4 位教师**（李明 / 张华 / 刘洋 / 赵磊）、**6 门课程**、**14 次授课**，每门课程配同一位督导（陈静）；每次课同时具备督导与智能体两侧、且**两侧均覆盖五维**（智能体不再缺 `objective`，雷达图无缺角）。
 
-> ⚠️ **v1.2（2026-09-28）已扩充种子数据**：事实源为 `database/seed.sql`，现覆盖
-> 4 位教师（李明/张华/刘洋/赵磊）、6 门课程、14 次授课，每门课程配同一位督导（陈静），
-> 每次课同时具备督导与智能体两侧、且**两侧均覆盖五维**（智能体不再缺 `objective`，修复雷达图缺角）。
-> 本节仅保留 c1（软件项目管理 · 李明）3 次课的对账基准；全量 14 次课的逐场综合分与教师级均值
-> 由 `pkg/scoring` 单测 `TestSeedDataset*` 锁定（如算法变更需同步重算）。
+**c1 对账基准（软件项目管理 · 李明，3 次课，督导 + 智能体双侧五维）**：
 
-**c1 对账基准（3 次课，督导 + 智能体双侧五维）**：
+| 指标 | 第 1 次课 | 第 2 次课 | 第 3 次课 | 教师级汇总 |
+|------|----------|----------|----------|-----------|
+| 督导单次总分 | 52.50 | 70.00 | 82.50 | **68.33** |
+| 智能体单次总分 | 65.00 | 70.00 | 75.00 | **70.00** |
+| **综合分** | **58.75** | **70.00** | **78.75** | **69.17** |
 
-> | 指标 | 第 1 次课 | 第 2 次课 | 第 3 次课 | 教师级汇总 |
-> |------|----------|----------|----------|-----------|
-> | 督导单次总分 | 52.50 | 70.00 | 82.50 | **68.33** |
-> | 智能体单次总分 | 65.00 | 70.00 | 75.00 | **70.00** |
-> | **综合分** | **58.75** | **70.00** | **78.75** | **69.17** |
->
-> - 教师级综合分 69.17 **恰好等于三次课综合分的算术平均**（§2.5.2 的恒等式），若实现后两者不等即为聚合层次写错；
-> - 智能体侧现覆盖五维；算法**仍保留**「某侧维度为 NULL 时该维度只取另一侧 / 单侧总分权重再归一化」的容错分支（由 `pkg/scoring` 单测覆盖，seed 不再出现缺维）；
-> - `total_score` 仅为展示与排序用，**聚合以维度分为准**；
-> - 全量 14 次课：综合分 58.75 / 70.00 / 78.75 / 73.75 / 78.75 / 85.00 / 45.00 / 70.00 / 66.25 / 82.50 / 58.75 / 88.75 / 61.25 / 78.75；教师级综合分（李明 71.25 / 张华 79.17 / 刘洋 63.75 / 赵磊 73.75）。
+- 教师级综合分 69.17 **恰好等于三次课综合分的算术平均**（§2.5.2 的恒等式），若实现后两者不等即为聚合层次写错；
+- 算法**仍保留**「某侧维度为 NULL 时该维度只取另一侧 / 单侧总分权重再归一化」的容错分支（由 `pkg/scoring` 单测覆盖，种子数据不再出现缺维）；
+- 全量 14 次课的逐场综合分与教师级均值由 `pkg/scoring` 单测 `TestSeedDataset*` 锁定（`backend/pkg/scoring/scoring_test.go:352,365`）；算法变更须同步重算 seed 注释；
+- `total_score` 仅为展示与排序用，**聚合以维度分为准**。
 
 ---
 
-## 4. 接口契约
+## 4. 接口索引（契约事实源：[`backend_AGENTS.md`](./backend_AGENTS.md) §8）
 
-前缀 `/api/v1`，沿用 Sprint 1 统一响应信封与错误码。新增错误码：
+> 前缀 `/api/v1`，沿用 Sprint 1 统一响应信封与错误码。**请求/响应字段、权限、错误码的权威定义在 `backend_AGENTS.md` §7 / §8**（§8.8 授课记录与评价聚合、§8.9 课堂录音与转写）；字段名与 `backend/internal/dto/` 逐字对齐。本节只做索引，并保留评分/产品口径上独有的约定。
+
+**本节仅保留的新增错误码（完整表见 `backend_AGENTS.md` §7）**：
 
 | code | HTTP | 含义 | 触发示例 | 实现状态 |
 |------|------|------|---------|---------|
-| 40002 | 400 | 业务规则校验失败 | 授课记录日期晚于今天、**督导评分五维未录全** | 阶段一 ✅ |
-| 40901 | 409 | 数据已存在 | 同课程同班级同日同节次重复建课（`uk_session`） | 阶段一 ✅ |
+| 40002 | 400 | 业务规则校验失败 | 授课记录日期晚于今天、**督导评分五维未录全** | ✅ 阶段一 |
+| 40901 | 409 | 数据已存在 | 同课程同班级同日同节次重复建课（`uk_session`） | ✅ 阶段一 |
 | 40902 | 409 | 重复提交 | 同一督导对同一场次重复评分 | 保留：`PUT` 幂等覆盖，**不返回**该码 |
-| 50002 | 501 | 功能未实现 | 智能体接口在阶段一返回 | 阶段二 |
-| 50003 | 503 | 依赖服务不可用 | ASR 引擎未配置或转写任务失败 | 阶段二 |
+| 50002 | 501 | 功能未实现 | — | ⚠️ 仅 `pkg/errcode` 定义，**当前无调用方**（§4.4） |
+| 50003 | 503 | 依赖服务不可用 | ASR 引擎未配置或转写任务失败 | ✅ 阶段二转写链路 |
 
 > ⚠️ `40002` 的 HTTP 状态必须是 **400**（`pkg/errcode` 的 `HTTPStatus()` 已覆盖 `BizRule`）。
-> 该映射曾漏配而落 `default → 500`：响应体 code 正确但 HTTP 500，日志被记为服务端错误——回归测试见 `pkg/errcode/errcode_test.go`。
+> 该映射曾漏配而落 `default → 500`：响应体 code 正确但 HTTP 500，日志被记为服务端错误——回归测试见 `backend/pkg/errcode/errcode_test.go`。
 
-### 4.1 授课记录
+### 4.1 授课记录与督导评分 → `backend_AGENTS.md` §8.8
 
-| 方法 路径 | 权限 | 说明 |
-|-----------|------|------|
-| `GET /courses/:id/sessions?semester=&page=&pageSize=` | 登录（数据裁剪） | 课程历史授课记录列表，含每场的双侧评分摘要 |
-| `POST /sessions` | supervisor | 创建授课记录 |
-| `GET /sessions/:id` | 登录（数据裁剪） | 单场次基本信息 |
-| `GET /sessions/:id/evaluation` | 登录（数据裁剪） | **当堂课评估页聚合接口**：场次信息 + 音频 + 转写 + 督导评分 + 智能体评分 + 评语 |
-| `PUT /sessions/:id/supervisor-evaluation` | supervisor | 提交/覆盖督导评分与评语（幂等）；**5 个维度全部必填**，缺失返回 40002 |
+- 路由、请求字段、权限、错误码全见 §8.8，本节不复制。
+- **评分专属约定**：
+  - `PUT /sessions/:id/supervisor-evaluation` **5 个维度全部必填**（1–5 整数），缺失返回 40002；缺维度不得落库；
+  - 该接口**幂等覆盖**（同一督导同一场次至多一行，无草稿态）；落库同时写 `formula_version`；
+  - **仅智能体侧**允许维度为 `NULL`（§2.1）；
+  - 草稿接口（`/sessions/:id/draft`、`/drafts*`）见 §8.8；草稿允许部分维度为空，提交时强制五维齐全，**草稿永不进入聚合口径**。
 
-### 4.2 评价聚合（主任页与教师页的唯一事实源）
+### 4.2 评价聚合（主任页与教师页的唯一事实源） → `backend_AGENTS.md` §8.8
 
-| 方法 路径 | 权限 | 说明 |
-|-----------|------|------|
-| `GET /teacher-scores?departmentId=&semester=&page=&pageSize=` | director（本室）/ supervisor（全校） | 教师评分列表：综合分、双侧分、分维度、样本量 |
-| `GET /teachers/:id/evaluation-summary?semester=` | director（本室）/ teacher（仅自己）/ supervisor | 教师级评分面板 |
-| `GET /teachers/:id/evaluations?semester=&page=&pageSize=` | director（本室）/ teacher（仅自己）/ supervisor | **教师历次评价时间线**（T1.13）：按课次倒序，含课次信息 + 督导结构化评语 + 智能体参考 + 场次综合分 |
-| `GET /courses/:id/evaluation-summary?semester=` | 登录（数据裁剪） | **课程级**评分（教学提优页用），与教师级共用聚合函数 |
-| `GET /teachers/:id/score-trend?semester=&dimension=` | director（本室）/ teacher（仅自己）/ supervisor | 阶段三：趋势序列（未实现） |
+- 🔴 **路由命名**：教师评分列表为 **`GET /teacher-scores`**，不是 `GET /teachers`。Sprint 1 的 `GET /teachers` 已用于「教师字典」（前端课程表单依赖，返回数组），不能改成带分页的评分列表。两者并存，**新增接口不得复用二者，也不得再改路径而不更新本节与 §8.8。**
+- **综合分口径**（§2.5.2 综合均值）：教师级 / 课程级 `compositeScore` = 各场次综合分的算术平均；教师级恒等于其各次课综合分的平均。维度展示分 = α（默认 0.5）双侧融合，单侧缺失取另一侧。
+- **必须返回的样本与状态字段**（字段名见 `backend/internal/dto/evaluation.go`，`SampleDTO` / `ScoreSummary`）：
+  - `sample`：`sessionCount / evaluatedCount / supervisorCount / agentCount / alignedCount / sampleSufficient`；`sampleSufficient` 以 `evaluatedCount` 为准；
+  - `flags`：后端显式回传，不让前端猜。**已实现**：`no_data` / `sup_only` / `ai_only` / `disjoint`（`pkg/scoring/scoring.go:305` `missingFlags`）+ `sample_insufficient`（`service/teacherscore.go:381`）。文档早期列出的 `agent_not_calibrated` / `formula_mixed` **后端尚未产生**（`formula_mixed` 仅前端有文案占位），不得当作已实现；
+  - 未评价场次不计入分母，综合分为 `null` 且不参与排序，**不得按 0 分处理**（§2.5.5）。
+- 未实现：`GET /teachers/:id/score-trend`（阶段三趋势，前端现为 mock，见 §4.4）。
 
-> 🔴 **路由变更（2026-09，已在 `backend_AGENTS.md` §8 同步）**：教师评分列表为 **`GET /teacher-scores`**，不是本文早期版本的 `GET /teachers`。
-> 原因：Sprint 1 的 `GET /teachers` 已用于「教师字典」（前端课程表单依赖，返回数组），不能改成带分页的评分列表，否则破坏「Sprint 1 接口无回归」验收线。
-> 两者并存：`GET /teachers` = 教师字典；`GET /teacher-scores` = 评分列表。**新增接口不得复用二者，也不得再改路径而不更新本节。**
+### 4.3 录音与转写 → `backend_AGENTS.md` §8.9
 
-**`GET /teachers/:id/evaluation-summary` 响应**：
+- 路由、字段与权限全见 §8.9。产品级红线（§5.1 / §5.2）：
+  - **音频对教师不可见**：`GET /recordings/:id/stream` 仅督导，服务层强制 403；`<audio>` 无法携带 Authorization，故额外签发 `?ticket=` 短时票据（路由挂载见 `backend/internal/router/router.go:80-84`）；
+  - 播放必须写审计 `recording_playback_logs`（§5.2-2）；
+  - **转写异步**：`GET /sessions/:id/transcript` 返回 `{recording, transcript}`，用 `transcript.status` 轮询；`failed` 可 `POST /sessions/:id/transcript/retry`；
+  - **脱敏**：转写文本中的学生姓名按称谓正则 + `transcription.studentNames` 词典替换（§5.2-4）。
 
-```json
-{
-  "teacherId": 2, "teacherName": "李明", "semester": "2026-2027-1",
-  "compositeScore": 69.17,
-  "supervisorScore": 68.33,
-  "agentScore": 70.00,
-  "weights": { "supervisor": 0.5, "agent": 0.5 },
-  "dimensions": [
-    { "key": "objective",    "name": "教学目标与内容准确性", "score": 79.17, "supervisorScore": 83.33, "agentScore": 75.00, "weight": 0.30 },
-    { "key": "content",      "name": "内容质量与深度",       "score": 70.83, "supervisorScore": 66.67, "agentScore": 75.00, "weight": 0.30 },
-    { "key": "interaction",  "name": "学生互动与参与",       "score": 54.17, "supervisorScore": 50.00, "agentScore": 58.33, "weight": 0.20 },
-    { "key": "organization", "name": "课堂组织与节奏",       "score": 66.67, "supervisorScore": 66.67, "agentScore": 66.67, "weight": 0.20 },
-    { "key": "frontier",     "name": "前沿与交叉学科",       "score": 50.00, "supervisorScore": 41.67, "agentScore": 58.33, "weight": 0.00, "isObservation": true }
-  ],
-  "sample": {
-    "sessionCount": 3, "evaluatedCount": 3, "supervisorCount": 3, "agentCount": 3,
-    "alignedCount": 3, "sampleSufficient": true
-  },
-  "flags": [],
-  "formulaVersion": "v1"
-}
-```
+### 4.4 智能体接口（阶段二起，**未实现**）
 
-> 该响应与 §3.4 种子数据一一对应，可直接作为联调断言：`compositeScore` = c1 三次课综合分 `58.75/70.00/78.75` 的算术平均 = **69.17**。
-> 数据双侧对齐时，它也等于维度展示分加权求和 `0.30×79.17 + 0.30×70.83 + 0.20×54.17 + 0.20×66.67 ≈ 69.17`（§2.5.2 的默认前提）。
-> `sampleSufficient` 以 `evaluatedCount`（已评价场次）为准，不以 `sessionCount` 为准。
-> `frontier` 返回 `weight: 0` 与 `isObservation: true`，前端据此把它渲染为"亮点标记"而非计分维度。
+| 方法 路径 | 权限 | 说明 | 状态 |
+|-----------|------|------|------|
+| `POST /agent/transcribe` | 内部 | 触发转写任务（异步） | ❌ 未实现；实际由上传录音后入队（§8.9） |
+| `POST /agent/evaluate` | 内部 | 触发智能体评分（写 `evaluations` 的 agent 行） | ❌ 未实现；`repository/recording.go:79` `UpsertAgentEvaluation` 已就绪但**无调用方** |
+| `POST /agent/chat` | 登录 | 阶段三：SSE 流式对话 | ❌ 未实现；前端 `frontend/src/api/agent.ts` 返回 `src/mocks/teacherImprove.ts` 的演示数据 |
 
-> `flags` 是**必须让使用者知道的状态**，由后端显式传给前端，不让前端猜：`no_data` / `sup_only` / `ai_only` / `disjoint` / `sample_insufficient` / `agent_not_calibrated` / `formula_mixed`。
-
-**`GET /teachers/:id/evaluations` 响应**（历次评价时间线，T1.13；`pageSize` 默认 10、上限 50）：
-
-```json
-{
-  "list": [
-    {
-      "sessionId": 3, "sessionDate": "2026-09-26", "period": "3-4 节",
-      "topic": "迭代计划与估点", "courseId": 1, "courseCode": "SE3101",
-      "courseName": "软件项目管理", "status": "evaluated",
-      "compositeScore": 78.75, "supervisorScore": 82.50, "agentScore": 75.00,
-      "supervisorEvaluations": [
-        { "evaluatorId": 5, "evaluatorName": "陈静", "evaluatorType": "supervisor",
-          "formulaVersion": "v1", "objective": 5, "content": 4, "interaction": 4,
-          "organization": 4, "frontier": 3, "totalScore": 82.50,
-          "comment": "估点练习设计巧妙，学生参与度高。", "highlights": "练习设计贴近实战",
-          "improvements": "时间略紧", "suggestions": "预留 5 分钟总结",
-          "createdAt": "2026-09-26T10:00:00+08:00", "updatedAt": "2026-09-26T10:00:00+08:00" }
-      ],
-      "agentEvaluation": { "evaluatorType": "agent", "aiModelVersion": "qwen-audio-v1",
-                           "aiConfidence": 0.70, "totalScore": 75.00 }
-    }
-  ],
-  "total": 3, "page": 1, "pageSize": 10
-}
-```
-
-> - **只返回有评价的场次**（`has_supervisor || has_agent`），未评价课次不进时间线；
-> - 倒序规则 `session_date DESC, session_id DESC`；
-> - 一次拉取即可渲染「时间 / 课程·课次 / 督导评语 / 分数」，**前端不得再逐场调 `/sessions/:id/evaluation` 拼时间线（N+1）**；
-> - `compositeScore` 为该场次综合分（§2.5.2 场次级口径，与教师级聚合同源）；`supervisorScore` 为同场多督导 `total_score` 均值（§2.5.4）；`agentScore` 为智能体行总分；无侧为 `null`；
-> - 权限与 `/teachers/:id/evaluation-summary` 完全一致（同一 `checkTeacherAccess` 实现），越权 40302。
-
-### 4.3 录音与转写（阶段二）
-
-| 方法 路径 | 权限 | 说明 |
-|-----------|------|------|
-| `POST /sessions/:id/recording` | supervisor | multipart 上传音频（扩展名与大小白名单校验） |
-| `GET /recordings/:id/stream` | supervisor（教师不可见，见 §5.1） | 音频流式播放，支持 Range |
-| `GET /sessions/:id/transcript` | 登录（数据裁剪） | 转写文本；未完成时返回 `status` 供轮询 |
-| `POST /sessions/:id/transcript/retry` | supervisor | 转写失败后重试 |
-
-### 4.4 智能体（阶段二起，未实现前统一返回 `501 / 50002`）
-
-| 方法 路径 | 权限 | 说明 |
-|-----------|------|------|
-| `POST /agent/transcribe` | 内部 | 触发转写任务（异步） |
-| `POST /agent/evaluate` | 内部 | 触发智能体评分（写 `evaluations` 的 agent 行） |
-| `POST /agent/chat` | 登录 | 阶段三：SSE 流式对话 |
-
-> 智能体接口**必须与主链路解耦**：调用失败只记录日志并保留 `transcripts.status='failed'`，**不得影响督导评分与主流程**。
+> 🔴 **诚实说明（修正早期版本的错误描述）**：`backend/internal/router/router.go` 中**没有任何 `/agent/*` 路由**，因此请求会落到 gin 默认 **404**；`50002` 虽在 `pkg/errcode` 定义并映射 HTTP 501，但**无任何调用方**。"未实现前统一返回 501 / 50002"的说法不成立——**不得在联调中把它们当作可用接口**。
+> 🔴 **硬约束（不变，`service/recording.go:237` 已实现）**：智能体接口**必须与主链路解耦**：调用失败只记录日志并保留 `transcripts.status='failed'`，**不得影响督导评分与主流程**。
 
 ---
 
@@ -592,50 +472,57 @@ CREATE TABLE `transcripts` (
 | 转写文本 | ✗ | **本人课程（可看，用于改进）** | ✓ |
 
 > 🔴 **教师绝不能看到同事的评分与评语。** 教师端可见范围严格限定为**仅本人**——这是组织敏感信息，越权等于事故。
-> **音频对教师不可见**：音频中的学生人声与教师人声不可分割，教师端只开放**已脱敏的转写文本**（§5.2-5）。
+> **音频对教师不可见**：音频中的学生人声与教师人声不可分割，教师端只开放**已脱敏的转写文本**（§5.2-4）。
 
 ### 5.2 隐私与合规（采集音频前必须落地）
 
 课堂录音含**学生声音**，属个人信息。一旦开始采集即产生合规义务：
 
 1. **告知**：录音前需课堂口头告知或课程公告
-2. **访问控制 + 审计**：谁在何时听了谁的课，必须留痕（阶段二引入 `audit_logs`）
+2. **访问控制 + 审计**：谁在何时听了谁的课，必须留痕——**已落地**为 `recording_playback_logs` 表（`backend/migrations/3_recordings_and_transcripts.up.sql:37`），由 `RecordingService.Stream` 在放行播放时写入（`backend/internal/service/recording.go:184`）。早期文档中的 `audit_logs` 表**不存在**，勿再引用。
 3. **保留期限**：如 1 学期后归档或删除，不得无限期保存
 4. **转写脱敏**：转写文本中的学生姓名做 NER 替换（"学生A"），避免评语出现可识别个人的内容
 5. **最小可见**：教师可见**自己的转写文本**用于改进；音频默认仅督导（音频里的人声不只是教师的）
 
 ### 5.3 评分伦理
 
-- 教师管理列表**默认按姓名/工号排序**，按分排序作为显式操作
+- 教师评分列表**默认按姓名/工号排序**，按分排序作为显式操作
 - 每行必须展示**评价次数 n**，`n < 3` 标注样本不足
 - UI 显著标注「**仅用于教学支持，不作为考核依据**」
 - 督导间评分校准（rater bias）列为已知局限（§10.1），阶段三引入
 
 ---
 
-## 6. 页面与路由设计
+## 6. 页面与路由
 
-### 6.1 路由变更表
+> 页面规格、组件清单与路由总表的事实源为 [`docs/frontend_AGENTS.md`](./frontend_AGENTS.md) §6 / §7。本节只保留**路由现状**与产品级决策（并列路由、三条跳转链路）。
 
-| 路由 | name | 现状 | 目标 | 权限 | 变更 |
-|------|------|------|------|------|------|
-| `/dashboard` | dashboard | 三角色 | 按角色重构（见 §6.3） | 登录 | 改 |
-| `/courses` | course-list | — | 不变 | 登录 | — |
-| `/courses/new` | course-new | — | 不变 | director | — |
-| `/courses/:id` | course-detail | — | **+ 历史授课记录列表** | 登录 | 增强 |
-| `/courses/:id/edit` | course-edit | — | 不变 | director | — |
-| `/courses/:id/improve` | course-improve | — | **新增** 教学提优 | teacher | 新增 |
-| `/teachers` | teacher-list | — | **新增** 教师管理 | director/supervisor | 新增 |
-| `/teachers/:id` | teacher-detail | — | **新增** 教师评分面板 | director/supervisor | 新增 |
-| `/sessions/:id/evaluation` | session-evaluation | — | **新增** 当堂课质量评估页 | supervisor（他人只读） | 新增 |
-| `/supervision` | supervision | 督导总览 | **改造为「听评课管理」**完整分页列表 | supervisor | 改造（不删路由） |
-| `/profile` | profile | — | 不变 | 登录 | — |
+### 6.1 路由现状（对照 `frontend/src/router/index.ts`）
 
-> `/supervision` **不删除**：工作台只展示听评课安排前 8 条，删页会导致第 9 条以后无法访问；改造后承载完整分页与状态/日期筛选。
+| 路由 | name | meta.roles | 说明 |
+|------|------|-----------|------|
+| `/dashboard` | dashboard | 登录 | 三角色差异化工作台；教师登录后重定向到 `/me/quality`（`frontend/src/router/guards.ts:23`） |
+| `/courses` | course-list | 登录 | 课程列表（主任「课程库」/ 教师「我的课程」/ 督导「课程列表」） |
+| `/courses/new` | course-new | director | 新增课程 |
+| `/courses/:id` | course-detail | 登录 | 课程详情（含历史授课记录列表） |
+| `/courses/:id/edit` | course-edit | director | 编辑课程 |
+| `/courses/:id/improve` | course-improve | teacher | 教学提优（并列路由决策见 §6.2） |
+| `/sessions/:id/evaluation` | session-evaluation | 登录 | 当堂课质量评估页；**唯一可写角色为 supervisor**（教师由「授课快照 → 查看详细记录」进入复盘） |
+| `/supervision` | supervision | supervisor | 听评课管理（完整分页 + 状态/日期筛选）；**不删除** |
+| `/supervision/courses/:id` | supervisor-course | supervisor | 督导课程综合评分页（综合分 + 历史授课记录 + 录音上传） |
+| `/teachers` | teacher-list | director/supervisor | **教师画像**（侧边栏文案见 `frontend/src/layouts/AppLayout.vue:61`；不是「教师管理」） |
+| `/teachers/:id` | teacher-detail | director/supervisor | 教师评分面板 |
+| `/me/quality` | profile-quality | teacher | 我的质量档案 |
+| `/drafts` | draft-box | supervisor | 草稿箱 |
+| `/profile` | profile | 登录 | 个人中心 |
+| `/login` · `/403` · `/:pathMatch(.*)*` | login / forbidden / not-found | public | 登录、无权、404 |
+
+> 与早期版本的差异：补入 `/me/quality`、`/drafts`（旧表遗漏）；`/teachers` 页面标题为「教师画像」。
+> `/supervision` **不删除**：工作台只展示听评课安排前 8 条，删页会导致第 9 条以后无法访问。
 
 ### 6.2 「教学提优」与课程详情的关系
 
-**采用并列路由**：保留 `/courses/:id`；教师从**「我的课程」点击时跳 `/courses/:id/improve`**。
+**采用并列路由**：保留 `/courses/:id`；教师从**「我的课程」点击时跳 `/courses/:id/improve`**（`frontend/src/views/CourseListView.vue:49`）。
 
 | 方案 | 做法 | 评价 |
 |------|------|------|
@@ -645,12 +532,12 @@ CREATE TABLE `transcripts` (
 
 教学提优页保留课程基本信息（学分/学时/学期/班级/学生人次）与资源上传接口。
 
-### 6.3 三条跳转链路
+### 6.3 三条跳转链路（产品级目标）
 
 **① 主任**
 ```
-/dashboard  统计卡 + 「课程管理」「教师管理」入口卡
-   ├─▶ /courses（课程管理）
+/dashboard  统计卡 + 「课程管理」「教师画像」入口卡
+   ├─▶ /courses（课程库）
    └─▶ /teachers  本室教师｜综合分｜5维分｜评价次数 n
          └─▶ /teachers/:id  教师评分面板
                ├─ 综合分大数字 + 分维度条形图
@@ -662,111 +549,98 @@ CREATE TABLE `transcripts` (
 
 **② 督导**
 ```
-/dashboard  统计卡 + 覆盖率环 + 听评课安排（前 8 条）＋「查看全部」
+/dashboard  待评课队列（今日/本周/本月/未评，已评估自动清除）＋ 待评估授课记录
    ├─▶ /supervision  听评课管理（完整分页 + 状态/日期筛选）
-   └─▶ /courses/:id  课程详情
-         └─ 历史授课记录列表
-               └─▶ /sessions/:id/evaluation  当堂课质量评估页
-                     ├─ 音频播放器（阶段二）
-                     ├─ 转写文本（阶段二，含说话人分离）
-                     ├─ 督导评分表单：5 维 1-5 分 + 结构化评语
-                     ├─ 智能体评分参考（可折叠，标"AI 参考"）
-                     └─ 提交
+   └─▶ /courses  课程列表（mine=1：本人负责评估的课程）
+         └─▶ /supervision/courses/:id  课程综合评分页
+               ├─ 本课程当前综合评分（督导 × AI 双源）
+               └─ 历史授课记录列表
+                     ├─「去评估 / 查看·修改评估」→ /sessions/:id/evaluation
+                     │     ├─ 音频播放器（阶段二，仅督导）
+                     │     ├─ 转写文本（阶段二，含说话人分离；卡片限长 + 弹窗展开）
+                     │     ├─ 督导评分表单：5 维 1-5 分 + 结构化评语
+                     │     ├─ 智能体评分参考（可折叠，标"AI 参考"）
+                     │     └─ 提交（提交后授课记录置 evaluated，从队列清除）
+                     └─ 上传课堂录音（POST /sessions/:id/recording）
 ```
 
 **③ 教师**
 ```
-/dashboard  我的课程卡片
-   └─▶ /courses/:id/improve  教学提优
-         ├─ 课程基本信息 + 资源上传接口（保留）
-         ├─ 评分区：综合分 + 5 维分 + 与上学期对比 +（阶段三）趋势折线
-         ├─ 督导评语列表（按时间倒序，标注是哪一次课）
-         └─ 智能体提优建议（按时间倒序）
+/me/quality  我的质量档案
+   ├─ 我的课程评分明细：课程列表 +「去提优」→ /courses/:id/improve
+   └─ 授课快照：逐次授课卡片 +「查看详细记录」→ /sessions/:id/evaluation（只读）
+         ├─ 督导评分与结构化评语（只读）
+         ├─ AI 智能体评价（维度对照 + 文字评语）
+         └─ 当堂课脱敏转写（教师不可回放录音）
+/courses/:id/improve  教学提优
+   ├─ 课程基本信息 + 资源上传接口（保留）
+   ├─ 评分区：综合分 + 5 维分 + 与上学期对比 +（阶段三）趋势折线
+   ├─ 督导评语列表（按时间倒序，标注是哪一次课）
+   └─ 智能体提优建议（按时间倒序，当前为 mock）
 ```
 
-### 6.4 前端新增目录
+> **挂链现状核对（2026-10-07）**：`/courses → /courses/:id/improve`（`CourseListView.vue:49`）、`/me/quality → /sessions/:id/evaluation`（`ProfileQualityView.vue:102`）、`/dashboard → /sessions/:id/evaluation`（`DashboardView.vue:162,178,183`）、`/dashboard → /teachers`（`DashboardView.vue:144,353`）、`/supervision/courses/:id → /sessions/:id/evaluation`（`SupervisorCourseView.vue:108`）均已挂链；**`/supervision` 与 `/supervision/courses/:id` 目前没有入口链接**（侧边栏 `AppLayout.vue:49-55` 无对应项，工作台也无跳转），只能直接输入 URL 访问——入口待补。
 
-```
-src/
-├── api/
-│   ├── session.ts          # 授课记录、单场次评估聚合
-│   ├── teacher.ts          # 教师评分列表与面板
-│   └── agent.ts            # 阶段三：对话
-├── components/
-│   ├── evaluation/         # 新增：评分域组件
-│   │   ├── ScoreRadar.vue          # 五维雷达/条形
-│   │   ├── ScoreTrendChart.vue     # 阶段三：趋势
-│   │   ├── EvaluationForm.vue      # 督导评分表单（含锚点 tooltip）
-│   │   ├── EvaluationCompare.vue   # 督导 vs 智能体 对比
-│   │   ├── CommentPanel.vue        # 结构化评语展示
-│   │   └── TranscriptViewer.vue    # 阶段二：转写文本
-│   ├── session/
-│   │   ├── SessionTable.vue        # 历史授课记录列表
-│   │   └── AudioPlayer.vue         # 阶段二
-│   └── teacher/
-│       ├── TeacherScoreTable.vue
-│       └── TeacherScorePanel.vue
-└── views/
-    ├── TeacherListView.vue
-    ├── TeacherDetailView.vue
-    ├── SessionEvaluationView.vue
-    └── CourseImproveView.vue
-```
+### 6.4 前端目录与组件
+
+> 目录结构（`src/api` / `src/components` / `src/views`）与组件清单以 [`frontend_AGENTS.md`](./frontend_AGENTS.md) §5 / §8 为事实源，本文件不复制。本文件关心的口径只两条：评估页组件必须覆盖「评分表单 + 锚点 tooltip + 双源对照 + 结构化评语 + 脱敏转写」，提优页必须覆盖「督导评语流 + 智能体建议 + 趋势」。
 
 ---
 
-## 7. 任务列表
+## 7. 任务列表（含状态）
 
 > 分工沿用 4+n 模式：**成员一**（徐仕杰，DRI/产品）、**成员二**（刘子杰，前端）、**成员三**（后端）、**成员四**（胡凯翔，后端架构）。
-> 依赖列中的编号表示必须先完成的任务。分发用的简短清单见 [`Sprint2-3-任务清单.md`](./Sprint2-3-任务清单.md)。
+> 依赖列中的编号表示必须先完成的任务。
+> **状态口径**：✅ 已完成 · 🟡 部分完成 · ❌ 未完成。状态由代码核对得出（证据见 §1.1 与各表备注），**不是排期占位**。
+> 原按模块分发的《Sprint2-3 任务清单》已并入本表（该文件随本次合并删除）：模块分组不提供超出本表的额外信息（同一批任务、同一批负责人），为避免双份清单漂移，**任务分发的唯一入口是本表**。
 
 ### 7.1 阶段一（Sprint 2.1）—— 评价闭环，不依赖智能体
 
-| 编号 | 任务 | 负责 | 依赖 | 验收 |
-|------|------|------|------|------|
-| T1.1 | 引入 `golang-migrate`，编写 `2_teaching_sessions_and_evaluations` 迁移脚本（§3.1） | 成员四 | — | 空库执行 `migrate up` 可建成 2 张表；文件命名符合同工具约定 |
-| T1.2 | 扩展 `model`：`TeachingSession`、`Evaluation` | 成员四 | T1.1 | `go build` 通过，字段与 DDL 一一对应 |
-| T1.3 | `pkg/scoring`：维度权重、单次总分、`Aggregate()` 纯函数 | 成员四 | — | 表驱动单测覆盖 §2.4 验算例与 §2.5.5 缺失矩阵全部 5 行；恒等式（综合均值）在非对齐数据下亦成立 |
-| T1.4 | repository：`session.go`、`evaluation.go`（含 §2.5.4 聚合 SQL） | 成员三 | T1.2 | `go test` 通过；聚合结果与手算一致 |
-| T1.5 | service：`session.go`（授课记录 CRUD + 归属校验） | 成员三 | T1.4 | 越权用例返回 40302 |
-| T1.6 | service：`evaluation.go`（提交评分、幂等覆盖、`formula_version` 写入） | 成员三 | T1.5 | 五维必填（缺失 40002）；重复提交覆盖而非报错 |
-| T1.7 | service：`teacherscore.go`（教师级/课程级聚合，单一事实源） | 成员四 | T1.3 T1.4 | 主任视角与教师视角数字**完全一致** |
-| T1.8 | handler + router：§4.1 / §4.2 全部接口 | 成员三 | T1.5–T1.7 | `/healthz` 与 Sprint 1 接口无回归 |
-| T1.9 | 前端 `types/` + `api/`：session / teacher 接口层 | 成员二 | T1.8 | `vue-tsc` 零错误 |
-| T1.10 | 前端：课程详情页新增「历史授课记录」列表 | 成员二 | T1.9 | 三态完整（加载/空/失败） |
-| T1.11 | 前端：当堂课质量评估页（评分表单 + 锚点 tooltip + 结构化评语） | 成员二 | T1.9 | 5 维 1-5 分必填校验；提交后列表即时反映 |
-| T1.12 | 前端：教师管理页 `TeacherListView` | 成员二 | T1.9 | 展示评价次数 n；n<3 有样本不足标记；默认按姓名排序 |
-| T1.13 | 前端：教师评分面板 `TeacherDetailView` | 成员二 | T1.12 | 综合分 + 5 维 + 按课程明细 + 历次时间线 |
-| T1.14 | 前端：教学提优页 `CourseImproveView`（只读督导分 + 评语） | 成员二 | T1.9 | 保留基本信息与资源上传 |
-| T1.15 | 前端：`/supervision` 改造为听评课管理；主任工作台改为入口卡 | 成员二 | — | 完整分页列表可用；工作台不再重复课程表格 |
-| T1.16 | 种子数据扩展（§3.4）+ `scripts/verify.sh` 新增断言 | 成员三 | T1.8 | 新增 ≥25 条断言全绿 |
-| T1.17 | 文档同步：三份 AGENTS/MySQL 文档的范围与契约章节 | 成员四 | — | 与本文档无矛盾 |
+| 编号 | 任务 | 负责 | 依赖 | 验收 | 状态 |
+|------|------|------|------|------|------|
+| T1.1 | 引入 `golang-migrate`，编写 `2_teaching_sessions_and_evaluations` 迁移脚本（§3.1） | 成员四 | — | 空库执行 `migrate up` 可建成 2 张表；文件命名符合同工具约定 | ✅ |
+| T1.2 | 扩展 `model`：`TeachingSession`、`Evaluation` | 成员四 | T1.1 | `go build` 通过，字段与 DDL 一一对应 | ✅ |
+| T1.3 | `pkg/scoring`：维度权重、单次总分、`Aggregate()` 纯函数 | 成员四 | — | 表驱动单测覆盖 §2.4 验算例与 §2.5.5 缺失矩阵全部 5 行；恒等式（综合均值）在非对齐数据下亦成立 | ✅ |
+| T1.4 | repository：`session.go`、`evaluation.go`（含 §2.5.4 聚合 SQL） | 成员三 | T1.2 | `go test` 通过；聚合结果与手算一致 | ✅ |
+| T1.5 | service：`session.go`（授课记录 CRUD + 归属校验） | 成员三 | T1.4 | 越权用例返回 40302 | ✅ |
+| T1.6 | service：`session.go`（提交评分、幂等覆盖、`formula_version` 写入） | 成员三 | T1.5 | 五维必填（缺失 40002）；重复提交覆盖而非报错 | ✅ |
+| T1.7 | service：`teacherscore.go`（教师级/课程级聚合，单一事实源） | 成员四 | T1.3 T1.4 | 主任视角与教师视角数字**完全一致** | ✅ |
+| T1.8 | handler + router：§4.1 / §4.2 全部接口 | 成员三 | T1.5–T1.7 | `/healthz` 与 Sprint 1 接口无回归 | ✅ |
+| T1.9 | 前端 `types/` + `api/`：session / teacher 接口层 | 成员二 | T1.8 | `vue-tsc` 零错误 | ✅ |
+| T1.10 | 前端：课程详情页新增「历史授课记录」列表 | 成员二 | T1.9 | 三态完整（加载/空/失败） | ✅ |
+| T1.11 | 前端：当堂课质量评估页（评分表单 + 锚点 tooltip + 结构化评语） | 成员二 | T1.9 | 5 维 1-5 分必填校验；提交后列表即时反映 | ✅ |
+| T1.12 | 前端：教师画像页 `TeacherListView` | 成员二 | T1.9 | 展示评价次数 n；n<3 有样本不足标记；默认按姓名排序 | ✅ |
+| T1.13 | 前端：教师评分面板 `TeacherDetailView` | 成员二 | T1.12 | 综合分 + 5 维 + 按课程明细 + 历次时间线 | ✅ |
+| T1.14 | 前端：教学提优页 `CourseImproveView`（只读督导分 + 评语） | 成员二 | T1.9 | 保留基本信息与资源上传 | ✅ |
+| T1.15 | 前端：`/supervision` 改造为听评课管理；主任工作台改为入口卡 | 成员二 | — | 完整分页列表可用；工作台不再重复课程表格 | ✅ |
+| T1.16 | 种子数据扩展（§3.4）+ `verify.sh` 新增断言 | 成员三 | T1.8 | 新增断言全绿（当前 `backend/scripts/verify.sh` 共 137 条 `want` 断言） | ✅ |
+| T1.17 | 文档同步：三份 AGENTS / MySQL 文档的范围与契约章节 | 成员四 | — | 与本文档无矛盾 | ✅ |
 
 ### 7.2 阶段二（Sprint 2.2）—— 智能体接入
 
-| 编号 | 任务 | 负责 | 依赖 | 验收 |
-|------|------|------|------|------|
-| T2.1 | `3_recordings_and_transcripts` 迁移脚本（§3.2） | 成员四 | T1.1 | 迁移可重复执行 |
-| T2.2 | 音频上传（白名单 + 大小限制 + 时长解析） | 成员三 | T2.1 | 非法扩展名返回 40001 |
-| T2.3 | 异步转写任务框架（worker + 状态机 + 重试） | 成员四 | T2.2 | 任务失败不影响主流程；`failed` 可重试 |
-| T2.4 | ASR 适配层（Qwen-Audio 接入，接口先行、实现可后补） | 成员四 | T2.3 | 未配置引擎时返回 50003 而非崩溃 |
-| T2.5 | 转写脱敏（学生姓名 NER 替换） | 成员四 | T2.3 | 单测覆盖姓名替换 |
-| T2.6 | 智能体评分服务（写 `evaluations` 的 agent 行） | 成员四 | T2.4 | 无法观测的维度写 `NULL` |
-| T2.7 | 前端：音频播放器 + 转写查看器（含轮询） | 成员二 | T2.3 | 转写中/失败/完成三态 |
-| T2.8 | 前端：评估页「智能体参考」对比面板 | 成员二 | T2.6 | 标注"AI 参考"；低置信度维度有提示 |
-| T2.9 | 综合分生效：聚合 SQL 纳入 agent 侧 + `flags` 全量返回 | 成员四 | T2.6 | §2.5.5 缺失矩阵全部有单测 |
-| T2.10 | 审计日志（谁听了谁的课） | 成员三 | T2.2 | 播放接口写入审计 |
+| 编号 | 任务 | 负责 | 依赖 | 验收 | 状态 |
+|------|------|------|------|------|------|
+| T2.1 | `3_recordings_and_transcripts` 迁移脚本（§3.2） | 成员四 | T1.1 | 迁移可重复执行 | ✅ |
+| T2.2 | 音频上传（白名单 + 大小限制 + 时长解析） | 成员三 | T2.1 | 非法扩展名返回 40001 | ✅ |
+| T2.3 | 异步转写任务框架（worker + 状态机 + 重试） | 成员四 | T2.2 | 任务失败不影响主流程；`failed` 可重试 | ✅ |
+| T2.4 | ASR 适配层（Qwen-Audio 接入，接口先行、实现可后补） | 成员四 | T2.3 | 未配置引擎时返回 50003 而非崩溃 | ✅ |
+| T2.5 | 转写脱敏（学生姓名 NER 替换） | 成员四 | T2.3 | 单测覆盖姓名替换 | ✅ |
+| T2.6 | 智能体评分服务（写 `evaluations` 的 agent 行） | 成员四 | T2.4 | 无法观测的维度写 `NULL` | ❌ **未完成**：`repository/recording.go:79` `UpsertAgentEvaluation` 无调用方；无 `/agent/*` 路由 |
+| T2.7 | 前端：音频播放器 + 转写查看器（含轮询） | 成员二 | T2.3 | 转写中/失败/完成三态 | ✅ |
+| T2.8 | 前端：评估页「智能体参考」对比面板 | 成员二 | T2.6 | 标注"AI 参考"；低置信度维度有提示 | ✅ 面板已交付（`EvaluationCompare.vue`）；真实数据待 T2.6 |
+| T2.9 | 综合分生效：聚合 SQL 纳入 agent 侧 + `flags` 全量返回 | 成员四 | T2.6 | §2.5.5 缺失矩阵全部有单测 | ✅ 聚合侧已实现；无 agent 写入通道（取决于 T2.6） |
+| T2.10 | 审计日志（谁听了谁的课） | 成员三 | T2.2 | 播放接口写入审计 | ✅ `recording_playback_logs`（`service/recording.go:184`） |
 
 ### 7.3 阶段三（Sprint 3）—— 帮教师
 
-| 编号 | 任务 | 负责 | 依赖 | 验收 |
-|------|------|------|------|------|
-| T3.1 | 智能体提优建议生成与展示 | 成员四/二 | T2.6 | 教师端可见，按时间倒序 |
-| T3.2 | 趋势接口 + 趋势折线组件 | 成员三/二 | T1.7 | §3.4 种子数据应呈上升趋势 |
-| T3.3 | 智能体对话（SSE 流式） | 成员四/二 | T2.6 | 断流可重连；失败不阻塞页面 |
-| T3.4 | 教师申诉 / 督导复核流程 | 成员三/二 | T1.6 | 申诉记录留痕，状态可追溯 |
-| T3.5 | 督导间评分校准（示范课基线偏移） | 成员四 | T2.9 | 校准前后分数可对比 |
-| T3.6 | 质量报告导出 | 成员三 | T1.7 | 导出内容与页面数字一致 |
+| 编号 | 任务 | 负责 | 依赖 | 验收 | 状态 |
+|------|------|------|------|------|------|
+| T3.1 | 智能体提优建议生成与展示 | 成员四/二 | T2.6 | 教师端可见，按时间倒序 | ❌ 未完成：督导评语展示已有（`EvaluationTimeline` / `CommentPanel`），**AI 建议为 mock**（`frontend/src/mocks/teacherImprove.ts`） |
+| T3.2 | 趋势接口 + 趋势折线组件 | 成员三/二 | T1.7 | §3.4 种子数据应呈上升趋势 | ❌ 未完成：组件与 mock 已就绪（`ScoreTrendChart.vue`），接口未实现 |
+| T3.3 | 智能体对话（SSE 流式） | 成员四/二 | T2.6 | 断流可重连；失败不阻塞页面 | ❌ 未完成：`api/agent.ts` 用定时分包模拟流式 |
+| T3.4 | 教师申诉 / 督导复核流程 | 成员三/二 | T1.6 | 申诉记录留痕，状态可追溯 | ❌ 未完成 |
+| T3.5 | 督导间评分校准（示范课基线偏移） | 成员四 | T2.9 | 校准前后分数可对比 | ❌ 未完成 |
+| T3.6 | 质量报告导出 | 成员三 | T1.7 | 导出内容与页面数字一致 | ❌ 未完成 |
 
 ---
 
@@ -790,13 +664,15 @@ src/
 
 ### 8.2 阶段二
 
+> ⚠️ **前置缺口**：T2.6 智能体评分未接入。下表「维度可空」「综合分」两条当前**只在种子数据（`seed.sql` 的 agent 行）下成立**，不得据此判定阶段二完成——阶段二完成的标志是 T2.6 落地（有真实写入通道）。
+
 | 项 | 标准 |
 |----|------|
 | 转写异步 | 上传 45 分钟音频不阻塞接口；轮询可见 `pending→running→done` |
 | 降级 | ASR 引擎不可用时，督导评分与聚合**完全不受影响**；接口返回 50003 |
 | 维度可空 | 智能体 `objective_score` 为 `NULL` 时，该维度自动退化为"只取督导侧"，不出现 NaN |
 | 综合分 | 双侧齐备时按 α 融合；`disjoint` 场景返回显式提示 |
-| 隐私 | 转写文本中学生姓名已脱敏；音频播放写入审计日志 |
+| 隐私 | 转写文本中学生姓名已脱敏；音频播放写入 `recording_playback_logs` |
 
 ### 8.3 阶段三
 
@@ -825,6 +701,7 @@ src/
 | 9.8 | 跨学期对比 | 低/低 | 依赖 9.3 之外的 T3.2 |
 | 9.9 | 评语通知教师 | 中/中 | 需重新评估「消息通知」的开禁 |
 | 9.10 | 细粒度权限（ABAC） | 低/高 | 出现"院级督导"等新角色时再考虑 |
+| 9.11 | 补齐 `/supervision` 与 `/supervision/courses/:id` 的导航入口 | 高/低 | 两页已实现但无入口链接（§6.3 现状核对），属可用性缺口 |
 
 ---
 
@@ -843,17 +720,18 @@ src/
 | 7 | 所有聚合接口必须支持 `?semester=`，默认当前学期 | §2.5.6 |
 | 8 | 无评价教师综合分为 `null` 且不参与排序，不得显示 0 | §2.5.5 |
 | 9 | 一次课允许多个督导评分，同场次取 `AVG` | §2.5.4 |
-| 10 | 评分无草稿态，`PUT` 幂等覆盖，写入即生效 | §3.1 |
+| 10 | 正式评价无草稿态，`PUT` 幂等覆盖，写入即生效；草稿另存 `evaluation_drafts`，不进聚合 | §3.1 |
 | 11 | 教师只能看自己的评分与评语；音频对教师不可见，仅开放脱敏转写 | §5.1 |
 | 12 | 教师评分列表默认按姓名排序，必须展示评价次数 n，标注"不作为考核依据" | §5.3 |
-| 13 | 新增表只新增、不改存量表；`supervision_plans` 保持不动 | §3 |
+| 13 | **不得改动 Sprint 1 存量表**（`supervision_plans` 保持不动，关联靠 `teaching_sessions.plan_id` 反向指回）；Sprint 2 新增表的列调整一律走新迁移（V4 / V6 为先例） | §3 |
 | 14 | 转写必须异步且可重试；智能体故障不得影响督导评分主流程 | §4.4 |
 | 15 | 督导评分**五维全部必填**（缺失 40002）；仅智能体侧允许维度为 `NULL` | §2.1 · §4.1 |
 | 16 | 样本充足性以 `evaluatedCount`（已评价场次）为准，不以 `sessionCount` | §2.5.5 |
 | 17 | 迁移文件命名 `<版本>_<名称>.up.sql` / `.down.sql`；**禁止** Flyway 风格 `V2__xxx` | §3 |
 | 18 | 教师评分列表路由为 `GET /teacher-scores`；`GET /teachers` 永远是教师字典 | §4.2 |
 | 19 | 新增错误码必须同步 `pkg/errcode` 的 code / 文案 / **HTTP 映射**三处，并补表驱动单测 | §4 |
-| 20 | JSON 列（如 `evaluations.evidence`）的 Go 字段必须用指针，禁止以零值 `''` 写入 | §3.1 |
+| 20 | JSON 列（如 `evaluations.evidence`）的 Go 字段必须用指针，禁止以零值 `''` 写入 | §3.3-3 |
+| 21 | 智能体评分未接入（T2.6）：不得把 `/agent/*`、`score-trend` 当作可用接口，也不得用 `50002` 描述其真实行为（实为 404） | §4.4 |
 
 ### 10.1 遗留待观察项（不阻塞开发，阶段三复盘）
 
@@ -863,7 +741,15 @@ src/
 | 智能体评分效力 | α=0.5 是未经校准的等权假设，积累 ≥50 条双侧样本后应重新评估 |
 | 样本量阈值 | `minSampleSize=3` 为经验值，首个学期结束后按实际分布调整 |
 | 非对齐聚合算法 | 当前采用「综合均值」并默认数据双侧对齐；部分场次仅单侧评价时的通用算法待单独立项（§2.5.2） |
+| 智能体评分接入 | T2.6 未完成，阶段二不能判定为交付（§1.1 / §8.2）；`50003` 目前只覆盖转写链路 |
 
 ---
 
-*文档版本：v1.3（2026-09 阶段一联调修订：综合均值口径、五维必填、evaluatedCount 样本量、`/teacher-scores` 路由、golang-migrate 命名、错误码 HTTP 映射）*
+## 更新记录
+
+| 日期 | 版本 | 变更 |
+|------|------|------|
+| 2026-09 | v1.0 → v1.3 | 阶段一联调修订：综合均值口径、五维必填、`evaluatedCount` 样本量、`/teacher-scores` 路由、golang-migrate 命名、错误码 HTTP 映射 |
+| 2026-10-07 | v1.4 | ① 并入原按模块分发的《Sprint2-3 任务清单》（该文件随本次合并删除，其按模块视角无额外信息）并为 §7.1/§7.2/§7.3 增加**状态**列；② §3 DDL、§4 接口契约、§6 页面与路由改为指向单一事实源（`backend/database/schema.sql` + `backend/migrations/`、`backend_AGENTS.md` §8、`frontend_AGENTS.md` §6/§7），只保留 SQL/契约之外的口径约定与实现陷阱；③ 修正阶段状态（阶段①已实现 / 阶段②**部分实现**：智能体评分未接入 / 阶段③未实现）与审计表名（`audit_logs` → `recording_playback_logs`）、页面名（「教师管理」→「教师画像」）；④ 修正 §4.4「未实现前统一返回 501/50002」的失实描述为真实行为（无 `/agent/*` 路由 → 404；`50002` 无调用方）；⑤ 补入遗漏路由 `/me/quality`、`/drafts` 与挂链现状 |
+
+*文档版本：v1.4（2026-10-07）*

@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # 「爱教学」Sprint 1 + Sprint 2.1 数据链路一键验收（后端 AGENTS.md §15）
 #
-# 前置：MySQL 已按 database/schema.sql + migrations（V2）+ database/seed.sql 初始化，
-#       且已执行 make seed。Sprint 2.1 断言对照开发计划 §3.4 对账基准与 §4.2 响应示例。
+# 前置：MySQL 已按 database/schema.sql + migrations（V1–V6）+ database/seed.sql 初始化，
+#       且已执行 make seed。断言对照开发计划 §3.4 对账基准（§4 为契约索引，正文见 backend_AGENTS.md §8）；
+#       聚合期望值与 pkg/scoring 的种子数据集单测同源（教师2=71.25 / 教师3=79.17 / c1=69.17）。
 # 设计：只读校验先执行，写操作（建课/上传/建场次/提交评分）后执行，
 #       避免写操作污染种子数据的期望值；写操作产生的新增数据在脚本尾部清理。
 # 用法：BASE=http://localhost:8080/api/v1 bash scripts/verify.sh
@@ -80,7 +81,7 @@ want "已完成听评课程数=3"     "3"   "$COV" "d['data']['supervisedCourses
 want "总体覆盖率=0.5"         "0.5" "$COV" "d['data']['rate']"
 want "分教研室覆盖率条目=3"   "3"   "$COV" "len(d['data']['byDepartment'])"
 PLANS="$(req "$BASE/supervision/plans?page=1&pageSize=10" "${AUTH_S[@]}")"
-want "听评课安排总数=5"       "5"   "$PLANS" "d['data']['total']"
+want "听评课安排总数=7"       "7"   "$PLANS" "d['data']['total']"
 want "筛选 status=completed 命中 3" "3" "$(req "$BASE/supervision/plans?status=completed" "${AUTH_S[@]}")" "d['data']['total']"
 
 echo
@@ -98,10 +99,10 @@ want "教师：学生总人次=175" "175" "$DASH_T" "d['data']['studentCount']"
 want "教师：资源总数=3"     "3"   "$DASH_T" "d['data']['resourceCount']"
 
 DASH_S="$(req "$BASE/dashboard" "${AUTH_S[@]}")"
-want "督导：open 课程数=6" "6"   "$DASH_S" "d['data']['courseCount']"
-want "督导：计划数=5"       "5"   "$DASH_S" "d['data']['planCount']"
-want "督导：已完成=3"       "3"   "$DASH_S" "d['data']['completedCount']"
-want "督导：覆盖率=0.5"     "0.5" "$DASH_S" "d['data']['coverageRate']"
+want "督导：听评课安排=7"       "7"    "$DASH_S" "len(d['data']['recentPlans'])"
+want "督导：最近草稿=0"         "0"    "$DASH_S" "len(d['data']['recentDrafts'])"
+want "督导：待评估授课记录=0"   "0"    "$DASH_S" "len(d['data']['pendingSessions'])"
+want "督导：计划 1 已关联评估"   "True" "$DASH_S" "[p['evaluated'] for p in d['data']['recentPlans'] if p['id']==1][0]"
 
 echo
 echo "${c_dim}== 6. 字典接口 ==${c_reset}"
@@ -167,7 +168,7 @@ want "最新一场主题=迭代计划与估点"     "迭代计划与估点" "$C1
 want "最新一场督导摘要分=82.5"        "82.5"  "$C1SESS" "d['data']['list'][0]['supervisorScore']"
 want "最新一场智能体摘要分=75"        "75"    "$C1SESS" "d['data']['list'][0]['agentScore']"
 want "最早一场督导摘要分=52.5"        "52.5"  "$C1SESS" "d['data']['list'][2]['supervisorScore']"
-want "最早一场智能体摘要分=60.71"     "60.71" "$C1SESS" "d['data']['list'][2]['agentScore']"
+want "最早一场智能体摘要分=65"        "65"    "$C1SESS" "d['data']['list'][2]['agentScore']"
 want "最早一场评价条数=2"             "2"     "$C1SESS" "d['data']['list'][2]['evaluationCount']"
 want "学期切片不匹配返回空"           "0"     "$(req "$BASE/courses/1/sessions?semester=2025-2026-2" "${AUTH_S[@]}")" "d['data']['total']"
 
@@ -182,30 +183,30 @@ want "场次 1 督导评分人=陈静"          "陈静"   "$E1" "d['data']['sup
 want "场次 1 督导 objective=4"        "4"     "$E1" "d['data']['supervisorScores'][0]['objective']"
 want "场次 1 督导总分=52.5"           "52.5"  "$E1" "d['data']['supervisorScores'][0]['totalScore']"
 want "场次 1 智能体参考=qwen-audio-v1" "qwen-audio-v1" "$E1" "d['data']['agentScore']['aiModelVersion']"
-want "场次 1 智能体 objective=null"   "None"  "$E1" "d['data']['agentScore']['objective']"
-want "场次 1 智能体置信度=0.72"        "0.72"  "$E1" "d['data']['agentScore']['aiConfidence']"
+want "场次 1 智能体 objective=4"    "4"     "$E1" "d['data']['agentScore']['objective']"
+want "场次 1 智能体置信度=0.7"         "0.7"   "$E1" "d['data']['agentScore']['aiConfidence']"
 
 echo
-echo "${c_dim}== 11. 教师级/课程级聚合（§4.2 响应示例逐位对账）==${c_reset}"
+echo "${c_dim}== 11. 教师级/课程级聚合（与 pkg/scoring 种子数据集单测同源）==${c_reset}"
 TS="$(req "$BASE/teachers/2/evaluation-summary" "${AUTH_D[@]}")"
-want "李明综合分=70.42"                "70.42" "$TS" "d['data']['compositeScore']"
-want "李明督导侧=68.33"               "68.33" "$TS" "d['data']['supervisorScore']"
-want "李明智能体侧=67.86"             "67.86" "$TS" "d['data']['agentScore']"
-want "objective 维度分=83.33"         "83.33" "$TS" "[x['score'] for x in d['data']['dimensions'] if x['key']=='objective'][0]"
-want "objective 无智能体分"           "None"  "$TS" "[x['agentScore'] for x in d['data']['dimensions'] if x['key']=='objective'][0]"
-want "interaction 维度分=54.17"       "54.17" "$TS" "[x['score'] for x in d['data']['dimensions'] if x['key']=='interaction'][0]"
+want "李明综合分=71.25"                "71.25" "$TS" "d['data']['compositeScore']"
+want "李明督导侧=70"                  "70"    "$TS" "d['data']['supervisorScore']"
+want "李明智能体侧=72.5"              "72.5"  "$TS" "d['data']['agentScore']"
+want "objective 维度分=80"            "80"    "$TS" "[x['score'] for x in d['data']['dimensions'] if x['key']=='objective'][0]"
+want "objective 智能体分=75"          "75"    "$TS" "[x['agentScore'] for x in d['data']['dimensions'] if x['key']=='objective'][0]"
+want "interaction 维度分=57.5"        "57.5"  "$TS" "[x['score'] for x in d['data']['dimensions'] if x['key']=='interaction'][0]"
 want "frontier 维度分=50"             "50"    "$TS" "[x['score'] for x in d['data']['dimensions'] if x['key']=='frontier'][0]"
 want "frontier 权重=0"                "0"     "$TS" "[x['weight'] for x in d['data']['dimensions'] if x['key']=='frontier'][0]"
 want "frontier 标记为观测项"          "True"  "$TS" "[x['isObservation'] for x in d['data']['dimensions'] if x['key']=='frontier'][0]"
-want "样本量场次=3"                   "3"     "$TS" "d['data']['sample']['sessionCount']"
-want "双侧对齐场次=3"                 "3"     "$TS" "d['data']['sample']['alignedCount']"
+want "样本量场次=5"                   "5"     "$TS" "d['data']['sample']['sessionCount']"
+want "双侧对齐场次=5"                 "5"     "$TS" "d['data']['sample']['alignedCount']"
 want "样本充足"                       "True"  "$TS" "d['data']['sample']['sampleSufficient']"
 want "无 flags"                       "[]"    "$TS" "d['data']['flags']"
 want "计分口径=v1"                    "v1"    "$TS" "d['data']['formulaVersion']"
-want "按课程明细 1 条"                "1"     "$TS" "len(d['data']['courses'])"
+want "按课程明细 2 条"                "2"     "$TS" "len(d['data']['courses'])"
 
 CS="$(req "$BASE/courses/1/evaluation-summary" "${AUTH_T[@]}")"
-want "课程级综合分=70.42（与教师级逐位一致）" "70.42" "$CS" "d['data']['compositeScore']"
+want "课程级综合分=69.17（c1 对账基准）" "69.17" "$CS" "d['data']['compositeScore']"
 want "课程级督导侧=68.33"             "68.33" "$CS" "d['data']['supervisorScore']"
 want "课程级样本场次=3"               "3"     "$CS" "d['data']['sample']['sessionCount']"
 
@@ -214,26 +215,28 @@ echo "${c_dim}== 12. 教师评分列表与权限矩阵（§5.1）==${c_reset}"
 want "主任见本室教师评分 total=2"      "2"     "$(req "$BASE/teacher-scores" "${AUTH_D[@]}")" "d['data']['total']"
 want "督导见全校教师评分 total=4"      "4"     "$(req "$BASE/teacher-scores" "${AUTH_S[@]}")" "d['data']['total']"
 want "督导按教研室筛选 dept=2 命中 1"  "1"     "$(req "$BASE/teacher-scores?departmentId=2" "${AUTH_S[@]}")" "d['data']['total']"
-want "列表中李明综合分=70.42"          "70.42" "$(req "$BASE/teacher-scores" "${AUTH_D[@]}")" "[x['compositeScore'] for x in d['data']['list'] if x['teacherName']=='李明'][0]"
+want "列表中李明综合分=71.25"          "71.25" "$(req "$BASE/teacher-scores" "${AUTH_D[@]}")" "[x['compositeScore'] for x in d['data']['list'] if x['teacherName']=='李明'][0]"
 want "未知学期返回 40001"             "40001" "$(req "$BASE/teacher-scores?semester=2099-2100-1" "${AUTH_S[@]}")" "d['code']"
 want "教师访问评分列表返回 40301"     "40301" "$(req "$BASE/teacher-scores" "${AUTH_T[@]}")" "d['code']"
-want "李明查本人面板=70.42"           "70.42" "$(req "$BASE/teachers/2/evaluation-summary" "${AUTH_T[@]}")" "d['data']['compositeScore']"
+want "李明查本人面板=71.25"           "71.25" "$(req "$BASE/teachers/2/evaluation-summary" "${AUTH_T[@]}")" "d['data']['compositeScore']"
 want "教师查同事面板返回 40302"       "40302" "$(req "$BASE/teachers/3/evaluation-summary" "${AUTH_T[@]}")" "d['code']"
 ZH="$(req "$BASE/teachers/3/evaluation-summary" "${AUTH_D[@]}")"
-want "张华无评分 flags 含 no_data"     "True"  "$ZH" "'no_data' in d['data']['flags']"
-want "张华综合分为 null"              "None"  "$ZH" "d['data']['compositeScore']"
+want "张华综合分=79.17"               "79.17" "$ZH" "d['data']['compositeScore']"
+ZN="$(req "$BASE/teachers/2/evaluation-summary?semester=2025-2026-2" "${AUTH_D[@]}")"
+want "旧学期无数据 flags 含 no_data"   "True"  "$ZN" "'no_data' in d['data']['flags']"
+want "旧学期综合分为 null"             "None"  "$ZN" "d['data']['compositeScore']"
 want "教师查他室课程授课记录 40302"   "40302" "$(req "$BASE/courses/3/sessions" "${AUTH_T[@]}")" "d['code']"
 want "主任查他室课程授课记录 40302"   "40302" "$(req "$BASE/courses/3/sessions" "${AUTH_D[@]}")" "d['code']"
 
 echo
 echo "${c_dim}== 12.1 教师历次评价时间线（GET /teachers/:id/evaluations，T1.13）==${c_reset}"
 TL="$(req "$BASE/teachers/2/evaluations?page=1&pageSize=10" "${AUTH_D[@]}")"
-want "时间线场次总数=3"                  "3"            "$TL" "d['data']['total']"
+want "时间线场次总数=5"                  "5"            "$TL" "d['data']['total']"
 want "按课次倒序（最新=2026-09-26）"      "2026-09-26"   "$TL" "d['data']['list'][0]['sessionDate']"
 want "最新一行场次 id=3"                 "3"            "$TL" "d['data']['list'][0]['sessionId']"
 want "最新一行课程名=软件项目管理"        "软件项目管理"  "$TL" "d['data']['list'][0]['courseName']"
 want "最新一行课次主题=迭代计划与估点"     "迭代计划与估点" "$TL" "d['data']['list'][0]['topic']"
-want "最新一行场次综合分=82.5"           "82.5"         "$TL" "d['data']['list'][0]['compositeScore']"
+want "最新一行场次综合分=78.75"          "78.75"        "$TL" "d['data']['list'][0]['compositeScore']"
 want "最新一行督导分=82.5"               "82.5"         "$TL" "d['data']['list'][0]['supervisorScore']"
 want "最新一行智能体分=75"               "75"           "$TL" "d['data']['list'][0]['agentScore']"
 want "含督导评语 comment"                "估点练习设计巧妙，学生参与度高。" "$TL" "d['data']['list'][0]['supervisorEvaluations'][0]['comment']"
@@ -241,10 +244,10 @@ want "含督导亮点 highlights"             "练习设计贴近实战" "$TL" "
 want "含督导建议 suggestions"            "预留 5 分钟总结" "$TL" "d['data']['list'][0]['supervisorEvaluations'][0]['suggestions']"
 want "含督导待改进 improvements"         "时间略紧"      "$TL" "d['data']['list'][0]['supervisorEvaluations'][0]['improvements']"
 want "含智能体模型=qwen-audio-v1"        "qwen-audio-v1" "$TL" "d['data']['list'][0]['agentEvaluation']['aiModelVersion']"
-want "最早一行场次日期=2026-09-12"        "2026-09-12"   "$TL" "d['data']['list'][2]['sessionDate']"
-want "最早一行场次综合分=58.75"          "58.75"        "$TL" "d['data']['list'][2]['compositeScore']"
+want "最早一行场次日期=2026-09-12"        "2026-09-12"   "$TL" "d['data']['list'][4]['sessionDate']"
+want "最早一行场次综合分=58.75"          "58.75"        "$TL" "d['data']['list'][4]['compositeScore']"
 TLP="$(req "$BASE/teachers/2/evaluations?page=1&pageSize=2" "${AUTH_D[@]}")"
-want "分页 pageSize=2 → total 仍为 3"    "3"            "$TLP" "d['data']['total']"
+want "分页 pageSize=2 → total 仍为 5"    "5"            "$TLP" "d['data']['total']"
 want "分页 pageSize=2 → 本页 2 条"       "2"            "$TLP" "len(d['data']['list'])"
 want "教师查本人时间线可用（最新 id=3）"  "3"            "$(req "$BASE/teachers/2/evaluations" "${AUTH_T[@]}")" "d['data']['list'][0]['sessionId']"
 want "教师查同事时间线 40302"            "40302"        "$(req "$BASE/teachers/3/evaluations" "${AUTH_T[@]}")" "d['code']"

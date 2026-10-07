@@ -5,7 +5,7 @@ import type { EvaluationDTO } from '@/types/evaluation'
 import type { TeacherTimelineItem } from '@/types/teacher'
 
 /**
- * 竖线评价流（教师画像 / 我的质量档案共用，《前端设计-new》§5.6/§5.7）。
+ * 竖线评价流（教师画像 / 我的质量档案共用，docs/frontend_AGENTS.md §7.9 / §7.13）。
  * 竖线 + 课次徽章 + 分数色阶节点；督导评语分色缩进；AI 评价以 AI 语法显形。
  */
 withDefaults(

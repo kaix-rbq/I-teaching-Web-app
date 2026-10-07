@@ -10,7 +10,7 @@ import type { DimensionKey } from '@/types/evaluation'
 import type { TeacherSummary, TeacherTimelineItem } from '@/types/teacher'
 
 /**
- * 教师画像详情主体（《前端设计-new》§5.6）。
+ * 教师画像详情主体（docs/frontend_AGENTS.md §7.9）。
  * 三卡横排（罗盘 | 双源雷达 | 样本口径）→ 按课程明细 → 评价流时间线。
  * 铁律：缺失分渲染 — 不补 0；样本与 flags 必露；AI 评价以 AI 语法显形。
  */

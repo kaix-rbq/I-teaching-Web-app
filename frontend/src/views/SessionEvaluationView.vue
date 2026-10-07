@@ -155,6 +155,22 @@ const totalToneColor = computed(() =>
 
 const supervisorCount = computed(() => data.value?.supervisorScores.length ?? 0)
 const agentScore = computed(() => data.value?.agentScore ?? null)
+
+/**
+ * 智能体对本次课的文字评价。
+ * 只展示维度分会让「AI 评价」看不出依据；有文本时按督导同构的四段呈现。
+ * 教师从「授课快照 → 查看详细记录」进入本页时据此回顾 AI 侧的亮点与改进建议。
+ */
+const agentTextItems = computed(() => {
+  const agent = agentScore.value
+  if (!agent) return []
+  return [
+    { label: '总体评语', value: agent.comment },
+    { label: '亮点', value: agent.highlights },
+    { label: '待改进', value: agent.improvements },
+    { label: '改进建议', value: agent.suggestions }
+  ].filter((item) => Boolean(item.value && item.value.trim()))
+})
 const formulaVersion = computed(
   () => displayedEvaluation.value?.formulaVersion ?? data.value?.supervisorScores[0]?.formulaVersion ?? 'v1'
 )
@@ -481,10 +497,18 @@ onUnmounted(() => { if (pollTimer) clearTimeout(pollTimer) })
           <section class="session-evaluation__card">
             <h2 class="session-evaluation__card-title">智能体参考</h2>
             <EvaluationCompare :supervisor="displayedEvaluation" :agent="agentScore" />
+            <dl v-if="agentTextItems.length" class="session-evaluation__agent-text">
+              <div v-for="item in agentTextItems" :key="item.label">
+                <dt>{{ item.label }}</dt>
+                <dd>{{ item.value }}</dd>
+              </div>
+            </dl>
           </section>
 
           <section class="session-evaluation__card">
-            <h2 class="session-evaluation__card-title">课堂录音与转写</h2>
+            <h2 class="session-evaluation__card-title">
+              {{ isSupervisor ? '课堂录音与转写' : '课堂转写' }}
+            </h2>
             <template v-if="isSupervisor">
               <el-upload :show-file-list="false" accept=".mp3,.wav,.m4a" :before-upload="handleRecording">
                 <el-button type="primary" plain>上传课堂录音</el-button>
@@ -492,6 +516,10 @@ onUnmounted(() => { if (pollTimer) clearTimeout(pollTimer) })
               <el-progress v-if="uploadProgress > 0 && uploadProgress < 100" :percentage="uploadProgress" />
               <AudioPlayer v-if="media.recording" :src="recordingURL" :name="media.recording.originalName" />
             </template>
+            <p v-else-if="media.recording" class="session-evaluation__muted">
+              课堂录音已收录（{{ media.recording.originalName }}）；回放仅教学督导可见，
+              你可以查看下方脱敏转写回顾授课内容。
+            </p>
             <TranscriptViewer :transcript="media.transcript" :loading="mediaLoading" @retry="retryTranscript" />
           </section>
         </aside>
@@ -707,7 +735,31 @@ onUnmounted(() => { if (pollTimer) clearTimeout(pollTimer) })
   &__muted {
     font-size: var(--font-size-xs);
     font-weight: 400;
+    line-height: 1.7;
     color: var(--color-text-tertiary);
+  }
+
+  &__agent-text {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-2);
+    padding-top: var(--spacing-3);
+    margin-top: var(--spacing-3);
+    border-top: 1px dashed color-mix(in srgb, var(--color-ai) 24%, #ffffff);
+
+    dt {
+      font-size: var(--font-size-xs);
+      font-weight: 600;
+      color: var(--color-ai-deep);
+    }
+
+    dd {
+      margin: 2px 0 0;
+      font-size: var(--font-size-sm);
+      line-height: 1.7;
+      color: var(--color-text-secondary);
+      white-space: pre-wrap;
+    }
   }
 
   &__grid {

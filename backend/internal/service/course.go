@@ -34,6 +34,13 @@ func (s *courseService) List(
 	page, pageSize := normalizePage(q.Page, q.PageSize)
 	scope := ScopeFor(role, deptID, userID)
 
+	// mine=1：督导只要「本人负责评估的课程」（supervision_plans.supervisor_id = 本人）。
+	// 其他角色忽略该参数，数据范围仍由 ScopeFor 决定（铁律：裁剪只发生在 service 层）。
+	var scopeSupervisorID uint64
+	if q.Mine && role == RoleSupervisor {
+		scopeSupervisorID = userID
+	}
+
 	rows, total, err := s.courses.List(ctx, repository.CourseListParams{
 		CourseFilter: repository.CourseFilter{
 			Semester:          q.Semester,
@@ -43,6 +50,7 @@ func (s *courseService) List(
 			Keyword:           q.Keyword,
 			ScopeDepartmentID: scope.DepartmentID,
 			ScopeTeacherID:    scope.TeacherID,
+			ScopeSupervisorID: scopeSupervisorID,
 		},
 		Page:     page,
 		PageSize: pageSize,

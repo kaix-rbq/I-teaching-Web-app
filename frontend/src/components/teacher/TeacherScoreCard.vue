@@ -6,7 +6,7 @@ import { scoreTone, scoreToneColor } from '@/utils/format'
 import type { TeacherScoreItem } from '@/types/teacher'
 
 /**
- * 教师质量卡片（《前端设计-new》§5.6 列表页默认视图）。
+ * 教师质量卡片（docs/frontend_AGENTS.md §7.8 列表页默认视图）。
  * 三件套：罗盘缩略 + 五维迷你条 + 样本徽章；null → 灰环「暂无评价」，禁止以 0 充当。
  */
 const props = withDefaults(

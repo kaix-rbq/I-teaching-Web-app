@@ -2,8 +2,8 @@
 
 > **文档用途**：本文件是写给 AI 智能体（编码助手 GLM 5.3 + OpenCode、架构助手 DeepSeek V4 Pro）的后端编码工作宪法。
 > 智能体在为本项目编写任何后端代码之前，**必须先完整阅读本文件**，并严格遵守其中的技术栈、目录结构、分层架构、接口契约与编码规则。
-> **使用方式**：后端仓库 `aijiaoxue-api` 初始化后，本文件应置于仓库根目录。
-> **配套文档**：《MySQL数据库创建指导.md》（同目录）——建库、建表与种子数据；[`Sprint2-3-教学评价与提优-开发计划.md`](./Sprint2-3-教学评价与提优-开发计划.md)——Sprint 2/3 的算法、DDL 与接口契约；前端《AGENTS.md》——页面与组件设计。接口契约以本文第 8 节为准。
+> **文档位置**：本文件位于 `docs/backend_AGENTS.md`；后端仓库速查入口为 `backend/AGENTS.md`。
+> **配套文档（单一事实源分工）**：接口契约 → 本文 §8；页面/组件/设计 → [`frontend_AGENTS.md`](./frontend_AGENTS.md)；DDL/schema → 代码 `backend/database/schema.sql` + `backend/migrations/`；评分体系/权限隐私/DoD/任务 → [`Sprint2-3-教学评价与提优-开发计划.md`](./Sprint2-3-教学评价与提优-开发计划.md)；建库/种子/备份/排查 → [`MySQL数据库创建指导.md`](./MySQL数据库创建指导.md)；启停/初始化命令 → [`README.md`](../README.md)「For Developers」。
 
 > 🔴 **文档同步要求（强制）**：本手册是后端开发的事实源之一。任何改动若涉及**路由 / 接口字段、数据模型或表结构、错误码、权限与数据范围、计分口径、Sprint 范围**，
 > 必须在**同一个 PR** 内同步更新本文件，以及 `docs/Sprint2-3-教学评价与提优-开发计划.md` 中对应的契约章节。
@@ -18,8 +18,8 @@
 | 阶段 | 主题 | 一句话目标 | 状态 |
 |------|------|-----------|------|
 | Sprint 1 | 查课程 | 课程信息透明可查、三角色数据打通、Web 框架稳定运行 | ✅ 已交付 |
-| Sprint 2 | 看课堂 | 授课记录 + 督导/智能体课堂评价闭环；课堂录音、异步转写与智能体接入 | 🚧 **当前阶段**（阶段① 评价闭环已落地，阶段② 智能体接入待开发） |
-| Sprint 3 | 帮教师 | 教学提优：评语与提优建议、趋势折线、智能体对话、申诉复核、质量报告 | ⏳ 待排期 |
+| Sprint 2 | 看课堂 | 授课记录 + 督导/智能体课堂评价闭环；课堂录音、异步转写与智能体接入 | 🚧 **当前阶段**（阶段① 评价闭环**已实现**；阶段② **部分实现**：录音上传/异步转写/脱敏/播放票据已落地，**智能体评分未接入**） |
+| Sprint 3 | 帮教师 | 教学提优：评语与提优建议、趋势折线、智能体对话、申诉复核、质量报告 | ⏳ **未实现**（对应开发计划「阶段三」，待排期） |
 
 后端使命始终是**保障数据链路连通无误**：登录鉴权 → 角色化数据裁剪 → 领域数据（课程 / 资源 / 督导 / 授课 / 评价）的可靠读写。
 
@@ -43,7 +43,7 @@
 
 ### 2.2 Sprint 2「看课堂」（当前阶段）：目标与范围
 
-Sprint 2 分两阶段推进，任务编号见开发计划 §7.1 / §7.2，简短清单见 [`Sprint2-3-任务清单.md`](./Sprint2-3-任务清单.md)。
+Sprint 2 分两阶段推进。**任务编号与完整任务列表见 [`Sprint2-3-教学评价与提优-开发计划.md`](./Sprint2-3-教学评价与提优-开发计划.md) §7.1 / §7.2 / §7.3**（本文件不重复维护任务列表）。
 
 **阶段① 评价闭环（Sprint 2.1，后端已落地）**
 
@@ -57,13 +57,21 @@ Sprint 2 分两阶段推进，任务编号见开发计划 §7.1 / §7.2，简短
 | 当堂课评估 | `GET /sessions/:id/evaluation`（场次 + 双侧评分 + 评语；录音/转写位在阶段②填充） |
 | 数据迁移 | `golang-migrate`，`migrations/2_teaching_sessions_and_evaluations.*.sql`（§13） |
 
-**阶段② 智能体接入（Sprint 2.2，待开发）**
+**阶段② 智能体接入（Sprint 2.2，部分实现）**
 
-- 课堂录音上传与流式播放（Range）、播放审计日志；
-- 异步语音转写任务：`transcripts.status` 状态机（`pending→running→done/failed`）+ 失败重试 + 学生姓名脱敏；
-- 智能体评分写入 `evaluations` 的 agent 行（无法观测的维度写 `NULL`，附 `evidence` 与 `ai_confidence`）；
-- 聚合纳入 agent 侧并**全量返回 `flags`**（`no_data/sup_only/ai_only/disjoint/sample_insufficient/agent_not_calibrated/formula_mixed`）；
-- 智能体故障不得影响督导评分主流程（降级返回 50003）。
+已实现（后端落点，详见 §16）：
+
+| 能力 | 后端落点 |
+|------|---------|
+| 课堂录音上传与流式播放（Range）、播放审计日志 | `internal/handler/recording.go` · `internal/service/recording.go` · `internal/router/router.go:84` |
+| 异步转写：`transcripts.status` 状态机（`pending→running→done/failed`）+ 失败重试 + 启动重排 | `internal/asr/client.go` · `internal/service/recording.go`（`RequeueStuck`） |
+| 学生姓名脱敏（称谓正则 + 可选词典） | `internal/service/desensitize.go` |
+| 短时播放票据（`?ticket=`） | `internal/middleware/auth.go:50`（`AuthOrPlaybackTicket`） |
+
+**未实现（不得按已完成对待）**：
+
+- **智能体评分未接入**：`internal/repository/recording.go:79` 已定义 `UpsertAgentEvaluation`，但**无任何调用方**，`router.go` 亦无 `/agent/*` 路由（契约见开发计划 §4.4）。聚合侧本已能读取 `evaluations` 中的 agent 行（`pkg/scoring/scoring.go:140`、`internal/service/teacherscore.go:330`、`internal/service/session.go:179`），但**没有写入通道**——现有 agent 行只来自种子数据；
+- 智能体故障降级未接入：`50003` 目前只覆盖转写链路（ASR 失败写 `failed` + `error_message`，不影响督导评分主流程）；`50002`（`NotImplemented` → HTTP 501）已在 `pkg/errcode` 定义但**当前无任何调用方**——`router.go` 无 `/agent/*` 路由，请求实际落 gin 默认 **404**。智能体评分链路尚未接入，故无其降级可言。
 
 ### 2.3 Sprint 3「帮教师」（待排期）：目标与范围
 
@@ -123,34 +131,43 @@ Sprint 2 分两阶段推进，任务编号见开发计划 §7.1 / §7.2，简短
 ## 5. 目录结构（强制）
 
 ```
-aijiaoxue-api/
-├── AGENTS.md                # 本文件
+aijiaoxue-api/                # 本仓库中的 backend/
+├── AGENTS.md                # 后端速查入口（指向 ../docs/backend_AGENTS.md，即本文件）
 ├── go.mod / go.sum
 ├── Makefile                 # run / seed / test / lint / build
 ├── config.yaml              # 本地配置（config.example.yaml 提交模板，config.yaml 不入库）
 ├── cmd/
-│   ├── server/main.go       # 唯一服务入口
+│   ├── server/main.go       # 唯一服务入口（启动时驱动 RequeueStuck）
 │   ├── migrate/main.go      # golang-migrate 执行器（up / down [N] / version）
 │   └── seed/main.go         # 种子数据工具（bcrypt 写入演示账号）
 ├── migrations/              # 版本化迁移（embed 打包）；命名 <版本>_<名称>.up/down.sql
 │   ├── 1_baseline_sprint1.{up,down}.sql
 │   ├── 2_teaching_sessions_and_evaluations.{up,down}.sql
-│   └── 5_evaluation_drafts.{up,down}.sql   # 督导评估草稿（3/4 为录音转写迁移）
+│   ├── 3_recordings_and_transcripts.{up,down}.sql   # 录音 / 转写 / 播放审计
+│   ├── 4_transcripts_content_default.{up,down}.sql  # transcripts.content 默认值
+│   ├── 5_evaluation_drafts.{up,down}.sql            # 督导评估草稿
+│   └── 6_transcripts_engine_width.{up,down}.sql     # engine / engine_version 放宽到 VARCHAR(64)
 ├── internal/
-│   ├── config/config.go     # viper 加载与结构体（含 evaluation 计分口径启动校验）
+│   ├── asr/client.go        # ASR 适配层（百炼 filetrans：上传→提交→轮询→解析）
+│   ├── config/config.go     # viper 加载与结构体（含 evaluation 计分口径、transcription 启动校验）
 │   ├── router/router.go     # 路由表 + 分组（唯一路由注册地）
 │   ├── middleware/          # recovery / logger / cors / auth / rbac
 │   ├── handler/             # HTTP 层：参数绑定、调用 service、组装响应
-│   │   ├── auth.go course.go resource.go supervision.go dict.go
-│   │   └── session.go teacherscore.go     # Sprint 2.1
+│   │   ├── auth.go course.go resource.go supervision.go dict.go health.go bind.go
+│   │   ├── session.go teacherscore.go     # Sprint 2.1
+│   │   └── recording.go draft.go          # Sprint 2.2 阶段② / 草稿箱
 │   ├── service/             # 业务层：权限判断、业务校验、事务边界、聚合
-│   │   ├── auth.go course.go resource.go supervision.go dashboard.go
-│   │   └── session.go teacherscore.go     # Sprint 2.1
+│   │   ├── auth.go course.go resource.go supervision.go dashboard.go dict.go
+│   │   ├── session.go teacherscore.go     # Sprint 2.1
+│   │   └── recording.go draft.go mapper.go desensitize.go   # Sprint 2.2 阶段②
 │   ├── repository/          # 数据层：GORM 查询，无业务逻辑
 │   │   ├── user.go course.go resource.go supervision.go
-│   │   └── session.go evaluation.go       # Sprint 2.1
-│   ├── model/               # GORM 模型，与表一一对应
+│   │   ├── session.go evaluation.go       # Sprint 2.1
+│   │   └── recording.go draft.go          # Sprint 2.2 阶段②
+│   ├── model/               # GORM 模型，与表一一对应（recording.go = Recording / Transcript）
 │   └── dto/                 # 请求/响应结构体（json tag 与前端 types 对齐）
+│       ├── auth.go course.go dashboard.go dict.go page.go resource.go supervision.go validate.go
+│       └── draft.go evaluation.go         # 草稿 / 评价聚合 / 录音转写 DTO
 ├── pkg/
 │   ├── response/            # OK / Fail 统一响应
 │   ├── errcode/             # 错误码常量 + HTTP 映射（含单测）
@@ -159,10 +176,10 @@ aijiaoxue-api/
 ├── database/
 │   ├── schema.sql           # Sprint 1 存量表建表脚本（新表以 migrations/ 为准）
 │   └── seed.sql             # 种子数据（含 §3.4 授课/评价）；密码哈希由 cmd/seed 覆写
-├── uploads/                 # 课程资源文件存储（.gitignore）
+├── uploads/                 # 文件存储（.gitignore）：课程资源 + recordings/{sessionId}/{uuid}.{ext}
 └── scripts/
     ├── init_db.sh           # 建库 → migrate up → seed.sql → cmd/seed
-    └── verify.sh            # 端到端验收（Sprint 1 + 2.1 断言）
+    └── verify.sh            # 端到端验收（Sprint 1 + 2.1，144 条 want 断言；无录音/转写断言，见 §15）
 ```
 
 **目录铁律**：
@@ -172,9 +189,12 @@ aijiaoxue-api/
 
 ## 6. 配置管理（config.yaml）
 
+> 模板即事实源：`backend/config.example.yaml`。以下片段与其保持同步，字段值以该文件为准。
+
 ```yaml
 server:
   port: 8080
+  mode: debug                          # debug | release
 mysql:
   dsn: "aijiaoxue:aijiaoxue_dev@tcp(127.0.0.1:3306)/aijiaoxue?charset=utf8mb4&parseTime=True&loc=Local"
   maxOpenConns: 20
@@ -186,12 +206,50 @@ upload:
   dir: "./uploads"
   maxSize: 104857600                  # 100MB
   allowExt: [".pdf", ".doc", ".docx", ".ppt", ".pptx", ".mp4", ".zip"]
+
+# 课堂音频转写（ASR，Sprint 2.2 阶段②）。详见 §16。
+# 🔴 API Key 只走环境变量 AIJIAOXUE_TRANSCRIPTION_API_KEY（显式 BindEnv），
+#    本文件 apiKey 永远留空；enabled=true 且 Key 为空时启动即 Fail-Fast。
+# ⚠️ 变量名带下划线：自动推导会得到 ..._APIKEY（连写）而失效，必须显式绑定。
+transcription:
+  enabled: false
+  engine: "dashscope-qwen-audio-asr"            # 写入 transcripts.engine
+  engineVersion: "qwen-audio-3.1-asr-flash-filetrans"
+  model: "qwen-audio-3.1-asr-flash-filetrans"
+  apiKey: ""                                    # 永远留空，由环境变量覆盖
+  workspaceId: ""                               # 百炼业务空间 ID，如 ws-xxxxxxxx
+  baseUrl: ""                                   # 留空则按 workspaceId 推导
+  timeout: "30m"
+  pollInterval: "5s"
+  maxConcurrency: 2
+  diarization: false                            # 说话人分离：仅支持单声道音频
+  studentNames: []                              # 脱敏词典；为空时仅用称谓正则
+
 cors:
-  origins: ["http://localhost:5173"]  # 前端 dev 地址
+  origins: ["http://localhost:5173", "http://127.0.0.1:5173"]
+  # 放行任意来源，仅限本地/局域网联调（Vite Network 地址）；生产必须 false。
+  # 🔴 因 AllowCredentials=true，禁止写 AllowOrigins: ["*"]（gin-contrib/cors 会 panic）。
+  allowAnyOrigin: false
+
+# 课堂评价计分口径（开发计划 §2.2）。权重合计必须为 1.00，服务启动时校验。
+# 变更口径时必须递增 formulaVersion。
+evaluation:
+  weights:                            # frontier 为观测项，权重 0，不计入加权总分
+    objective: 0.30
+    content: 0.30
+    interaction: 0.20
+    organization: 0.20
+    frontier: 0.00
+  supervisorWeight: 0.5               # α：综合分中督导评分权重
+  agentWeight: 0.5                    # 1−α：综合分中智能体评分权重
+  formulaVersion: "v1"
+  minSampleSize: 3                    # 低于该值标记"样本不足"
 ```
 
 - 环境变量优先级高于 yaml，键名前缀 `AIJIAOXUE_`（viper `AutomaticEnv` + `SetEnvKeyReplacer`）；
+  **新增配置键必须在 `config.Load` 中 `SetDefault` 或 `BindEnv`**，否则 `AutomaticEnv` 发现的键不在 `AllKeys()` 中，`Unmarshal` 会静默跳过（`internal/config/config.go:207-213` 有注释说明）；
 - **密钥不得提交仓库**：仓库内只放 `config.example.yaml`，`config.yaml` 进 `.gitignore`；
+- 启动期强制校验：`mysql.dsn` / `jwt.secret` 非空、`evaluation.weights` 非零项合计为 1.00、`transcription.enabled` 时 Key/Model 非空且 `engine`/`model` 长度 ≤64（`internal/config/config.go:223-260`）；
 - 前端开发期推荐 Vite proxy 将 `/api` 代理到 `127.0.0.1:8080`，CORS 作为兜底配置。
 
 ## 7. 统一响应与错误码
@@ -224,12 +282,19 @@ cors:
 - `message` 面向用户可读（中文），内部细节写日志不外泄；
 - 实现：`pkg/response.OK(c, data)` / `pkg/response.Fail(c, errcode.Params)`，handler 中**禁止手写 `c.JSON` 拼信封**。
 
-## 8. 接口契约（Sprint 1 的 15 个业务接口 + Sprint 2.1 新增 9 个 + 1 个运维接口）
+## 8. 接口契约（已注册路由共 36 条）
+
+> 计数口径 = `backend/internal/router/router.go` 实际 `r.GET/POST/PUT/DELETE` 注册数，按鉴权分组：
+> 未挂 `Auth` 组 4（`GET /healthz` 根路径 + `GET /api/v1/healthz` + `POST /auth/login` + `GET /recordings/:id/stream`，
+> 最后一条自带 `AuthOrPlaybackTicket`）
+> \+ 登录 17 + director 2 + teacher 2 + supervisor 10 + director/supervisor 1。
+> 下文 §8.1–§8.7 为 Sprint 1 存量，§8.8 为 Sprint 2.1（14 条），§8.9 为 Sprint 2.2 阶段②（4 条）。
 
 前缀 `/api/v1`。**字段名与前端 `src/types/` 逐字对齐，本节是前后端联调的唯一事实源。**
 
-> **Sprint 2.1 已实现接口**见本文 §8.8；Sprint 2.2 / Sprint 3 的接口（录音转写、智能体、趋势）见
-> [`Sprint2-3-教学评价与提优-开发计划.md`](./Sprint2-3-教学评价与提优-开发计划.md) §4.3 / §4.4，本文件随实现进度同步。
+> **已实现接口**：Sprint 2.1 见本文 §8.8，Sprint 2.2 阶段②（录音与转写）见 §8.9。
+> **未实现接口**：智能体评分/对话（`/agent/*`，**未注册路由**，请求落 404）与阶段三趋势等见
+> [`Sprint2-3-教学评价与提优-开发计划.md`](./Sprint2-3-教学评价与提优-开发计划.md) §4.2 / §4.4。**未实现即不得在联调中当作可用**。
 
 ### 8.1 认证 auth
 
@@ -316,14 +381,16 @@ type PendingSessionItem struct { // 手动新增/尚未评价的授课记录（s
 
 | 方法 路径 | 权限 | 说明 |
 |-----------|------|------|
-| GET `/courses` | 登录 | 分页列表，数据范围按角色裁剪 |
+| GET `/courses` | 登录 | 分页列表，数据范围按角色裁剪；`mine=1` 时**督导**只返回本人听评课计划覆盖的课程 |
 | GET `/courses/:id` | 登录 | 详情（含班级） |
 | POST `/courses` | director | 新增 |
 | PUT `/courses/:id` | director | 修改（code 不可改） |
 
 ```go
 // GET /courses 查询参数（全部可选）
-//   semester, departmentId, teacherId, status, keyword, page(默认1), pageSize(默认10, max50)
+//   semester, departmentId, teacherId, status, keyword, mine, page(默认1), pageSize(默认10, max50)
+//   mine=true 仅对 supervisor 生效：EXISTS(supervision_plans WHERE course_id=c.id AND supervisor_id=本人)；
+//   其他角色忽略该参数（数据范围由 service 层角色裁剪决定，前端参数不构成权限依据）。
 type CourseListItem struct {
     ID            uint64 `json:"id"`
     Code          string `json:"code"`
@@ -429,9 +496,10 @@ type PlanItem struct {
 
 ### 8.7 运维 healthz
 
-`GET /healthz`（无鉴权）返回 `{"code":0,"data":{"status":"up"}}`，供部署探活与 S1.1 验收。
+`GET /healthz` 与 `GET /api/v1/healthz`（均无鉴权，同一 handler）返回 `{"code":0,"data":{"status":"up"}}`，
+供部署探活与 S1.1 验收（`router.go:74,77`）。
 
-### 8.8 授课记录与评价聚合（Sprint 2.1，已实现）
+### 8.8 授课记录与评价聚合（Sprint 2.1，已实现，14 条）
 
 > 契约细节与示例响应见 [`Sprint2-3-教学评价与提优-开发计划.md`](./Sprint2-3-教学评价与提优-开发计划.md) §4.1 / §4.2。
 
@@ -515,9 +583,10 @@ type DraftDTO struct {
 - 唯一聚合出口：教师级与课程级都调用 `pkg/scoring.Aggregate`，禁止"先算课程级再对课程取平均"。
 - 综合分取**综合均值**口径（各场次综合分的算术平均）；默认数据双侧对齐时与维度加权求和自洽。详见开发计划 §2.5.2。
 
-### 8.9 课堂录音与转写（Sprint 2.2 阶段②，已实现）
+### 8.9 课堂录音与转写（Sprint 2.2 阶段②，已实现，4 条）
 
 > 权限依据见开发计划 §5.1：**音频对教师不可见**（音频中人声不可分割），教师端只开放已脱敏的转写文本。
+> DTO 定义在 `backend/internal/dto/evaluation.go`；配置、实现记录与遗留项见 §16。
 
 | 方法 路径 | 权限 | 说明 |
 |-----------|------|------|
@@ -580,16 +649,24 @@ Recovery → Logger → CORS → [Auth → RBAC]（按分组挂载）
 | 中间件 | 职责 | 要点 |
 |--------|------|------|
 | Recovery | panic 兜底 | 返回 500 + code 50001，日志含堆栈 |
-| Logger | 请求日志（slog JSON） | method/path/status/耗时/user_id（Auth 之后才有 user_id，可将用户注入 context 由 Logger 在响应后输出） |
+| Logger | 请求日志（slog JSON） | method/path/status/耗时/user_id（Auth 之后才有 user_id，可将用户注入 context 由 Logger 在响应后输出）；**查询串脱敏**：`ticket`/`token`/`api_key`/`apikey`/`access_token` 掩码后再落盘（`middleware/logger.go:47`） |
 | CORS | 白名单放行 | origins 来自配置；允许 `Authorization` 头。`cors.allowAnyOrigin=true` 时回显任意来源（**仅本地联调，生产必须 false**）；因 `AllowCredentials=true`，禁用 `AllowOrigins:["*"]`（会 panic），必须用 `AllowOriginFunc` |
-| Auth | 解析 Bearer token | claims 注入 `c.Set("userID"/"role"/"deptID")`；失败返回 40101 |
+| Auth | 解析 Bearer token | claims 注入 `c.Set("userID"/"role"/"deptID")`；失败返回 40101；**显式拒绝 `scope=playback` 票据**（票据不得当会话令牌） |
+| AuthOrPlaybackTicket | 流式路由专用鉴权 | 先取 `Authorization`，否则取 `?ticket=`；票据须 `scope=playback` 且 `rid` == 路径 `:id`，否则 40101。仅挂 `GET /recordings/:id/stream`（`middleware/auth.go:50`） |
 | RequireRoles(roles...) | 角色守卫 | 不匹配返回 40301；`router` 分组挂载，禁止散落在 handler 里判断角色 |
 
 路由分组示意（唯一注册地 `router/router.go`）：
 
 ```go
+r.GET("/healthz", h.Health)                  // 根路径探活（无需鉴权）
+
 v1 := r.Group("/api/v1")
+v1.GET("/healthz", h.Health)
 v1.POST("/auth/login", h.Auth.Login)
+
+// 🔴 音频流只能挂在 v1 上：<audio> 带不了 Authorization，只能靠 ?ticket=；
+// 若放进下面的 authed 组，组上的 Auth 会先执行并 401，票据中间件根本没机会运行。
+v1.GET("/recordings/:id/stream", mw.AuthOrPlaybackTicket(jwt), h.Recording.Stream)
 
 authed := v1.Group("", mw.Auth())
 authed.GET("/auth/me", h.Auth.Me)
@@ -598,6 +675,7 @@ authed.GET("/dashboard", h.Dash.Board)
 authed.GET("/courses", h.Course.List)
 authed.GET("/courses/:id", h.Course.Detail)
 authed.GET("/courses/:id/resources", h.Resource.List)
+authed.GET("/resources/:id/download", h.Resource.Download)
 authed.GET("/departments", h.Dict.Departments)
 authed.GET("/teachers", h.Dict.Teachers)          // 教师字典（Sprint 1，勿改语义）
 
@@ -608,6 +686,10 @@ authed.GET("/sessions/:id", h.Session.Detail)
 authed.GET("/sessions/:id/evaluation", h.Session.Evaluation)
 authed.GET("/teachers/:id/evaluation-summary", h.TeacherScore.TeacherSummary)
 authed.GET("/teachers/:id/evaluations", h.TeacherScore.TeacherEvaluations)
+
+// —— Sprint 2.2 阶段②：转写读取与重试（播放流在 v1 上，见上）——
+authed.GET("/sessions/:id/transcript", h.Recording.Transcript)
+authed.POST("/sessions/:id/transcript/retry", h.Recording.Retry)
 
 authed.Group("", mw.RequireRoles("director")).
     POST("/courses", h.Course.Create).
@@ -622,6 +704,7 @@ authed.Group("", mw.RequireRoles("supervisor")).
     GET("/supervision/plans", h.Super.Plans).
     POST("/sessions", h.Session.Create).
     PUT("/sessions/:id/supervisor-evaluation", h.Session.Submit).
+    POST("/sessions/:id/recording", h.Recording.Upload).
     GET("/sessions/:id/draft", h.Draft.GetBySession).
     PUT("/sessions/:id/draft", h.Draft.Save).
     GET("/drafts", h.Draft.List).
@@ -686,7 +769,8 @@ HTTP 请求
 
 ## 13. 数据库对接
 
-- 建库、建表、索引、种子数据：**严格按《MySQL数据库创建指导.md》执行**，两文档表结构以该文档 DDL 为准；
+- 建库、种子数据、备份与排查：**按 [`MySQL数据库创建指导.md`](./MySQL数据库创建指导.md) 执行**；
+  **表结构（DDL）的事实源是代码**——`database/schema.sql`（Sprint 1 基线）+ `migrations/`（增量），本文档不复述 DDL；
 - GORM 模型与表的映射（`internal/model/`）：
 
 | model | 表 | 说明 |
@@ -710,6 +794,17 @@ HTTP 请求
 - **事实源分工**：`database/schema.sql` 只管 Sprint 1 存量表；**Sprint 2 起的新表以 `migrations/` 下的迁移脚本为唯一事实源**，二者不重复维护；
 - **迁移策略**：从 Sprint 2 起引入 `golang-migrate`（`cmd/migrate` + `migrations/` embed）。GORM **不使用 AutoMigrate**（避免双源漂移）；
   新增表 = 新建迁移脚本 + 更新 `internal/model` + 在 PR 说明列明变更。初始化流程见 `scripts/init_db.sh`：`schema.sql → migrate up → seed.sql → cmd/seed`；
+- **迁移清单（V1–V6，逐个对应 `backend/migrations/` 下同名文件）**：
+
+| 版本 | 文件（`.up/down.sql`） | 内容 |
+|------|------------------------|------|
+| V1 | `1_baseline_sprint1` | Sprint 1 基线表：`departments` / `users` / `courses` / `course_classes` / `resources` / `supervision_plans` |
+| V2 | `2_teaching_sessions_and_evaluations` | `teaching_sessions` / `evaluations`（阶段① 评价闭环） |
+| V3 | `3_recordings_and_transcripts` | `recordings` / `transcripts` / `recording_playback_logs`（阶段② 录音与转写） |
+| V4 | `4_transcripts_content_default` | `transcripts.content` 补 `DEFAULT ('')`，避开 `STRICT_TRANS_TABLES` 下的 1364 |
+| V5 | `5_evaluation_drafts` | `evaluation_drafts`（督导草稿箱，`uk_draft` 一人一场次一份） |
+| V6 | `6_transcripts_engine_width` | `transcripts.engine` / `engine_version` 放宽到 `VARCHAR(64)`（真实模型名 34 字符触发 1406，见 §16） |
+
 - 🔴 **迁移文件命名**：`<版本>_<名称>.up.sql` / `.down.sql`（如 `2_teaching_sessions_and_evaluations.up.sql`）。
   Flyway 风格 `V2__xxx.up.sql` **不被 golang-migrate 识别**，会让 `migrate up` 报 `first .: file does not exist`——禁止使用；
 - **实现陷阱**：JSON 列（`evaluations.evidence`）的 Go 字段必须用指针，禁止用零值 `''` 写入（MySQL 8 报 3140）；DATE 列比较必须按 `YYYY-MM-DD` 绑定，否则唯一性预检漏判；
@@ -731,7 +826,12 @@ HTTP 请求
 
 每个故事 DoD = 接口可用 + 权限正确 + 数据范围正确 + `go build` / `go vet` / `gofmt` / `go test` 零错误。
 
-**数据链路一键验收**（`scripts/verify.sh`，覆盖 **Sprint 1 + Sprint 2.1**，共 140+ 条断言）：
+**数据链路一键验收**（`scripts/verify.sh`，覆盖 **Sprint 1 + Sprint 2.1**）：
+
+> ⚠️ **覆盖边界（事实陈述，勿当已覆盖）**：当前脚本共 **144 条 `want` 断言**（`grep -c 'want "' backend/scripts/verify.sh`）。
+> 其中**没有任何录音 / 转写断言**——脚本里与阶段②相关的只有两处 `aiModelVersion="qwen-audio-v1"` 的种子数据断言
+> （`verify.sh:185,246`）。因此**阶段②（录音上传 / 异步转写 / 播放票据）目前没有自动化端到端断言**，
+> 临时验收口径见 §16 与开发计划 §8.2。
 
 ```bash
 # 一键执行（需已启动 MySQL 与后端服务）
@@ -796,10 +896,69 @@ curl -s $BASE/supervision/coverage -H "Authorization: Bearer $TOK_S"
 
 ---
 
+## 16. 课堂录音与转写：配置、实现记录与遗留
+
+> 本节内容合并自本轮文档整合中删除的原「录音转写接入方案」，只保留其中**仍然有效**的部分：
+> 实现事实、真实缺陷与遗留项；不再保留「待做 / 缺口」式的方案推演。接口契约见 §8.9，权限依据见开发计划 §5.1。
+
+### 16.1 配置与密钥
+
+| 项 | 规则 | 证据 |
+|----|------|------|
+| API Key 来源 | **只允许环境变量 `AIJIAOXUE_TRANSCRIPTION_API_KEY`**（`config.Load` 显式 `BindEnv`）；`config.example.yaml` 中 `apiKey: ""` 永远留空 | `internal/config/config.go:210` · `config.example.yaml:37` |
+| 启动校验 | `transcription.enabled=true` 但 Key 为空 → **启动即报错退出**（Fail-Fast）；`model`/`engine` 为空或长度 >64 同样拒绝启动（在向厂商付费之前拦住） | `internal/config/config.go:234-249` |
+| 日志 | 只打印掩码 Key（如 `sk-459***ad68`），禁止记录原始值 | `internal/config/config.go:103`（`MaskedAPIKey`） |
+| 命名坑 | `AutomaticEnv` 自动推导会得到 `..._APIKEY`（驼峰连写）而失效，必须显式 `BindEnv`；新配置键同理，否则 `Unmarshal` 静默跳过 | `internal/config/config.go:207-213` |
+
+### 16.2 存储与播放
+
+| 项 | 实现 | 证据 |
+|----|------|------|
+| 存储路径 | `uploads/recordings/{sessionId}/{uuid}.{ext}`；扩展名白名单 `mp3/wav/m4a`；一节课一条主录音（`uk_rec_session`），重复上传 **40901** | `internal/service/recording.go:93-118` |
+| 文件权限 | `0o640` + 显式 `Sync()`（音频含学生人声，不做全局可读；避免崩溃留下半截文件被当完整音频） | `internal/service/recording.go:362-381` |
+| 流式播放 | `GET /recordings/:id/stream` 走 `http.ServeFile`，原生支持 Range（实测 `206 Partial Content` + `Content-Range`） | `internal/handler/recording.go:80` |
+| 播放票据 | `<audio>` 无法发送 `Authorization`，故接受 `?ticket=`：`scope=playback`、绑定录音 `rid`、TTL **4h**、**仅 supervisor 签发**（教师侧 `playbackUrl` 恒为空串） | `internal/service/recording.go:34,152-157` |
+| 票据校验 | `AuthOrPlaybackTicket` 要求 `scope=playback` 时 `rid == 路径 :id`；`Auth` 中间件**显式拒绝** playback 票据（不得当会话令牌） | `internal/middleware/auth.go:34,50-77` |
+| 🔴 路由位置 | 该路由**必须注册在 `v1` 上，不能放进 `Auth` 组**：否则组上的 `Auth` 先 401，票据中间件根本没机会运行 | `internal/router/router.go:80-84` |
+| 日志脱敏 | `Logger` 把 `ticket`/`token`/`api_key` 等查询参数掩码后落盘（实测 `?ticket=%2A%2A%2A`） | `internal/middleware/logger.go:47` |
+
+### 16.3 ASR 引擎与状态机
+
+| 项 | 实现 | 证据 |
+|----|------|------|
+| 引擎 / 模型 | `dashscope-qwen-audio-asr` / `qwen-audio-3.1-asr-flash-filetrans`（百炼 filetrans：上传凭证 → OSS → 提交 → 轮询 → 下载解析） | `internal/asr/client.go` · `config.example.yaml:34-36` |
+| 状态机 | `pending→running→done/failed`；失败写 `failed` + `error_message`（截断到 255 字符），映射 **50003**，**绝不阻断督导评分主流程** | `internal/service/recording.go:239-332` · `pkg/errcode/errcode.go:26,71` |
+| 失败必落地 | 写失败状态用**独立短上下文**（主上下文可能已超时/取消），否则前端永远停在 `running` | `internal/service/recording.go:243-253` |
+| 重启恢复 | 启动时 `RequeueStuck` 把遗留的 `pending/running` 重新入队（幂等，重复调用安全） | `internal/service/recording.go:214-233` · `cmd/server/main.go:63` |
+| 并发闸门 | 容量 = `transcription.maxConcurrency`，避免同时把多个大文件推进内存 | `internal/service/recording.go:57,274-281` |
+| 脱敏 | `Scrubber` = 称谓正则（`X同学/小朋友们` + 否定列表）+ 可选词典（`transcription.studentNames`）；**学生名册/NER 属未来工作，调用点不变** | `internal/service/desensitize.go` · `internal/service/recording.go:296` |
+
+### 16.4 联调发现的三个真实缺陷（长期教训）
+
+| # | 缺陷 | 根因 | 修复 |
+|---|------|------|------|
+| 1 | `transcripts.engine_version` 列宽不足 →「ASR 已计费但结果存不下来」 | 原 `VARCHAR(32)`，真实模型名 `qwen-audio-3.1-asr-flash-filetrans` 有 **34** 字符；MySQL 8 严格模式报 `1406 Data too long`，**整条 UPDATE 回滚** → `content`/`segments` 全丢、`status` 停在 `running`、需重新识别（再付一次费） | 迁移 6 把 `engine`/`engine_version` 放宽到 `VARCHAR(64)`；启动期校验长度 ≤64；最终写入失败时置 `failed` 而非留 `running` |
+| 2 | 流式路由挂在 `Auth` 组内，票据机制完全失效 | gin 先执行**组上**的 `Auth`，而 `<audio>` 带不了 `Authorization`，请求在 `AuthOrPlaybackTicket` 运行前就被 401（表现为「票据签发正常、URL 正确，但音频播不出来」） | 路由移到 `v1` 单独注册；回归用例 `internal/router/router_test.go`：无凭据 401 / 有效票据不得 401 / 会话令牌仍可用（单挂中间件的单测发现不了，必须测真实路由表） |
+| 3 | CORS 白名单漏内网 IP →「页面能开、一点登录就 403」 | Vite dev server 除 localhost 外还监听内网 IP（Network 地址），`Origin: http://<内网IP>:5173` 不在 `cors.origins` 即被 CORS 拦；`curl` 不带 `Origin`，命令行自测发现不了 | 新增 `cors.allowAnyOrigin`（默认 `false`，用 `AllowOriginFunc` 回显来源）；开启时启动打 WARN；**因 `AllowCredentials=true`，绝不能写 `AllowOrigins:["*"]`（gin-contrib/cors 直接 panic）**；生产必须关闭（回归：`internal/middleware/cors_test.go`） |
+
+### 16.5 遗留项（未做，需要时再排期）
+
+| 项 | 说明 | 现状核实 |
+|----|------|---------|
+| `recordings.file_path` 存相对路径 | 当前存 `uploads/recordings/1/{uuid}.mp3`，依赖进程 cwd 为 `backend/`；**生产建议**只存相对录音根的 key，读取时与 `upload.dir` 拼接 | `internal/service/recording.go:103-111`（`filepath.Join(upload.dir, …)` 直接落库） |
+| 音频保留期限 | 本轮定为「不限期」，故无清理任务；合规审查若提出期限需补定时任务 | 无相关代码 |
+| 学生名册 | 未建立，脱敏仅靠称谓正则；音近字误识别、直呼全名（无「同学」后缀）可能漏网 | `internal/service/desensitize.go`（注释自述该局限） |
+| 超长音频 | 仅校验文件大小（`upload.maxSize`，默认 100MB），未按时长拒绝；开启说话人分离时官方建议 ≤2 小时 | `internal/service/recording.go:97-99` |
+| 429 退避重试 | 未对上游限流做专门退避 | `internal/asr/client.go` 无退避/重试逻辑 |
+| 生产音频卸载 | 仍由 Go 进程 `http.ServeFile` 转发，生产建议改 Nginx `X-Accel-Redirect` | `internal/handler/recording.go:80` |
+
+---
+
 ## 更新记录
 
 | 版本 | 日期 | 变更 |
 |------|------|------|
 | v2.0 | 2026-09 | 均衡覆盖三次 Sprint；注明当前处于 Sprint 2；新增 Sprint 2.1 接口契约（§8.8）、错误码 HTTP 映射与回归说明、`golang-migrate` 迁移规范、文档同步要求（页首）|
+| v3.0 | 2026-10-07 | 文档整合：修正阶段状态（阶段② 部分实现、智能体评分未接入）；补齐 §5 目录树、§6 配置（transcription/evaluation/cors.allowAnyOrigin）、§13 迁移 V1–V6；§8 接口计数按 `router.go` 校正为 36 条并同步路由示意与中间件表；并入录音转写实现记录与遗留（§16）；删除对已删文档的引用并去重接口契约 |
 
-*本文档与 [`Sprint2-3-教学评价与提优-开发计划.md`](./Sprint2-3-教学评价与提优-开发计划.md)、[`MySQL数据库创建指导.md`](./MySQL数据库创建指导.md)、[`frontend_AGENTS.md`](./frontend_AGENTS.md) 互为配套，任何契约变更须四者同步。*
+*文档分工见页首「单一事实源」表：接口契约以本文 §8 为准；页面/路由/组件见 [`frontend_AGENTS.md`](./frontend_AGENTS.md)；DDL 见 `backend/database/schema.sql` + `backend/migrations/`；评分体系/权限/DoD 见 [`Sprint2-3-教学评价与提优-开发计划.md`](./Sprint2-3-教学评价与提优-开发计划.md)；建库/种子/备份见 [`MySQL数据库创建指导.md`](./MySQL数据库创建指导.md)。接口契约变更须先改本文 §8，再同步 `internal/dto/` 与前端 `src/types/`。*

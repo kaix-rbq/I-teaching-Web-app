@@ -77,6 +77,33 @@ func TestCourseListAppliesScope(t *testing.T) {
 	}
 }
 
+// TestCourseListSupervisorMine 验证 mine=1 时督导只查本人负责评估的课程；其他角色忽略该参数。
+func TestCourseListSupervisorMine(t *testing.T) {
+	cases := []struct {
+		name      string
+		role      string
+		mine      bool
+		wantScope uint64
+	}{
+		{name: "督导勾选 mine", role: RoleSupervisor, mine: true, wantScope: 9},
+		{name: "督导未勾选 mine", role: RoleSupervisor, mine: false, wantScope: 0},
+		{name: "主任勾选 mine 被忽略", role: RoleDirector, mine: true, wantScope: 0},
+		{name: "教师勾选 mine 被忽略", role: RoleTeacher, mine: true, wantScope: 0},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := &fakeCourseRepo{}
+			svc := NewCourseService(repo, &fakeUserRepo{})
+
+			_, err := svc.List(context.Background(), tc.role, 3, 9, dto.CourseListQuery{Mine: tc.mine})
+			require.NoError(t, err)
+			require.NotNil(t, repo.lastListParams)
+			assert.Equal(t, tc.wantScope, repo.lastListParams.ScopeSupervisorID)
+		})
+	}
+}
+
 // TestCheckCourseScope 覆盖详情读取的越权矩阵。
 func TestCheckCourseScope(t *testing.T) {
 	course := &repository.CourseRow{ID: 1, DepartmentID: 1, TeacherID: 2}

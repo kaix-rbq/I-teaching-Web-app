@@ -4,7 +4,7 @@ import { formatDate } from '@/utils/format'
 import type { AgentSuggestion } from '@/types/agent'
 
 /**
- * AI 提优建议卡（琥珀语法，《前端设计-new》§4.5）：
+ * AI 提优建议卡（琥珀语法，docs/frontend_AGENTS.md §9.0）：
  * AiBadge 准入证 + 浅紫虚线卡 + 置信度可视化；低置信（<0.4）标警示。
  */
 withDefaults(

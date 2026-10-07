@@ -6,7 +6,7 @@ import { scoreTone, scoreToneColor } from '@/utils/format'
 import type { ScoreSummary } from '@/types/teacher'
 
 /**
- * 五维评分卡（雷达双源叠加 + 维度条权重徽章，《前端设计-new》§5.6/§5.7）。
+ * 五维评分卡（雷达双源叠加 + 维度条权重徽章，docs/frontend_AGENTS.md §8.4）。
  * 教师画像详情与「我的质量档案」共用；缺失分渲染 — 不补 0。
  */
 const props = withDefaults(

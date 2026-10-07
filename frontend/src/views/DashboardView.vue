@@ -167,10 +167,9 @@ async function handleQueueCreate(plan: SupervisionPlan): Promise<void> {
   }
 }
 
-/** 已评估课程：直达对应授课记录的评估页。 */
-function handleQueueView(plan: SupervisionPlan): void {
-  if (plan.sessionId === null) return
-  void router.push({ name: 'session-evaluation', params: { id: plan.sessionId } })
+/** 已评估记录的复盘入口：课程列表 → 课程综合评分 → 历史授课记录。 */
+function goSupervisorCourses(): void {
+  void router.push({ name: 'course-list' })
 }
 
 /** 授课记录已创建但未评价：直达评估页。 */
@@ -364,7 +363,10 @@ onMounted(reloadQuality)
             <div class="dashboard__panel-head">
               <h2 class="dashboard__panel-title">待评课队列</h2>
               <div class="dashboard__panel-actions">
-                <span class="dashboard__panel-sub">按今日 / 本周 / 本月切换安排</span>
+                <span class="dashboard__panel-sub">
+                  今日 / 本周 / 本月 / 未评 · 已评估记录请到「课程列表」查看
+                </span>
+                <el-button size="small" @click="goSupervisorCourses">课程列表</el-button>
                 <el-button type="primary" size="small" @click="openCreateSession">
                   新增授课记录
                 </el-button>
@@ -374,7 +376,6 @@ onMounted(reloadQuality)
               :plans="data?.plans ?? []"
               :loading="loading"
               @create="handleQueueCreate"
-              @view="handleQueueView"
               @evaluate="handleQueueEvaluate"
             />
           </section>

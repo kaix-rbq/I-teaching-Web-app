@@ -12,16 +12,18 @@
 
 | 顺序 | 文档 | 重点章节 |
 |:----:|------|---------|
-| 1 | `README.md` | 「For Developers」——环境准备、启停命令、验证方式 |
-| 2 | 你负责的那一端 | `docs/backend_AGENTS.md` 或 `docs/frontend_AGENTS.md` |
-| 3 | `docs/MySQL数据库创建指导.md` | 涉及数据、表结构、SQL 口径时必读 |
-| 4 | `docs/Sprint2-3-教学评价与提优-开发计划.md` | 当前迭代的功能与规范 |
-| 5 | `docs/Sprint2-3-任务清单.md` | 找到你被分配的任务编号 |
+| 1 | `README.md` | 「For Developers」——环境准备、初始化、启停命令、验证方式、排查手册 |
+| 2 | 你负责的那一端 | `docs/backend_AGENTS.md` 或 `docs/frontend_AGENTS.md`（分层、目录、契约） |
+| 3 | `docs/Sprint2-3-教学评价与提优-开发计划.md` | 产品与迭代规格（评分体系 §2、权限/隐私 §5、任务与状态 §7、DoD §8）；DDL/接口/页面在该文中只做索引，指向各自事实源 |
+| 4 | `docs/MySQL数据库创建指导.md` | 建库与账号、12 张表与迁移清单、种子数据与自查、GORM 对接、备份与排查 |
+| 5 | `backend/AGENTS.md` | 后端目录级纪律速查（一页读完，再指向上面几份文档） |
+
+> **文档全集（共 7 份，勿再引用其它历史文档）**：`README.md`、`CONTRIBUTING.md`、`backend/AGENTS.md`、`docs/backend_AGENTS.md`、`docs/frontend_AGENTS.md`、`docs/Sprint2-3-教学评价与提优-开发计划.md`、`docs/MySQL数据库创建指导.md`。
 
 **两端各自最不能漏的章节**：
 
-- 后端：§3 角色与数据范围规则、§5 目录结构、§8 接口契约、§10 分层与数据流
-- 前端：§5 目录结构、§9 美术与设计规范、§10 数据模型与接口约定
+- 后端：§3 角色与数据范围规则、§5 目录结构、§8 接口契约、§10 分层与数据流、§15 验收标准（DoD）
+- 前端：§5 目录结构、§6 路由与页面清单、§9 美术与设计规范、§10 数据模型与接口约定、§14 验收标准（DoD）
 
 ---
 
@@ -105,13 +107,15 @@ git push origin --delete feature/S6.3-session-evaluation
 
 **规则：凡是改了"别人要跟着改"的东西，必须先改文档，再改代码。**
 
-| 你改了什么 | 必须先改 | 再改 |
-|-----------|---------|------|
-| 接口路径 / 请求响应字段 | `docs/backend_AGENTS.md` §8 或开发计划 §4 | `internal/dto/` → `handler/` → `frontend/src/types/` → `frontend/src/api/` |
-| 表结构 / 字段 | `docs/MySQL数据库创建指导.md` §9 或开发计划 §3 | 新增表：`backend/migrations/<版本>_<名称>.up.sql` → `internal/model/` → `repository/`；存量表：`database/schema.sql` → 同上 |
+| 你改了什么 | 必须先改（事实源） | 再改 |
+|-----------|------------------|------|
+| 接口路径 / 请求响应字段 | `docs/backend_AGENTS.md` §8 接口契约 | `internal/dto/` → `handler/` → `frontend/src/types/` → `frontend/src/api/` |
+| 新表 DDL | `backend/migrations/<版本>_<名称>.up.sql`（DDL 依据：开发计划 §3；命名必须 golang-migrate 风格） | `internal/model/` → `repository/` |
+| 存量表（Sprint 1）加列 | `backend/database/schema.sql` + 一条 `ALTER TABLE` 迁移（口径：`docs/MySQL数据库创建指导.md` §4 / §9） | `internal/model/` → `repository/` |
 | 评分维度 / 权重 / 聚合口径 | 开发计划 §2 | `pkg/scoring` → `service/` |
-| 权限 / 数据范围 | 开发计划 §5 | `middleware/` → `service/` |
-| 路由 / 页面跳转 | `docs/frontend_AGENTS.md` §6 或开发计划 §6 | `router/index.ts` → `views/` |
+| 权限 / 数据范围 | 开发计划 §5（裁剪铁律细则见 `docs/backend_AGENTS.md` §3） | `middleware/` → `service/` |
+| 路由 / 页面跳转 | `docs/frontend_AGENTS.md` §6 路由与页面清单 | `router/index.ts` → `views/` |
+| 验收口径 / DoD | 开发计划 §8 + `docs/backend_AGENTS.md` §15 / `docs/frontend_AGENTS.md` §14 | `backend/scripts/verify.sh` 与验收清单 |
 | 关键设计约定 | 开发计划 §10 | 对应实现 |
 
 > **顺序反了就是返工**：先写代码后补文档，PR 评审时会被打回，且前端可能已经在错误的契约上开发完了。
@@ -129,7 +133,7 @@ git push origin --delete feature/S6.3-session-evaluation
 | 5 | 提交 `backend/config.yaml`、`.env*`、`uploads/`、`.devtools/` | 泄露密钥、隐私数据、本地环境 | 这些已被 `.gitignore` 覆盖；若已误提交立即告知成员四 |
 | 6 | 在别人的分支上直接 push | 覆盖对方未完成的工作 | 在 PR 里评论建议，或协商后由本人修改 |
 | 7 | `git checkout .` / `git clean -fd` 清理不认识的改动 | 可能是同事未提交的工作 | 先 `git stash` 保存，再操作 |
-| 8 | 对共享数据库执行 `make db-seed` | **`seed.sql` 会 TRUNCATE 全部 6 张表，数据清空** | 只对本地库执行 |
+| 8 | 对共享数据库执行 `make db-seed` | **`seed.sql` 会 TRUNCATE 全部 9 张表（当前库共 12 张表），数据清空** | 只对本地库执行 |
 | 9 | 自己 approve 自己的 PR 并合入 | 评审形同虚设 | 至少 1 名成员 approve 后才能合入 |
 | 10 | 在 `main` 上直接改文件后 `git commit` | 落在 main 上，无法评审 | 发现后立即 `git switch -c <分支>` 把提交带走，再 `git switch main && git reset --hard origin/main` |
 
@@ -172,7 +176,7 @@ git rebase --abort
 
 ## 9. 评审要求
 
-**谁审**（摘自两份 AGENTS）：
+**谁审**（人名与分工见 `docs/Sprint2-3-教学评价与提优-开发计划.md` §7；初审 / 复审为团队约定）：
 
 - 后端改动：成员四（胡凯翔）初审 → 成员一 / 成员三复审
 - 前端改动：成员二（刘子杰）初审 → 成员一 / 成员三复审
@@ -204,8 +208,8 @@ git rebase --abort
 - [ ] 后端改动：`make lint && make test && make build` 全绿
 - [ ] 前端改动：`npm run lint && npm run typecheck && npm run test && npm run build` 全绿
 - [ ] 涉及接口/数据口径：`bash scripts/verify.sh` 全绿
-- [ ] **契约先行**：接口字段变更已先更新 `docs/backend_AGENTS.md` §8 或开发计划 §4
-- [ ] **表结构变更**：已更新 `docs/MySQL数据库创建指导.md` / 开发计划 §3 + `database/schema.sql` + `internal/model/`
+- [ ] **契约先行**：接口字段变更已先更新 `docs/backend_AGENTS.md` §8
+- [ ] **表结构变更**：新表已加 `backend/migrations/<版本>_<名称>.up.sql`（存量表改列已同步 `backend/database/schema.sql`）+ `internal/model/`
 - [ ] **前端类型同步**：`frontend/src/types/` 已随契约更新
 - [ ] **设计约定变更**：已更新开发计划 §10 关键设计约定速查
 - [ ] 数据范围裁剪写在 service 层，未依赖前端过滤

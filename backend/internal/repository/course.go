@@ -37,6 +37,8 @@ type CourseFilter struct {
 	Keyword           string
 	ScopeDepartmentID uint64
 	ScopeTeacherID    uint64
+	// ScopeSupervisorID > 0 时只保留该督导在 supervision_plans 中负责评估的课程。
+	ScopeSupervisorID uint64
 }
 
 // CourseListParams 是分页查询参数。
@@ -88,6 +90,12 @@ func (r *courseRepository) base(ctx context.Context, f CourseFilter) *gorm.DB {
 	}
 	if f.ScopeTeacherID > 0 {
 		tx = tx.Where("c.teacher_id = ?", f.ScopeTeacherID)
+	}
+	if f.ScopeSupervisorID > 0 {
+		tx = tx.Where(
+			"EXISTS (SELECT 1 FROM supervision_plans sp WHERE sp.course_id = c.id AND sp.supervisor_id = ?)",
+			f.ScopeSupervisorID,
+		)
 	}
 	if f.Semester != "" {
 		tx = tx.Where("c.semester = ?", f.Semester)
