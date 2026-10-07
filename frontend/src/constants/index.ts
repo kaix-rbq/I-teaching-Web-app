@@ -241,3 +241,25 @@ export function getDimensionAnchor(dimension: DimensionKey, score: number): stri
 export function getScoreLevel(score: number): ScoreLevel | undefined {
   return SCORE_LEVELS.find((item) => item.value === score)
 }
+
+/**
+ * 聚合口径 flags → 中文提示（后端 `pkg/scoring` 产出，开发生成计划 §2.5.5）。
+ *
+ * 🔴 单一事实源：两个展示面（我的质量档案 / 教师评分面板）此前各自维护一份字典，
+ * 结果漏掉了 `sup_only` / `ai_only`，页面会直接显示英文原始 key。
+ * 后端新增或改名 flag 时**必须同步此处**。
+ */
+export const FLAG_TEXT: Record<string, string> = {
+  no_data: '暂无评价',
+  sup_only: '当前仅有督导评分，智能体评价未覆盖',
+  ai_only: '当前仅有智能体评分，缺少督导评分',
+  disjoint: '督导与智能体评价尚未对齐，当前分数代表性有限',
+  sample_insufficient: '样本不足，当前分数代表性有限',
+  // 预留：开发计划 §2.5.5 记载但后端尚未产生（口径版本混杂时才会出现）
+  formula_mixed: '口径版本混杂，请谨慎解读'
+}
+
+/** flag → 中文提示；未知 flag 原样返回，便于排障时发现契约漂移 */
+export function flagText(flag: string): string {
+  return FLAG_TEXT[flag] ?? flag
+}

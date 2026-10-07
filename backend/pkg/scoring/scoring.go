@@ -301,17 +301,32 @@ func composite(weights Weights, dims []DimensionSummary) *float64 {
 	return &total
 }
 
+// 缺失与样本不足标记（§2.5.5）。前端按这些 key 映射中文提示，
+// **新增或改名必须同步前端的 flag 字典**，否则页面会直接显示英文原始 key。
+const (
+	// FlagNoData 双侧都没有评价：综合分为 null，不得按 0 分排序。
+	FlagNoData = "no_data"
+	// FlagSupOnly 只有督导评价。
+	FlagSupOnly = "sup_only"
+	// FlagAIOOnly 只有智能体评价。
+	FlagAIOOnly = "ai_only"
+	// FlagDisjoint 双侧都有评价，但没有一场是双侧齐全的（无法按场次对齐融合）。
+	FlagDisjoint = "disjoint"
+	// FlagSampleInsufficient 已评价场次低于 minSampleSize，由 service 层追加。
+	FlagSampleInsufficient = "sample_insufficient"
+)
+
 // missingFlags 按缺失矩阵（§2.5.5）返回状态标记；双侧齐全且场次对齐时返回空。
 func missingFlags(sample Sample) []string {
 	switch {
 	case sample.SupervisorCount == 0 && sample.AgentCount == 0:
-		return []string{"no_data"}
+		return []string{FlagNoData}
 	case sample.AgentCount == 0:
-		return []string{"sup_only"}
+		return []string{FlagSupOnly}
 	case sample.SupervisorCount == 0:
-		return []string{"ai_only"}
+		return []string{FlagAIOOnly}
 	case sample.AlignedCount == 0:
-		return []string{"disjoint"}
+		return []string{FlagDisjoint}
 	default:
 		return []string{}
 	}
