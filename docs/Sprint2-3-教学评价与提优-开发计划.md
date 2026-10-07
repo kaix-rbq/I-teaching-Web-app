@@ -627,7 +627,8 @@ CREATE TABLE `transcripts` (
 | `/courses/:id/improve` | course-improve | — | **新增** 教学提优 | teacher | 新增 |
 | `/teachers` | teacher-list | — | **新增** 教师管理 | director/supervisor | 新增 |
 | `/teachers/:id` | teacher-detail | — | **新增** 教师评分面板 | director/supervisor | 新增 |
-| `/sessions/:id/evaluation` | session-evaluation | — | **新增** 当堂课质量评估页 | supervisor（他人只读） | 新增 |
+| `/sessions/:id/evaluation` | session-evaluation | — | **新增** 当堂课质量评估页 | supervisor（他人只读） | 新增（v1.3：教师由「授课快照 → 查看详细记录」进入复盘） |
+| `/supervision/courses/:id` | supervisor-course | — | **新增** 督导课程综合评分页（综合分 + 历史授课记录评估 + 录音上传） | supervisor | v1.3 新增 |
 | `/supervision` | supervision | 督导总览 | **改造为「听评课管理」**完整分页列表 | supervisor | 改造（不删路由） |
 | `/profile` | profile | — | 不变 | 登录 | — |
 
@@ -662,26 +663,34 @@ CREATE TABLE `transcripts` (
 
 **② 督导**
 ```
-/dashboard  统计卡 + 覆盖率环 + 听评课安排（前 8 条）＋「查看全部」
+/dashboard  待评课队列（今日/本周/本月/未评，已评估自动清除）＋ 待评估授课记录
    ├─▶ /supervision  听评课管理（完整分页 + 状态/日期筛选）
-   └─▶ /courses/:id  课程详情
-         └─ 历史授课记录列表
-               └─▶ /sessions/:id/evaluation  当堂课质量评估页
-                     ├─ 音频播放器（阶段二）
-                     ├─ 转写文本（阶段二，含说话人分离）
-                     ├─ 督导评分表单：5 维 1-5 分 + 结构化评语
-                     ├─ 智能体评分参考（可折叠，标"AI 参考"）
-                     └─ 提交
+   └─▶ /courses  课程列表（mine=1：本人负责评估的课程）
+         └─▶ /supervision/courses/:id  课程综合评分页（v1.3）
+               ├─ 本课程当前综合评分（督导 × AI 双源）
+               └─ 历史授课记录列表
+                     ├─「去评估 / 查看·修改评估」→ /sessions/:id/evaluation
+                     │     ├─ 音频播放器（阶段二，仅督导）
+                     │     ├─ 转写文本（阶段二，含说话人分离；卡片限长 + 弹窗展开）
+                     │     ├─ 督导评分表单：5 维 1-5 分 + 结构化评语
+                     │     ├─ 智能体评分参考（可折叠，标"AI 参考"）
+                     │     └─ 提交（提交后授课记录置 evaluated，从队列清除）
+                     └─ 上传课堂录音（POST /sessions/:id/recording）
 ```
 
 **③ 教师**
 ```
-/dashboard  我的课程卡片
-   └─▶ /courses/:id/improve  教学提优
-         ├─ 课程基本信息 + 资源上传接口（保留）
-         ├─ 评分区：综合分 + 5 维分 + 与上学期对比 +（阶段三）趋势折线
-         ├─ 督导评语列表（按时间倒序，标注是哪一次课）
-         └─ 智能体提优建议（按时间倒序）
+/me/quality  我的质量档案
+   ├─ 我的课程评分明细：课程列表 +「去提优」→ /courses/:id/improve
+   └─ 授课快照：逐次授课卡片 +「查看详细记录」→ /sessions/:id/evaluation（只读）
+         ├─ 督导评分与结构化评语（只读）
+         ├─ AI 智能体评价（维度对照 + 文字评语）
+         └─ 当堂课脱敏转写（教师不可回放录音）
+/courses/:id/improve  教学提优
+   ├─ 课程基本信息 + 资源上传接口（保留）
+   ├─ 评分区：综合分 + 5 维分 + 与上学期对比 +（阶段三）趋势折线
+   ├─ 督导评语列表（按时间倒序，标注是哪一次课）
+   └─ 智能体提优建议（按时间倒序）
 ```
 
 ### 6.4 前端新增目录

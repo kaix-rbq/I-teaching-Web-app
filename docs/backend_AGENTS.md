@@ -316,14 +316,16 @@ type PendingSessionItem struct { // 手动新增/尚未评价的授课记录（s
 
 | 方法 路径 | 权限 | 说明 |
 |-----------|------|------|
-| GET `/courses` | 登录 | 分页列表，数据范围按角色裁剪 |
+| GET `/courses` | 登录 | 分页列表，数据范围按角色裁剪；`mine=1` 时**督导**只返回本人听评课计划覆盖的课程 |
 | GET `/courses/:id` | 登录 | 详情（含班级） |
 | POST `/courses` | director | 新增 |
 | PUT `/courses/:id` | director | 修改（code 不可改） |
 
 ```go
 // GET /courses 查询参数（全部可选）
-//   semester, departmentId, teacherId, status, keyword, page(默认1), pageSize(默认10, max50)
+//   semester, departmentId, teacherId, status, keyword, mine, page(默认1), pageSize(默认10, max50)
+//   mine=true 仅对 supervisor 生效：EXISTS(supervision_plans WHERE course_id=c.id AND supervisor_id=本人)；
+//   其他角色忽略该参数（数据范围由 service 层角色裁剪决定，前端参数不构成权限依据）。
 type CourseListItem struct {
     ID            uint64 `json:"id"`
     Code          string `json:"code"`

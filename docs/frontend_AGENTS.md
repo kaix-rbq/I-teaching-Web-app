@@ -34,6 +34,20 @@
 
 ---
 
+> ## 🆕 v1.3 督导课程复盘与教师授课记录（2026-10-06）
+>
+> 本次更新聚焦「评估完成后去哪看、教师如何复盘」：
+>
+> 1. **督导端新增「课程列表」**：侧边栏恢复「课程列表」（`course-list`），列表请求带 `mine=1`，后端按 `supervision_plans.supervisor_id` 只返回**本人负责评估的课程**；行点击进入新增的 **`SupervisorCourseView`（`/supervision/courses/:id`）** ——课程当前综合评分 + 历史授课记录「去评估 / 查看·修改评估」+ 逐次课录音上传。
+> 2. **待评课队列处理逻辑收敛**：已评估（`evaluated`）的听评课安排**一律从工作台待评课队列清除**（今日/本周/本月/未评四个分档统一过滤），过去未评估课次入口保持开放（「未评」分档 + 日期闸门）；评估提交后授课记录 `status` 置为 `evaluated`，从「待评估授课记录」移除，复盘走课程列表。
+> 3. **转写卡片长度控制**：`TranscriptViewer` 完成态默认只预览部分内容（前 3 条 / 前 220 字），超出显示「展开全文」；点击打开**居中悬浮弹窗**（正文可滚动）查看完整转写，解决督导页内容过长的问题。
+> 4. **教师「授课快照」跳转修正**：原「查看课程提优」与「去提优」同跳 `/courses/:id/improve`；现改为 **「查看详细记录」→ `/sessions/:id/evaluation`**，展示该次课的督导评分（只读）与 AI 智能体评价，并提供当堂课脱敏转写入口。「我的课程评分明细」栏保留课程列表与「去提优」按钮。
+> 5. **契约同步**：`GET /courses` 新增 `mine` 查询参数（仅 supervisor 生效，其他角色忽略）；新增路由 `/supervision/courses/:id`（name `supervisor-course`，权限 supervisor）。**音频隐私不变**：教师端仍不可回放录音，只提供转写文本。
+>
+> 详细页面规格见 §7.5A、§7.10；接口契约见 [`backend_AGENTS.md`](./backend_AGENTS.md) §8.4。
+
+---
+
 ## 1. 项目背景
 
 「爱教学」是面向高校（参考东北大学教学管理场景）的**教学质量全链路数字化管理平台**，产品愿景为"让教学质量持续可测"，走三阶进化路线：
@@ -363,7 +377,8 @@ aijiaoxue-web/
 | `/courses/:id/improve` | course-improve | CourseImproveView | App | teacher | S2① 新增（S3③ 增强） |
 | `/teachers` | teacher-list | TeacherListView | App | director / supervisor | S2① 新增 |
 | `/teachers/:id` | teacher-detail | TeacherDetailView | App | director / supervisor | S2① 新增 |
-| `/sessions/:id/evaluation` | session-evaluation | SessionEvaluationView | App | supervisor（他人只读） | S2① 新增（v1.2 增「保存草稿」） |
+| `/sessions/:id/evaluation` | session-evaluation | SessionEvaluationView | App | supervisor（他人只读） | S2① 新增（v1.2 增「保存草稿」；v1.3 教师由授课快照进入，增智能体文字评价与转写入口） |
+| `/supervision/courses/:id` | supervisor-course | SupervisorCourseView | App | supervisor | v1.3 新增（督导课程综合评分 + 授课记录评估/录音上传） |
 | `/me/quality` | profile-quality | ProfileQualityView | App | teacher | v1.0 新增（v1.2 为教师首页） |
 | `/drafts` | draft-box | DraftBoxView | App | supervisor | v1.2 新增（督导草稿箱） |
 | `/supervision` | supervision | SupervisionView | App | supervisor | S1（v1.2 起从督导菜单摘除，保留后备） |
@@ -476,14 +491,15 @@ aijiaoxue-web/
 └────────┴──────────────────────────────────┘
 ```
 
-- 侧边栏菜单**按角色渲染**（Sprint 2① 目标态）：
+- 侧边栏菜单**按角色渲染**（Sprint 2① 目标态；v1.3 督导恢复「课程列表」）：
   - 主任：工作台 / 课程管理 / **教师管理** / 个人中心
   - 教师：工作台 / 我的课程 / 个人中心
-  - 督导：工作台 / 全校课程 / **听评课管理** / 个人中心
+  - 督导：工作台 / **课程列表** / 草稿箱 / 个人中心
   - 实现：单一菜单配置数组 + `roles` 过滤，**禁止为每个角色写一份菜单**；
 - 菜单项：40px 高，激活态浅蓝底 `--color-primary-bg` + 主色文字 + 左侧 3px 指示条；
 - 顶栏右侧：用户姓名 + `RoleTag` + 下拉（个人中心 / 退出登录）；
-- 当路由为 `course-detail` / `course-new` / `course-edit` / `course-improve` 时，侧边栏高亮 `course-list`。
+- 当路由为 `course-detail` / `course-new` / `course-edit` / `course-improve` / `supervisor-course` 时，侧边栏高亮 `course-list`；
+- 督导端 `session-evaluation` 高亮 `dashboard`（工作台待评课队列为主入口），已评估记录的复盘入口在「课程列表 → 课程综合评分」。
 
 ### 7.3 DashboardView 工作台（三角色差异化，S2① 重构）
 
@@ -501,14 +517,15 @@ aijiaoxue-web/
 ### 7.4 CourseListView 课程列表（S2.1 / S2.2 / S2.3）
 
 ```
-PageHeader（标题随角色：「课程管理」/「我的课程」/「全校课程」 + 主任右侧「新增课程」按钮）
+PageHeader（标题随角色：「课程管理」/「我的课程」/「课程列表」 + 主任右侧「新增课程」按钮）
 FilterBar：学期下拉 · 教研室下拉(主任/督导) · 教师下拉(主任/督导) · 状态 · 关键词搜索 · 重置
 CourseTable：课程编码 | 课程名称 | 授课教师 | 教研室 | 学期 | 班级数 | 学生人次 | 资源数 | 状态 | 操作
 分页器（右下，10/20/50 条每页）
 ```
 
 - 数据范围由后端裁剪（主任→本室、教师→本人、督导→全校），前端列配置三角色一致；
-- 行点击进详情；操作列：查看（全员）、编辑（主任，S3.1）；教师角色行点击改为跳 `/courses/:id/improve`（见 §6.2 决策 3）；
+- **v1.3 督导切片**：督导端列表请求带 `mine=1`，后端按 `supervision_plans.supervisor_id` 只返回「本人负责评估的课程」（见 `backend_AGENTS.md` §8.4）；
+- 行点击进详情；操作列：查看（全员）、编辑（主任，S3.1）；教师角色行点击改为跳 `/courses/:id/improve`（见 §6.2 决策 3）；**督导角色行点击改为跳 `/supervision/courses/:id`（督导课程综合评分页）**；
 - 列表三态：加载中（骨架屏）/ 空数据（EmptyState + 引导文案）/ 加载失败（重试按钮）。
 
 ### 7.5 CourseDetailView 课程详情（S2.x / S4.1 / S4.2 / S6.2）
@@ -530,6 +547,25 @@ Tabs：
 - 三态完整（加载/空/失败）；空数据引导文案区分角色：督导显示「还没有授课记录，去创建」（S6.1 入口），其他角色显示「暂无授课记录」；
 - 行点击跳 `/sessions/:id/evaluation`（S6.3）；**教师/主任进入该页为只读**；
 - 无评价侧分数显示 `—`（**不得显示 0**）；`evaluationCount` 用于展示"已评 n 次"。
+
+### 7.5A SupervisorCourseView 督导课程综合评分（v1.3 新增，仅督导）
+
+督导「课程列表 → 具体课程」的落点页，路由 `/supervision/courses/:id`（name `supervisor-course`）。
+
+```
+PageHeader：返回 + 课程名称 + 课程编码 Tag + 状态 Tag
+信息条：教研室 | 授课教师 | 学期 | 开课班级数 | 学生人次
+综合评分区：本课程当前综合评分（督导分 / AI 分 / 综合分）+ ScoreDimensionsCard 五维双源 + 样本卡
+历史授课记录区：日期 | 节次 | 主题 | 状态 Tag | 督导分 | 智能体分 | 已评次数 | 操作
+分页器（右下，10/20/50 条每页）
+```
+
+- 数据源：`GET /courses/:id` + `GET /courses/:id/evaluation-summary`（学期口径取顶栏全局学期）+ `GET /courses/:id/sessions`；
+- 操作列两件事：
+  - **去评估 / 查看·修改评估**：`status !== 'evaluated'` 显示「去评估」，已评价显示「查看/修改评估」，均跳 `/sessions/:id/evaluation`（督导可在该页覆盖提交，见 §7.10）；
+  - **上传录音**：`el-upload` 直传 `POST /sessions/:id/recording`，成功后提示「转写完成后可在评估页查看」，转写与复核在评估页完成；
+- 缺失分一律 `—`；样本不足时显式提示，不静默；
+- 该页是**已评估记录的复盘入口**：评估提交后授课记录状态变为 `evaluated`，从工作台「待评课队列 / 待评估授课记录」清除，改由本页查看与修改。
 
 ### 7.6 CourseFormView 课程新增/编辑（S3.1，仅主任）
 
@@ -603,8 +639,8 @@ PageHeader：返回 + 课程名 + 课次信息（日期/节次/主题/班级/教
        提交按钮（PUT 幂等覆盖 → 成功提示 → 回填新分数）
     ② CommentPanel 已提交评语展示（多督导时按时间列出）
   参考区：
-    ③ 智能体参考（阶段②）—— EvaluationCompare，标注「AI 参考」
-    ④ 音频与转写（阶段②）—— AudioPlayer + TranscriptViewer
+    ③ 智能体参考（阶段②）—— EvaluationCompare，标注「AI 参考」；有文字评价时补「总体评语 / 亮点 / 待改进 / 改进建议」（v1.3）
+    ④ 音频与转写（阶段②）—— AudioPlayer（仅督导）+ TranscriptViewer
 ```
 
 - **权限**：仅 `supervisor` 可写；主任（本室）、教师（本人）进入为**只读**——表单禁用、隐藏提交按钮（组件级 `v-if`，非 CSS 隐藏）；
@@ -613,6 +649,8 @@ PageHeader：返回 + 课程名 + 课次信息（日期/节次/主题/班级/教
 - **智能体参考位（阶段①）**：`agentScore` 为 `null` 时展示占位说明「智能体评价将在阶段②接入」，**不得显示 0 分或空图表**；
 - `frontier` 在本页同样按「亮点标记」处理（不参与加权总分展示）；
 - 阶段②的转写区按三态渲染：`pending/running` → 进度/轮询提示；`failed` → 错误信息 + 「重试」按钮；`done` → 转写文本（含说话人）。轮询用 composable（`useTranscriptionPolling.ts`），**不得在组件里裸写 `setInterval`**。
+- **v1.3 教师复盘链路**：教师由「我的质量档案 → 授课快照 → 查看详细记录」进入本页，页面对教师呈现**督导评分（只读）+ AI 智能体评价 + 当堂课脱敏转写入口**，用于回顾授课细节；
+- **v1.3 转写卡片长度控制**：`TranscriptViewer` 在 `done` 态默认只预览前 3 条（或前 220 字），超出时显示「展开全文（共 n 条）」；点击后在**居中悬浮弹窗**（`el-dialog align-center`，正文 `max-height: 60vh; overflow-y: auto`）查看完整转写。音频仍仅督导可回放，教师端只提供转写（隐私红线见 §5.1 权限矩阵）。
 
 #### 7.10.1 评分锚点 tooltip（强制）
 
@@ -1254,5 +1292,6 @@ views ──调用──> api/*（唯一请求出口）
 | v1.0 | Sprint 1 | 初版：技术栈、目录结构、设计令牌、编码规范、Sprint 1 页面规格与验收 |
 | v2.0 | 2026-09 | 覆盖三个 Sprint：新增当前阶段横幅与三 Sprint 对等章节；补全 Sprint 2/3 页面、路由变更表、组件与目录（§5–§8）；接口层修正（`/teacher-scores` 与 `/teachers` 分离、`GET /courses/:id/sessions`、`/sessions/...`、两个 `evaluation-summary`、`evaluatedCount`、`40002` = HTTP 400）；新增评分展示规范（§9.6）；新增「文档同步要求（强制）」（§13）；补充阶段①②③验收标准（§14） |
 | v2.1 | 2026-09-22 | 交付「教学提优」页（任务五、六）：§7.11 补全七大区块与数据源；新增 `ScoreSummaryPanel` / `AgentSuggestionList` / `AgentChat` 组件规格，`ScoreTrendChart` Props 更新（§8.4）；更新 mock 约定（§10）——阶段③智能体区块真实接口留空，由 `src/mocks/teacherImprove.ts` 演示数据驱动；「我的课程」入口改跳 `/courses/:id/improve` |
+| v1.3 | 2026-10-06 | 督导课程复盘与教师授课记录：督导侧边栏恢复「课程列表」（`mine=1` 只列本人负责评估的课程）并新增 `/supervision/courses/:id`（§7.5A）；待评课队列清除已评估记录（§7.3）；`TranscriptViewer` 预览 + 居中弹窗展开（§7.10）；教师「授课快照」改跳当堂课评价页并展示督导 + AI 评价与转写入口（§7.10）；`GET /courses` 增 `mine` 参数 |
 
 > **版本维护约定**：本手册的版本号随任一强制同步项（§13）的变更递增，并在上表登记。修改本文件时，请一并核对 [`Sprint2-3-教学评价与提优-开发计划.md`](./Sprint2-3-教学评价与提优-开发计划.md) 是否需同步更新。
