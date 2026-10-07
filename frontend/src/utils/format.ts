@@ -33,7 +33,7 @@ export function percentFromCounts(done: number, total: number): number {
   return done / total
 }
 
-/* ===== 《前端设计-new》评分色阶映射（区间阈值与锚点「3 分=合格」对齐：60 分即李克特 3 分） ===== */
+/* ===== 评分色阶映射（docs/frontend_AGENTS.md §9.1）（区间阈值与锚点「3 分=合格」对齐：60 分即李克特 3 分） ===== */
 
 export type ScoreTone = 1 | 2 | 3 | 4 | 5 | null
 

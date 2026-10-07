@@ -3,7 +3,7 @@ import { computed, ref } from 'vue'
 import type { TranscriptDTO } from '@/types/evaluation'
 
 /**
- * 脱敏转写查看器（《前端设计-new》§5.5-4）。
+ * 脱敏转写查看器（docs/frontend_AGENTS.md §7.10）。
  * 三态：排队/运行中 → 波形呼吸；失败 → 重试；完成 → 说话人分色气泡（脱敏文案由后端保证）。
  *
  * 卡片长度控制：正文默认只渲染前 PREVIEW_SEGMENTS 条（纯文本按 PREVIEW_CHARS 截断）并限高裁切，

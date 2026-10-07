@@ -7,7 +7,7 @@ import QualityBadge from '@/components/common/QualityBadge.vue'
 import { scoreTone } from '@/utils/format'
 
 /**
- * 教师 × 五维质量热力（《前端设计-new》§5.3 主任驾驶舱）。
+ * 教师 × 五维质量热力（docs/frontend_AGENTS.md §7.3 / §8.4）。
  * 色阶深浅 = 维度分；缺分灰格；行尾综合分徽章；点行下钻教师画像。
  * 数据源：GET /teacher-scores（本室），无新增接口。
  */

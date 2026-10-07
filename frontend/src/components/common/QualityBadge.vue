@@ -4,7 +4,7 @@ import { scoreLevelLabel, scoreTone, scoreToneColor } from '@/utils/format'
 
 /**
  * 质量等级徽章：分数旁的必挂件（色彩即等级）。
- * 规范见 docs/前端设计-new.md §4.4 / §8：
+ * 规范见 docs/frontend_AGENTS.md §9.1 / §9.6：
  * - null → 灰色「暂无评价」，禁止以 0 充当；
  * - 色阶只用于分数及其派生物，禁止作装饰。
  */
