@@ -198,7 +198,7 @@ make lint            # go vet + gofmt -l，零告警才算过
 make test            # service 层表驱动单测（数据裁剪 / 覆盖率 / 资源归属 / 登录）
 make build           # 编译通过
 
-# 端到端验收：143 项断言，覆盖 Sprint 1 三故事线 + Sprint 2.1 评价闭环 + 越权负例 + 覆盖率/评分对账
+# 端到端验收：144 项断言，覆盖 Sprint 1 三故事线 + Sprint 2.1 评价闭环 + 越权负例 + 覆盖率/评分对账
 # ⚠️ 脚本目前不含录音 / 转写（阶段②）相关断言；该部分尚无端到端自动验收覆盖。
 BASE=http://127.0.0.1:8080/api/v1 MYSQL_PORT=3306 bash scripts/verify.sh
 # MYSQL_PORT 是脚本内核对种子数据用的 MySQL 端口，默认 3306；本仓库开发容器（附录 A）的沙箱实例是 3307，需显式改为 MYSQL_PORT=3307。
@@ -375,7 +375,7 @@ mysql:
 
 ### 10. 附录 C：Windows 首次环境搭建（Git Bash + 原生 MySQL）
 
-> **适用**：Windows 10/11，本机**从未配置过 MySQL**。目标：把「库 + 种子数据 + 后端 + 前端」跑通，并能执行 143 项验收。
+> **适用**：Windows 10/11，本机**从未配置过 MySQL**。目标：把「库 + 种子数据 + 后端 + 前端」跑通，并能执行 144 项验收。
 > **路线**：**Git for Windows（Git Bash） + MySQL Installer 原生安装**（服务名默认 `MySQL80`，端口 `3306`）。
 > ⚠️ 本仓库 `.devtools/mysql/`（附录 A）是 **Linux 开发容器专用**（ELF 二进制 + bash + `LD_LIBRARY_PATH`），且已 `.gitignore`，Windows 上既拿不到也跑不了，**请忽略它**。
 
@@ -481,7 +481,7 @@ cd frontend && npm run dev
 ```bash
 cd backend
 BASE=http://127.0.0.1:8080/api/v1 MYSQL_PORT=3306 bash scripts/verify.sh
-# 期望：143 通过 / 0 失败
+# 期望：144 通过 / 0 失败
 ```
 
 > **`verify.sh` 依赖 `python3`**。若 Git Bash 中 `python3 --version` 不可用（Windows 版 Python 常只提供 `python`），在当前 Git Bash 会话执行 `alias python3=python` 即可（写进 `~/.bashrc` 可持久）。

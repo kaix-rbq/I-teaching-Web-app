@@ -179,7 +179,7 @@ aijiaoxue-api/                # 本仓库中的 backend/
 ├── uploads/                 # 文件存储（.gitignore）：课程资源 + recordings/{sessionId}/{uuid}.{ext}
 └── scripts/
     ├── init_db.sh           # 建库 → migrate up → seed.sql → cmd/seed
-    └── verify.sh            # 端到端验收（Sprint 1 + 2.1，143 条 want 断言；无录音/转写断言，见 §15）
+    └── verify.sh            # 端到端验收（Sprint 1 + 2.1，144 条 want 断言；无录音/转写断言，见 §15）
 ```
 
 **目录铁律**：
@@ -828,9 +828,9 @@ HTTP 请求
 
 **数据链路一键验收**（`scripts/verify.sh`，覆盖 **Sprint 1 + Sprint 2.1**）：
 
-> ⚠️ **覆盖边界（事实陈述，勿当已覆盖）**：当前脚本共 **143 条 `want` 断言**（`grep -c 'want "' backend/scripts/verify.sh`）。
+> ⚠️ **覆盖边界（事实陈述，勿当已覆盖）**：当前脚本共 **144 条 `want` 断言**（`grep -c 'want "' backend/scripts/verify.sh`）。
 > 其中**没有任何录音 / 转写断言**——脚本里与阶段②相关的只有两处 `aiModelVersion="qwen-audio-v1"` 的种子数据断言
-> （`verify.sh:184,243`）。因此**阶段②（录音上传 / 异步转写 / 播放票据）目前没有自动化端到端断言**，
+> （`verify.sh:185,246`）。因此**阶段②（录音上传 / 异步转写 / 播放票据）目前没有自动化端到端断言**，
 > 临时验收口径见 §16 与开发计划 §8.2。
 
 ```bash
