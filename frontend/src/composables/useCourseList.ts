@@ -11,7 +11,12 @@ export interface CourseListQuery {
   keyword: string
 }
 
-export function useCourseList() {
+export interface CourseListOptions {
+  /** 仅督导使用：只看本人听评课计划覆盖的课程（透传后端 `mine=1`）。 */
+  mine?: boolean
+}
+
+export function useCourseList(options: CourseListOptions = {}) {
   const { page, pageSize, total, setTotal, setPage, setPageSize } = usePagination()
   const query = reactive<CourseListQuery>({
     semester: '',
@@ -34,6 +39,7 @@ export function useCourseList() {
         teacherId: query.teacherId || undefined,
         status: query.status || undefined,
         keyword: query.keyword || undefined,
+        mine: options.mine || undefined,
         page: page.value,
         pageSize: pageSize.value
       }

@@ -48,6 +48,11 @@ export interface CourseQuery {
   teacherId?: number
   status?: CourseStatus | ''
   keyword?: string
+  /**
+   * 仅督导场景使用：true = 只返回本人听评课计划覆盖的课程（后端 `mine=1`）。
+   * 其他角色传该参数会被后端忽略（数据范围由角色裁剪决定）。
+   */
+  mine?: boolean
   page?: number
   pageSize?: number
 }

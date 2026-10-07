@@ -5,6 +5,7 @@ import {
   ArrowDown,
   Collection,
   Expand,
+  Files,
   Fold,
   Medal,
   Odometer,
@@ -44,11 +45,12 @@ const menuItems = computed<MenuItem[]>(() => {
     ]
   }
 
-  // 督导端聚焦「听评课」核心任务：工作台、草稿箱、个人中心三栏。
+  // 督导端聚焦「听评课」核心任务：工作台、课程列表、草稿箱、个人中心四栏。
   if (role === 'supervisor') {
     return [
       { index: 'dashboard', label: '工作台', icon: markRaw(Odometer) },
-      { index: 'draft-box', label: '草稿箱', icon: markRaw(Collection) },
+      { index: 'course-list', label: '课程列表', icon: markRaw(Collection) },
+      { index: 'draft-box', label: '草稿箱', icon: markRaw(Files) },
       { index: 'profile', label: '个人中心', icon: markRaw(User) }
     ]
   }
@@ -70,7 +72,8 @@ const activeMenu = computed(() => {
     name === 'course-detail' ||
     name === 'course-new' ||
     name === 'course-edit' ||
-    name === 'course-improve'
+    name === 'course-improve' ||
+    name === 'supervisor-course'
   ) {
     return 'course-list'
   }
