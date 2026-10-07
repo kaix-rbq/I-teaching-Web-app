@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatBytes, formatDate, formatRate, percentFromCounts } from '@/utils/format'
+import { formatBytes, formatDate, formatOffset, formatRate, percentFromCounts } from '@/utils/format'
 
 describe('formatBytes', () => {
   it('returns 0 B for zero or invalid input', () => {
@@ -48,5 +48,22 @@ describe('percentFromCounts', () => {
   it('computes ratio safely', () => {
     expect(percentFromCounts(3, 6)).toBe(0.5)
     expect(percentFromCounts(1, 0)).toBe(0)
+  })
+})
+
+describe('formatOffset', () => {
+  it('formats seconds as mm:ss', () => {
+    expect(formatOffset(0)).toBe('00:00')
+    expect(formatOffset(59)).toBe('00:59')
+    expect(formatOffset(60)).toBe('01:00')
+    expect(formatOffset(123.4)).toBe('02:03')
+    expect(formatOffset(3600)).toBe('60:00')
+  })
+
+  it('falls back to 00:00 for invalid or negative input', () => {
+    // 证据引用与转写气泡共用该函数，NaN/负数不得渲染成 NaN:NaN
+    expect(formatOffset(-1)).toBe('00:00')
+    expect(formatOffset(Number.NaN)).toBe('00:00')
+    expect(formatOffset(Number.POSITIVE_INFINITY)).toBe('00:00')
   })
 })
