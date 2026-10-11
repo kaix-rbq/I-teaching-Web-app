@@ -184,16 +184,15 @@ curl -s -X POST "https://$AIJIAOXUE_AGENT_WORKSPACE_ID.cn-beijing.maas.aliyuncs.
 
 ## 4. 数据模型
 
-### 4.1 V7 迁移：AI 评价与任务
+> **迁移编号**：V7 = 列宽修正（阶段一已实施）；V8 = AI 评价与任务；V9 = 知识库。
+> 阶段一只需要列宽修正，故 AI 表与知识库表顺延一位。
+
+### 4.1 V8 迁移：AI 评价与任务
+
+> `ai_model_version` 列宽修正已单独落在 **V7**（`7_evaluations_ai_model_version_width`），见 §9 阶段一 1.3。
 
 ```sql
--- ① 放宽 agent 模型版本列宽
--- 原因：与 transcripts.engine_version 同型的坑。真实模型名易超 32 字符，
--- MySQL 8 严格模式下触发 ERROR 1406 会让整条写入回滚（已付费调用却什么都没存）。
-ALTER TABLE `evaluations`
-  MODIFY COLUMN `ai_model_version` VARCHAR(64) NOT NULL DEFAULT '' COMMENT '仅 agent';
-
--- ② AI 任务表：可观测、可重试、幂等
+-- ① AI 任务表：可观测、可重试、幂等
 CREATE TABLE `ai_tasks` (
   `id`            BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   `kind`          ENUM('session_eval','teacher_report','embed_document') NOT NULL,
@@ -213,7 +212,7 @@ CREATE TABLE `ai_tasks` (
   KEY `idx_ai_task_status` (`status`,`kind`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='AI 任务';
 
--- ③ 教师级 AI 报告
+-- ② 教师级 AI 报告
 CREATE TABLE `teacher_ai_reports` (
   `id`                 BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   `teacher_id`         BIGINT UNSIGNED NOT NULL,
@@ -244,7 +243,7 @@ CREATE TABLE `teacher_ai_reports` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='教师级 AI 综合报告';
 ```
 
-### 4.2 V8 迁移：知识库
+### 4.2 V9 迁移：知识库
 
 ```sql
 CREATE TABLE `knowledge_documents` (
@@ -327,6 +326,10 @@ CREATE TABLE `knowledge_chunks` (
 | 4 | `pkg/scoring` `composite` | 某维度**双侧皆缺**时不归一化，分数被系统性压低（无测试覆盖） | 补归一化决策 + 单测 |
 
 > 另：`errcode` 的 `50003` 文案写死为「转写服务不可用」。AI 链路复用该码时需参数化文案。
+>
+> **实施状态**：以上 4 项已在「阶段一」修复（见 §9 阶段一）。其中第 4 项为**口径变更**，
+> 已按「契约先行」先更新开发计划 §2.5.2 再改代码，且对满覆盖数据零影响
+> （种子对账 `TestSessionCompositeSeed` / `TestAggregateSeed` 数值不变）。
 
 ---
 
@@ -592,7 +595,7 @@ embedding:
 | 2.1 | `config` 新增 `agent.*` / `embedding.*`（`BindEnv` + `SetDefault` + Fail-Fast + 掩码） | 缺 Key 启动失败，日志只打掩码 |
 | 2.2 | `internal/agent/llm`：结构化 JSON 输出、超时、重试、并发闸门 | 上游失败包装为 `ErrAgentUnavailable` |
 | 2.3 | `internal/agent/prompt`：S1/S2/S3 模板 + 版本常量 | 单测：模板渲染 + JSON 容错解析 |
-| 2.4 | V7 迁移：`ai_tasks` + `teacher_ai_reports` | 唯一键幂等覆盖验证 |
+| 2.4 | V8 迁移：`ai_tasks` + `teacher_ai_reports` | 唯一键幂等覆盖验证 |
 | 2.5 | S1 服务：转写 done → 异步评价 → 写 agent 行 | 端到端：真实音频产出五维分 + 评语 + 证据 |
 | 2.6 | S2 服务：教师级报告（去抖 + 快照比对 + 幂等） | 同教师多次上传只生成一次 |
 | 2.7 | 接口：`ai-report` 读写、`agent-suggestions` | 契约与 `src/types` 逐字对齐 |
@@ -601,7 +604,7 @@ embedding:
 
 | # | 任务 | 验收 |
 |---|---|---|
-| 3.1 | V8 迁移：`knowledge_documents` + `knowledge_chunks` | 向量与 `embedding_model/dim` 一并落库 |
+| 3.1 | V9 迁移：`knowledge_documents` + `knowledge_chunks` | 向量与 `embedding_model/dim` 一并落库 |
 | 3.2 | `internal/agent/embedder`：Embedder 接口 + 百炼实现 + 失败降级 | 单测：失败时降级为无知识库仍返回 |
 | 3.3 | `internal/agent/retriever`：缓存、余弦、元数据过滤、阈值 | 单测：top-k 命中 + 模型过滤 + 阈值丢弃 |
 | 3.4 | `cmd/kb`：ingest / list / rebuild（md+txt+docx 解析，PDF 预处理） | 摄取一个真实文档并检索命中 |

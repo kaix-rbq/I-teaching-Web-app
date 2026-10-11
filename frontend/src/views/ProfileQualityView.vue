@@ -10,6 +10,7 @@ import ScoreDimensionsCard from '@/components/evaluation/ScoreDimensionsCard.vue
 import { fetchTeacherEvaluationsApi, fetchTeacherSummaryApi } from '@/api/teacher'
 import { useAuthStore } from '@/stores/auth'
 import { useSemester } from '@/composables/useSemester'
+import { flagText } from '@/constants'
 import { scoreTone, scoreToneColor } from '@/utils/format'
 import type { TeacherSummary, TeacherTimelineItem } from '@/types/teacher'
 
@@ -29,13 +30,6 @@ const summary = ref<TeacherSummary | null>(null)
 const timeline = ref<TeacherTimelineItem[]>([])
 const loading = ref(true)
 const error = ref(false)
-
-const FLAG_TEXT: Record<string, string> = {
-  no_data: '暂无评价',
-  sample_insufficient: '样本不足，当前分数代表性有限',
-  disjoint: '督导与智能体评价尚未对齐，当前分数代表性有限',
-  formula_mixed: '口径版本混杂，请谨慎解读'
-}
 
 const flags = computed(() => summary.value?.flags ?? [])
 
@@ -57,10 +51,6 @@ const improveAnalysis = {
 /** 数字一致性铁律：直接展示后端值，不做前端四舍五入 */
 function formatScore(score: number | null | undefined): string {
   return score === null || score === undefined ? '—' : score.toFixed(2)
-}
-
-function flagText(flag: string): string {
-  return FLAG_TEXT[flag] ?? flag
 }
 
 async function load(): Promise<void> {

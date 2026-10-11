@@ -395,7 +395,7 @@ func (s *teacherScoreService) toScoreSummary(sum scoring.Summary) dto.ScoreSumma
 
 	flags := sum.Flags
 	if sum.Sample.EvaluatedCount < s.cfg.MinSampleSize {
-		flags = append(flags, "sample_insufficient")
+		flags = append(flags, scoring.FlagSampleInsufficient)
 	}
 	if flags == nil {
 		flags = []string{}

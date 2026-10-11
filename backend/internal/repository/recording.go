@@ -76,8 +76,16 @@ func (r *recordingRepository) ListStuckTranscripts(ctx context.Context) ([]model
 		Find(&rows).Error
 	return rows, err
 }
+
+// UpsertAgentEvaluation 写入 agent 行，按 uk_eval 幂等覆盖。
+//
+// 复用 evaluationUpsertColumns（与督导路径同一份清单）：智能体重新评价同一场次时，
+// 分数、证据与四段评语都必须整行覆盖，只更新分数会留下上一轮的陈旧评语。
 func (r *recordingRepository) UpsertAgentEvaluation(ctx context.Context, v *model.Evaluation) error {
-	return r.db.WithContext(ctx).Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "session_id"}, {Name: "evaluator_type"}, {Name: "evaluator_id"}}, DoUpdates: clause.AssignmentColumns([]string{"ai_model_version", "formula_version", "objective_score", "content_score", "interaction_score", "organization_score", "frontier_score", "total_score", "ai_confidence", "evidence"})}).Create(v).Error
+	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns:   evaluationConflictColumns,
+		DoUpdates: clause.AssignmentColumns(evaluationUpsertColumns),
+	}).Create(v).Error
 }
 func (r *recordingRepository) LogPlayback(ctx context.Context, recordingID, userID uint64, at time.Time) error {
 	return r.db.WithContext(ctx).Table("recording_playback_logs").Create(map[string]any{"recording_id": recordingID, "user_id": userID, "started_at": at}).Error

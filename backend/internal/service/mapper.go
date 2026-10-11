@@ -1,6 +1,9 @@
 package service
 
 import (
+	"encoding/json"
+	"log/slog"
+	"strings"
 	"time"
 
 	"aijiaoxue-api/internal/dto"
@@ -165,9 +168,26 @@ func toEvaluationDTO(row repository.EvaluationRow) dto.EvaluationDTO {
 		Highlights:     row.Highlights,
 		Improvements:   row.Improvements,
 		Suggestions:    row.Suggestions,
+		Evidence:       toEvidenceDTO(row.Evidence),
 		CreatedAt:      row.CreatedAt.Format(time.RFC3339),
 		UpdatedAt:      row.UpdatedAt.Format(time.RFC3339),
 	}
+}
+
+// toEvidenceDTO 把 evaluations.evidence（JSON 列，仅 agent 行有值）解析为结构化 DTO。
+//
+// 解析失败不阻断响应：证据属增强信息，宁可退化为「无引用」展示，
+// 也不能让一条脏数据把整页评估数据打成 500。督导行该列为 NULL，直接返回 nil。
+func toEvidenceDTO(raw *string) *dto.EvidenceDTO {
+	if raw == nil || strings.TrimSpace(*raw) == "" {
+		return nil
+	}
+	var out dto.EvidenceDTO
+	if err := json.Unmarshal([]byte(*raw), &out); err != nil {
+		slog.Warn("解析 evaluations.evidence 失败，本次响应按无证据处理", "error", err)
+		return nil
+	}
+	return &out
 }
 
 // round2Ptr 保留两位小数（nil 透传）。

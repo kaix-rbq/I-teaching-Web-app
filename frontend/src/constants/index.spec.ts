@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   EVALUATION_DIMENSIONS,
+  flagText,
   getDimensionAnchor,
   getScoreLevel,
   getSessionStatusMeta,
@@ -41,5 +42,31 @@ describe('getSessionStatusMeta', () => {
   it('marks evaluated sessions as success', () => {
     expect(getSessionStatusMeta('evaluated').tag).toBe('success')
     expect(getSessionStatusMeta('scheduled').tag).toBe('warning')
+  })
+})
+
+describe('flagText', () => {
+  // 后端 pkg/scoring 实际会产出的全部 flag（含 service 层追加的 sample_insufficient）。
+  // 回归点：展示面此前漏了 sup_only / ai_only，页面会直接显示英文原始 key。
+  const BACKEND_FLAGS = [
+    'no_data',
+    'sup_only',
+    'ai_only',
+    'disjoint',
+    'sample_insufficient'
+  ]
+
+  it('maps every backend flag to Chinese copy', () => {
+    for (const flag of BACKEND_FLAGS) {
+      const text = flagText(flag)
+      expect(text).not.toBe(flag)
+      // 文案必须是中文，出现英文 key 说明字典漏配
+      expect(text).toMatch(/[\u4e00-\u9fa5]/)
+    }
+  })
+
+  it('falls back to the raw key for unknown flags', () => {
+    // 未知 flag 原样返回，便于排障时发现前后端契约漂移
+    expect(flagText('brand_new_flag')).toBe('brand_new_flag')
   })
 })

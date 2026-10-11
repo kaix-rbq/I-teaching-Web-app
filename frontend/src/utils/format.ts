@@ -22,6 +22,18 @@ export function formatDateTime(value?: string | number | Date): string {
   return formatDate(value, 'YYYY-MM-DD HH:mm')
 }
 
+/**
+ * 秒 → mm:ss。用于转写气泡与 AI 证据引用，便于按时间回看课堂。
+ * 非法或负数一律回落 00:00，避免出现 NaN:NaN。
+ */
+export function formatOffset(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) return '00:00'
+  const total = Math.floor(seconds)
+  const minutes = Math.floor(total / 60)
+  const rest = total % 60
+  return `${String(minutes).padStart(2, '0')}:${String(rest).padStart(2, '0')}`
+}
+
 export function formatRate(rate: number, fractionDigits = 0): string {
   if (!Number.isFinite(rate)) return '0%'
   const percent = Math.max(0, Math.min(1, rate)) * 100

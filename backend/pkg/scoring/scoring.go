@@ -285,33 +285,56 @@ func weightedSide(weights Weights, vals *[dimCount]*float64) *float64 {
 	return &v
 }
 
-// composite 由传入的维度分计算加权和 Σ w×dim，对可评价维度直接加权、不做重新归一化。
-// 当前仅用于 SessionComposite（单场次综合分）；单侧缺失已在维度层回退补齐。
+// composite 由传入的维度分计算加权和：Σ(w×dim) / Σw —— 权重在缺维度时重新归一化。
+//
+// 🔴 必须归一化（口径补充，2026-10 决议，见开发计划 §2.5.2）。
+// 融合后仍为 nil 的维度表示「督导与智能体都无法观测」，**不得按 0 分计入**：
+// 直接省略该项会让 Σw < 1，把综合分系统性压低（objective 权重 0.30 缺失时单场满分只剩 70），
+// 且与 weightedSide（侧总分）的处理方式不一致。
+//
+// 全维度可评价时 Σw = 1.00（启动期已校验权重合计），结果与纯加权和逐位相等，
+// 故对种子数据与 §8.1 恒等式的既有数值无影响。
 func composite(weights Weights, dims []DimensionSummary) *float64 {
-	total, has := 0.0, false
+	num, den := 0.0, 0.0
 	for d := range dims {
 		if dims[d].Score != nil {
-			total += weights.at(d) * *dims[d].Score
-			has = true
+			num += weights.at(d) * *dims[d].Score
+			den += weights.at(d)
 		}
 	}
-	if !has {
+	if den <= 0 {
 		return nil
 	}
-	return &total
+	v := num / den
+	return &v
 }
+
+// 缺失与样本不足标记（§2.5.5）。前端按这些 key 映射中文提示，
+// **新增或改名必须同步前端的 flag 字典**，否则页面会直接显示英文原始 key。
+const (
+	// FlagNoData 双侧都没有评价：综合分为 null，不得按 0 分排序。
+	FlagNoData = "no_data"
+	// FlagSupOnly 只有督导评价。
+	FlagSupOnly = "sup_only"
+	// FlagAIOOnly 只有智能体评价。
+	FlagAIOOnly = "ai_only"
+	// FlagDisjoint 双侧都有评价，但没有一场是双侧齐全的（无法按场次对齐融合）。
+	FlagDisjoint = "disjoint"
+	// FlagSampleInsufficient 已评价场次低于 minSampleSize，由 service 层追加。
+	FlagSampleInsufficient = "sample_insufficient"
+)
 
 // missingFlags 按缺失矩阵（§2.5.5）返回状态标记；双侧齐全且场次对齐时返回空。
 func missingFlags(sample Sample) []string {
 	switch {
 	case sample.SupervisorCount == 0 && sample.AgentCount == 0:
-		return []string{"no_data"}
+		return []string{FlagNoData}
 	case sample.AgentCount == 0:
-		return []string{"sup_only"}
+		return []string{FlagSupOnly}
 	case sample.SupervisorCount == 0:
-		return []string{"ai_only"}
+		return []string{FlagAIOOnly}
 	case sample.AlignedCount == 0:
-		return []string{"disjoint"}
+		return []string{FlagDisjoint}
 	default:
 		return []string{}
 	}

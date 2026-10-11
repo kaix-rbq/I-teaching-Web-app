@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { formatOffset } from '@/utils/format'
 import type { TranscriptDTO } from '@/types/evaluation'
 
 /**
@@ -23,15 +24,6 @@ function speakerKind(speaker: string): 'teacher' | 'student' | 'other' {
   if (speaker.includes('教师') || speaker.includes('老师')) return 'teacher'
   if (speaker.includes('学生')) return 'student'
   return 'other'
-}
-
-/** 秒 → mm:ss（用于气泡时间戳，便于按时间回看课堂） */
-function formatOffset(seconds: number): string {
-  if (!Number.isFinite(seconds) || seconds < 0) return '00:00'
-  const total = Math.floor(seconds)
-  const minutes = Math.floor(total / 60)
-  const rest = total % 60
-  return `${String(minutes).padStart(2, '0')}:${String(rest).padStart(2, '0')}`
 }
 
 /** 预览条数 / 字符数阈值：超过则提供「展开全文」入口 */

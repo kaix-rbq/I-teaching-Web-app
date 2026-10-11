@@ -69,8 +69,36 @@ export interface EvaluationDTO {
   improvements: string
   /** 建议 / 智能体提优建议 */
   suggestions: string
+  /** 仅 agent 行非空，督导行为 null；供渲染「分数→转写原文」的可追溯引用 */
+  evidence: EvidenceDTO | null
   createdAt: string
   updatedAt: string
+}
+
+/** 转写引用：秒级时间戳与 transcripts.segments 对齐 */
+export interface EvidenceQuote {
+  start: number
+  end: number
+  quote: string
+}
+
+/** 单个维度的证据：置信度 + 可定位的转写引用 */
+export interface EvidenceDimension {
+  confidence: number
+  quotes: EvidenceQuote[]
+}
+
+/**
+ * evaluations.evidence（JSON 列）的结构化投影，schemaVersion 1。
+ * dimensions 的 key ∈ DimensionKey；notObservable 显式声明智能体无法评价的维度。
+ */
+export interface EvidenceDTO {
+  schemaVersion: number
+  /** 引用的知识库片段标识，如 kb-rubric#3 */
+  citedChunks: string[]
+  dimensions: Partial<Record<DimensionKey, EvidenceDimension>>
+  notObservable: DimensionKey[]
+  promptVersion: string
 }
 
 /** GET /sessions/:id/evaluation 聚合响应（当堂课评估页） */
