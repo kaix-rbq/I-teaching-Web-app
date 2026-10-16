@@ -522,8 +522,8 @@ func TestTeacherSummarySampleUsesEvaluated(t *testing.T) {
 	}}
 	f := func(v float64) *float64 { return &v }
 	rows := []repository.SessionDimRow{
-		{SessionID: 1, TeacherID: 2, CourseID: 1, HasSupervisor: true,
-			SupObjective: f(4), SupContent: f(4), SupInteraction: f(4), SupOrganization: f(4), SupFrontier: f(4)},
+		{SessionID: 1, TeacherID: 2, CourseID: 1, HasAgent: true,
+			AiObjective: f(4), AiContent: f(4), AiInteraction: f(4), AiOrganization: f(4), AiFrontier: f(4)},
 		{SessionID: 2, TeacherID: 2, CourseID: 1},
 		{SessionID: 3, TeacherID: 2, CourseID: 1},
 	}
@@ -662,7 +662,7 @@ func TestTeacherEvaluationsTimeline(t *testing.T) {
 	assert.Equal(t, "2026-09-19", res.List[0].SessionDate)
 	assert.Equal(t, "软件项目管理", res.List[0].CourseName)
 
-	// 场次 2：双侧全 4 分 → 融合后 75.00；督导/智能体单侧分取落库总分。
+	// 场次 2：AI 侧维度全 4 分 → 综合分 = AI 单侧分 75.00；督导/智能体单侧分取落库总分。
 	require.NotNil(t, res.List[0].CompositeScore)
 	assert.Equal(t, 75.00, *res.List[0].CompositeScore)
 	require.NotNil(t, res.List[0].SupervisorScore)
@@ -675,9 +675,8 @@ func TestTeacherEvaluationsTimeline(t *testing.T) {
 	require.NotNil(t, res.List[0].AgentEvaluation)
 	assert.Equal(t, "qwen-audio-v1", res.List[0].AgentEvaluation.AIModelVersion)
 
-	// 场次 1：仅督导，智能体侧为空。
-	require.NotNil(t, res.List[1].CompositeScore)
-	assert.Equal(t, 75.00, *res.List[1].CompositeScore)
+	// 场次 1：仅督导评语、无 AI 评价 → 综合分为 null（计分只按 AI，计划 §6）。
+	assert.Nil(t, res.List[1].CompositeScore)
 	assert.Equal(t, 52.5, *res.List[1].SupervisorScore)
 	assert.Nil(t, res.List[1].AgentEvaluation)
 	assert.Empty(t, res.List[1].SupervisorEvaluations[0].Highlights)

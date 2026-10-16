@@ -186,6 +186,7 @@ curl -s -X POST "https://$AIJIAOXUE_AGENT_WORKSPACE_ID.cn-beijing.maas.aliyuncs.
 
 > **迁移编号**：V7 = 列宽修正（阶段一已实施）；V8 = AI 评价与任务；V9 = 知识库。
 > 阶段一只需要列宽修正，故 AI 表与知识库表顺延一位。
+> ⚠️ **2026-10-16 重构调整**：V8（`ai_tasks` 等）与重构计划对齐复用；知识库表（`knowledge_documents/chunks`）顺延至 V13+，本轮不建；V9–V12 为重构新表（反思/清单/通知/课表），详见 10.16 计划 §3.2。
 
 ### 4.1 V8 迁移：AI 评价与任务
 

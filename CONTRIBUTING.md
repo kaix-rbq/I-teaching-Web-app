@@ -12,13 +12,14 @@
 
 | 顺序 | 文档 | 重点章节 |
 |:----:|------|---------|
+| 0 | `docs/2026-10-16-教学提优重构开发计划.md` | **本次重构唯一事实源，先读**：冻结决策（B/D/N）、新业务流、新接口/表/权限/口径；与其它文档冲突时以它为准 |
 | 1 | `README.md` | 「For Developers」——环境准备、初始化、启停命令、验证方式、排查手册 |
-| 2 | 你负责的那一端 | `docs/backend_AGENTS.md` 或 `docs/frontend_AGENTS.md`（分层、目录、契约） |
-| 3 | `docs/Sprint2-3-教学评价与提优-开发计划.md` | 产品与迭代规格（评分体系 §2、权限/隐私 §5、任务与状态 §7、DoD §8）；DDL/接口/页面在该文中只做索引，指向各自事实源 |
-| 4 | `docs/MySQL数据库创建指导.md` | 建库与账号、12 张表与迁移清单、种子数据与自查、GORM 对接、备份与排查 |
+| 2 | 你负责的那一端 | `docs/backend_AGENTS.md` 或 `docs/frontend_AGENTS.md`（分层、目录、契约；其中与 10.16 计划冲突的条款以 10.16 为准，见各文件顶部效力声明） |
+| 3 | `docs/Sprint2-3-教学评价与提优-开发计划.md` | **已冻结归档**：评分体系 §2、权限 §5、任务 §7、DoD §8 只描述重构前状态；重构内容看 10.16 计划 |
+| 4 | `docs/MySQL数据库创建指导.md` | 建库与账号、表与迁移清单、种子数据与自查、GORM 对接、备份与排查（新表见 10.16 计划 §3） |
 | 5 | `backend/AGENTS.md` | 后端目录级纪律速查（一页读完，再指向上面几份文档） |
 
-> **文档全集（共 7 份，勿再引用其它历史文档）**：`README.md`、`CONTRIBUTING.md`、`backend/AGENTS.md`、`docs/backend_AGENTS.md`、`docs/frontend_AGENTS.md`、`docs/Sprint2-3-教学评价与提优-开发计划.md`、`docs/MySQL数据库创建指导.md`。
+> **文档全集**：`README.md`、`CONTRIBUTING.md`、`backend/AGENTS.md`、`docs/backend_AGENTS.md`、`docs/frontend_AGENTS.md`、`docs/2026-10-16-教学提优重构开发计划.md`（现行）、`docs/Sprint2-3-教学评价与提优-开发计划.md`（已冻结）、`docs/MySQL数据库创建指导.md`、`docs/RAG知识库与AI评价接入方案.md`。根目录《教学评估与提优优化方案.md》仅作需求输入，不是指导文档。
 
 **两端各自最不能漏的章节**：
 

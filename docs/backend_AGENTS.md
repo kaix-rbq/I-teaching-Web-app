@@ -8,6 +8,8 @@
 > 🔴 **文档同步要求（强制）**：本手册是后端开发的事实源之一。任何改动若涉及**路由 / 接口字段、数据模型或表结构、错误码、权限与数据范围、计分口径、Sprint 范围**，
 > 必须在**同一个 PR** 内同步更新本文件，以及 `docs/Sprint2-3-教学评价与提优-开发计划.md` 中对应的契约章节。
 > **契约先行：先改文档，再改代码。只改代码不改文档，视为未完成。**
+>
+> ⚠️ **效力声明（2026-10-16 重构）**：本手册的技术栈、分层、目录纪律继续有效；但 §2.4（消息通知 Won't）、§8.8（授课仅督导建课、督导五维必填）、§8.9（录音上传/回放仅督导）、评分双源融合口径等条款已被 [`2026-10-16-教学提优重构开发计划.md`](./2026-10-16-教学提优重构开发计划.md) §3–§6 取代。重构 PR 必须同步更新 §8，冲突处以 10.16 计划为准。
 
 ---
 
@@ -240,11 +242,19 @@ evaluation:
     interaction: 0.20
     organization: 0.20
     frontier: 0.00
-  supervisorWeight: 0.5               # α：综合分中督导评分权重
-  agentWeight: 0.5                    # 1−α：综合分中智能体评分权重
+  supervisorWeight: 0.5               # ⚠️ 已废弃（2026-10-16 重构 §6）：督导不计分，聚合层不再使用
+  agentWeight: 0.5                    # ⚠️ 已废弃：计分只按 AI，综合分 = AI 单侧总分
   formulaVersion: "v1"
   minSampleSize: 3                    # 低于该值标记"样本不足"
 ```
+
+> 🔴 **计分口径（2026-10-16 重构 §6，破坏性，以本节为准）**：`composite = AI 单侧总分`，
+> 教师级/课程级 = 各场次 AI 综合分均值；**聚合层排除一切 supervisor 行**（督导只写评语、五维全 NULL，见 §8.8）。
+> `supervisorWeight` / `agentWeight` 已废弃但保留在配置结构中以兼容旧 `config.yaml`；
+> 维度权重（objective 0.30 / content 0.30 / interaction 0.20 / organization 0.20 / frontier 0）与启动校验**不变**。
+> 对外 `weights` 恒为 `{supervisor:0, agent:1}`；`flags` 收敛为 `no_data` + `sample_insufficient`
+> （`sup_only` / `ai_only` / `disjoint` 已失去意义，由 service 层过滤，不再返回）。
+> `sample.alignedCount` 单源口径下退化为「有 AI 计分数据的场次」（等于 `agentCount`）。
 
 - 环境变量优先级高于 yaml，键名前缀 `AIJIAOXUE_`（viper `AutomaticEnv` + `SetEnvKeyReplacer`）；
   **新增配置键必须在 `config.Load` 中 `SetDefault` 或 `BindEnv`**，否则 `AutomaticEnv` 发现的键不在 `AllKeys()` 中，`Unmarshal` 会静默跳过（`internal/config/config.go:207-213` 有注释说明）；
@@ -502,6 +512,10 @@ type PlanItem struct {
 ### 8.8 授课记录与评价聚合（Sprint 2.1，已实现，14 条）
 
 > 契约细节与示例响应见 [`Sprint2-3-教学评价与提优-开发计划.md`](./Sprint2-3-教学评价与提优-开发计划.md) §4.1 / §4.2。
+
+> 🔴 **2026-10-16 重构口径（§6）**：`evaluations` 聚合**只按 AI**；督导行改为「纯评语、五维全 NULL、`total_score` NULL」
+> （B8 督导不打分）。因此 `supervisorScores[]` 的各维度与 `totalScore` 恒为 `null`，`compositeScore`/`agentScore` 为 AI 单侧分，
+> `supervisorScore` 在聚合响应中恒为 `null`，`weights` 恒为 `{supervisor:0, agent:1}`。评分口径详见 §6 配置说明。
 
 | 方法 路径 | 权限 | 说明 |
 |-----------|------|------|
@@ -851,6 +865,13 @@ HTTP 请求
 | V4 | `4_transcripts_content_default` | `transcripts.content` 补 `DEFAULT ('')`，避开 `STRICT_TRANS_TABLES` 下的 1364 |
 | V5 | `5_evaluation_drafts` | `evaluation_drafts`（督导草稿箱，`uk_draft` 一人一场次一份） |
 | V6 | `6_transcripts_engine_width` | `transcripts.engine` / `engine_version` 放宽到 `VARCHAR(64)`（真实模型名 34 字符触发 1406，见 §16） |
+| V7 | `7_evaluations_ai_model_version_width` | `evaluations.ai_model_version` 放宽到 `VARCHAR(64)` |
+| V8 | `8_ai_tasks_and_reports` | `ai_tasks` + `teacher_ai_reports`（D3，与 RAG 方案 §4.1 一致；知识库表顺延 V13+） |
+| V9 | `9_teaching_reflections` | `teaching_reflections`（N5 教学反思，教师私有） |
+| V10 | `10_improvement_items` | `improvement_items`（N4 简化版待改进清单，三态 open→done_self→closed） |
+| V11 | `11_user_notifications` | `user_notifications`（B12 站内信，仅 supervisor_comment / ai_issue） |
+| V12 | `12_course_timetable_and_created_by` | `course_timetable`（B11 最小课表）+ `teaching_sessions.created_by`（建课人） |
+| V13+ | `knowledge_documents` / `knowledge_chunks` | RAG 知识库表，**顺延本轮不建**（见 10.16 计划 §3.2） |
 
 - 🔴 **迁移文件命名**：`<版本>_<名称>.up.sql` / `.down.sql`（如 `2_teaching_sessions_and_evaluations.up.sql`）。
   Flyway 风格 `V2__xxx.up.sql` **不被 golang-migrate 识别**，会让 `migrate up` 报 `first .: file does not exist`——禁止使用；

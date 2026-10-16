@@ -313,7 +313,7 @@ func (s *teacherScoreService) TeacherEvaluations(
 			CourseCode:            row.CourseCode,
 			CourseName:            row.CourseName,
 			Status:                row.Status,
-			CompositeScore:        round2Ptr(scoring.SessionComposite(sessionScoreFromDim(row), weights, s.cfg.SupervisorWeight)),
+			CompositeScore:        round2Ptr(scoring.SessionComposite(sessionScoreFromDim(row), weights, 0)),
 			SupervisorEvaluations: []dto.EvaluationDTO{},
 		}
 		var supSum float64
@@ -342,19 +342,14 @@ func (s *teacherScoreService) TeacherEvaluations(
 	return dto.NewPageResult(items, int64(total), page, pageSize), nil
 }
 
-// sessionScoreFromDim 把一行场次维度均分映射为 scoring.SessionScore（双侧可缺）。
-// 聚合与「历次评价时间线」共用，保证同一场次的分数口径完全一致。
+// sessionScoreFromDim 把一行场次维度均分映射为 scoring.SessionScore。
+//
+// 🔴 2026-10-16 重构（计划 §6）：计分**只按 AI**，聚合层排除一切 supervisor 行。
+// 督导自本轮起只写评语（五维全 NULL，见 §3.3），其分数不进入任何聚合口径，
+// 故这里**只映射 agent 侧**；督导意见作为独立「督导观察」模块另行读取（ListBySession）。
+// 聚合与「历次评价时间线」共用本函数，保证同一场次的分数口径完全一致。
 func sessionScoreFromDim(row repository.SessionDimRow) scoring.SessionScore {
 	item := scoring.SessionScore{SessionID: row.SessionID, CourseID: row.CourseID}
-	if row.HasSupervisor {
-		item.Supervisor = &scoring.DimensionScores{
-			Objective:    row.SupObjective,
-			Content:      row.SupContent,
-			Interaction:  row.SupInteraction,
-			Organization: row.SupOrganization,
-			Frontier:     row.SupFrontier,
-		}
-	}
 	if row.HasAgent {
 		item.Agent = &scoring.DimensionScores{
 			Objective:    row.AiObjective,
@@ -369,12 +364,15 @@ func sessionScoreFromDim(row repository.SessionDimRow) scoring.SessionScore {
 
 // aggregate 是全部聚合的唯一路径：仓储行 → scoring.SessionScore → Aggregate。
 // 任何新增的评分视图都必须经过它，禁止另写聚合公式。
+//
+// 🔴 2026-10-16 重构（计划 §6）：计分只按 AI，α（supervisorWeight）已废弃，
+// 故传 alpha=0；因 sessionScoreFromDim 只填 agent 侧，融合结果恒等于 AI 单侧分。
 func (s *teacherScoreService) aggregate(rows []repository.SessionDimRow) scoring.Summary {
 	items := make([]scoring.SessionScore, 0, len(rows))
 	for _, row := range rows {
 		items = append(items, sessionScoreFromDim(row))
 	}
-	return scoring.Aggregate(items, s.cfg.ScoringWeights(), s.cfg.SupervisorWeight)
+	return scoring.Aggregate(items, s.cfg.ScoringWeights(), 0)
 }
 
 // toScoreSummary 把纯函数结果映射为 DTO：分数保留两位小数，
@@ -393,12 +391,9 @@ func (s *teacherScoreService) toScoreSummary(sum scoring.Summary) dto.ScoreSumma
 		})
 	}
 
-	flags := sum.Flags
+	flags := normalizeScoreFlags(sum.Flags)
 	if sum.Sample.EvaluatedCount < s.cfg.MinSampleSize {
 		flags = append(flags, scoring.FlagSampleInsufficient)
-	}
-	if flags == nil {
-		flags = []string{}
 	}
 
 	return dto.ScoreSummary{
@@ -407,17 +402,33 @@ func (s *teacherScoreService) toScoreSummary(sum scoring.Summary) dto.ScoreSumma
 		AgentScore:      round2Ptr(sum.Agent),
 		Dimensions:      dims,
 		Sample: dto.SampleDTO{
-			SessionCount:     sum.Sample.SessionCount,
-			EvaluatedCount:   sum.Sample.EvaluatedCount,
-			SupervisorCount:  sum.Sample.SupervisorCount,
-			AgentCount:       sum.Sample.AgentCount,
-			AlignedCount:     sum.Sample.AlignedCount,
+			SessionCount:    sum.Sample.SessionCount,
+			EvaluatedCount:  sum.Sample.EvaluatedCount,
+			SupervisorCount: sum.Sample.SupervisorCount,
+			AgentCount:      sum.Sample.AgentCount,
+			// 单源口径（计划 §6）：督导不再计分，「双侧对齐」概念退化为「有 AI 计分数据的场次」。
+			AlignedCount:     sum.Sample.AgentCount,
 			SampleSufficient: sum.Sample.EvaluatedCount >= s.cfg.MinSampleSize,
 		},
 		Flags:          flags,
-		Weights:        dto.ScoreWeights{Supervisor: s.cfg.SupervisorWeight, Agent: s.cfg.AgentWeight},
+		Weights:        dto.ScoreWeights{Supervisor: 0, Agent: 1},
 		FormulaVersion: s.cfg.FormulaVersion,
 	}
+}
+
+// normalizeScoreFlags 收敛对外的口径标记。
+//
+// 🔴 2026-10-16 重构（计划 §6）：计分只按 AI，聚合层排除 supervisor 行，
+// 因此 scoring 侧产出的 sup_only / ai_only / disjoint 已失去意义（「只有 AI」是常态），
+// 对外一律不返回；只保留 no_data，随后由 sample_insufficient 补样本不足提示。
+func normalizeScoreFlags(flags []string) []string {
+	out := make([]string, 0, len(flags))
+	for _, f := range flags {
+		if f == scoring.FlagNoData {
+			out = append(out, f)
+		}
+	}
+	return out
 }
 
 // resolveSemester 解析学期参数：缺省取当前学期，未知学期返回 40001（§2.5.6）。

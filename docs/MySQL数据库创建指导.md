@@ -1,8 +1,8 @@
-# MySQL 数据库创建指导文档 — aijiaoxue（Sprint 1 基线 + Sprint 2 增量，迁移至 V6）
+# MySQL 数据库创建指导文档 — aijiaoxue（Sprint 1 基线 + Sprint 2 增量，迁移至 V12）
 
 > **文档用途**：指导完成「爱教学」后端数据库的创建、建表与种子数据初始化，并给出各用户故事的验证 SQL，确保**基础数据链路打通**（数据库 → GORM → API → 前端页面）。
 > **DDL 事实源**：**本文件不复制表 DDL**——基线表见 `backend/database/schema.sql`，增量表见 `backend/migrations/`（表清单见 §4，迁移清单见 §9）。
-> **配套文档**：后端 [`backend_AGENTS.md`](./backend_AGENTS.md)（Go + Gin 编码规范与接口契约）；Sprint 2/3 的评分体系、评分聚合 SQL 与接口契约以 [`Sprint2-3-教学评价与提优-开发计划.md`](./Sprint2-3-教学评价与提优-开发计划.md) §2/§3 为准。
+> **配套文档**：后端 [`backend_AGENTS.md`](./backend_AGENTS.md)（Go + Gin 编码规范与接口契约）；评分体系、聚合口径与接口契约以 [`2026-10-16-教学提优重构开发计划.md`](./2026-10-16-教学提优重构开发计划.md) §3/§6 为准（2026-10-16 重构后 Sprint 旧计划已冻结，不再作为口径依据）；新表（V8 起）见 10.16 计划 §3.2。
 > **执行环境**：MySQL 8.0+（依赖 `utf8mb4_0900_ai_ci` 排序规则，5.7 不适用）、任意 MySQL 客户端（CLI / Navicat / DataGrip 均可）。
 
 ---
@@ -65,7 +65,7 @@ erDiagram
     teaching_sessions ||--o{ evaluation_drafts : "评估草稿"
 ```
 
-共 **12 张表、3 个角色**，5 层数据关系：**组织**（departments ↔ users）→ **教学**（courses + course_classes）→ **质量**（resources / supervision_plans）→ **课堂评价**（teaching_sessions → evaluations / evaluation_drafts）→ **音频链路**（recordings → transcripts / recording_playback_logs）。Sprint 1 的 6 张存量表结构未变，Sprint 2 起只新增表。表清单见 §4，迁移清单见 §9。
+共 **19 张表、3 个角色**，6 层数据关系：**组织**（departments ↔ users）→ **教学**（courses + course_classes）→ **质量**（resources / supervision_plans）→ **课堂评价**（teaching_sessions → evaluations / evaluation_drafts）→ **音频链路**（recordings → transcripts / recording_playback_logs）→ **提优闭环（2026-10-16 重构）**（ai_tasks / teacher_ai_reports → teaching_reflections / improvement_items / user_notifications / course_timetable）。Sprint 1 的 6 张存量表结构未变，Sprint 2 起只新增表。表清单见 §4，迁移清单见 §9。
 
 > 图中只画外键约束存在的关系（`teaching_sessions.class_id`、`evaluations.evaluator_id`、`evaluation_drafts.supervisor_id` 无外键，不参与画线）。
 
@@ -73,7 +73,7 @@ erDiagram
 
 > **本文件不复制表 DDL**，避免与代码双源漂移。事实源是代码：
 > - **基线表（6 张）**：`backend/database/schema.sql`，全部 `CREATE TABLE IF NOT EXISTS`，幂等可重复执行；
-> - **增量表（6 张）**：`backend/migrations/*.up.sql`，由 golang-migrate 执行，脚本经 `backend/migrations/migrations.go` 以 `embed` 打包；
+> - **增量表（13 张）**：`backend/migrations/*.up.sql`，由 golang-migrate 执行，脚本经 `backend/migrations/migrations.go` 以 `embed` 打包；
 > - **改表流程**：新增一个迁移版本（`.up.sql` + `.down.sql`）并同步 `backend/internal/model/`，**禁止 GORM `AutoMigrate`**。
 
 | # | 表 | 用途 | 建表位置 |
@@ -89,7 +89,14 @@ erDiagram
 | 9 | `recordings` | 课堂录音 | `backend/migrations/3_recordings_and_transcripts.up.sql` |
 | 10 | `transcripts` | 课堂转写（异步任务产物） | `backend/migrations/3_recordings_and_transcripts.up.sql` |
 | 11 | `recording_playback_logs` | 录音播放审计日志 | `backend/migrations/3_recordings_and_transcripts.up.sql` |
-| 12 | `evaluation_drafts` | 督导评估草稿（未生效的私人副本） | `backend/migrations/5_evaluation_drafts.up.sql` |
+| 12 | `evaluation_drafts` | 督导评估草稿（未生效的私人副本；2026-10-16 起停用，入口下线，接口过渡期返回空） | `backend/migrations/5_evaluation_drafts.up.sql` |
+| 13 | `ai_tasks` | AI 任务（D3：可观测、可重试、幂等） | `backend/migrations/8_ai_tasks_and_reports.up.sql` |
+| 14 | `teacher_ai_reports` | 教师级 AI 综合报告 | `backend/migrations/8_ai_tasks_and_reports.up.sql` |
+| 15 | `teaching_reflections` | 教学反思（N5，教师私有） | `backend/migrations/9_teaching_reflections.up.sql` |
+| 16 | `improvement_items` | 待改进清单（N4，三态 open/done_self/closed） | `backend/migrations/10_improvement_items.up.sql` |
+| 17 | `user_notifications` | 站内信（B12） | `backend/migrations/11_user_notifications.up.sql` |
+| 18 | `course_timetable` | 最小课表（B11，仅下拉用） | `backend/migrations/12_course_timetable_and_created_by.up.sql` |
+| 19 | `teaching_sessions.created_by` | 授课记录建课人（V12 `ALTER TABLE`，非独立表） | `backend/migrations/12_course_timetable_and_created_by.up.sql` |
 
 **关键约束（选摘，字段级定义以脚本为准）**：
 
@@ -132,7 +139,7 @@ make seed                 # = go run ./cmd/seed -config config.yaml，用 bcrypt
 | `resources` | 6 | c1×3、c2 / c3 / c5 各 1 |
 | `supervision_plans` | 7 | 3 `completed` + 4 `planned`（含 `CURDATE()` 当日计划，供"今日待评"演示） |
 | `teaching_sessions` | 14 | 覆盖 4 位教师（李明/张华/刘洋/赵磊）、6 门课程，全部 `evaluated` |
-| `evaluations` | 28 | 14 条督导（`evaluator_type='supervisor'`）+ 14 条智能体（`'agent'`），两侧五维齐全 |
+| `evaluations` | 28 | 14 条督导观察（`evaluator_type='supervisor'`，**五维全 NULL、只写评语**，B8 起不计分）+ 14 条智能体评价（`'agent'`，五维齐全，**本轮唯一计分来源**） |
 | `evaluation_drafts` | 0 | 草稿是督导运行期产生的私人副本，不预置 |
 
 ### 5.1 密码哈希处理（重要）
@@ -326,7 +333,7 @@ func (Course) TableName() string { return "courses" }
 > **Sprint 2 起的新表以 `migrations/` 下的迁移脚本为唯一事实源**，`schema.sql` 不再重复维护它们。
 > 初始化流程见 `backend/scripts/init_db.sh`：`schema.sql → migrate up → seed.sql → cmd/seed`。
 
-**迁移清单（`backend/migrations/`，共 6 个版本，最新 V6）**：
+**迁移清单（`backend/migrations/`，共 12 个版本，最新 V12）**：
 
 | 版本 | 文件（`.up.sql` / `.down.sql`） | 变更 |
 |------|------|------|
@@ -336,6 +343,12 @@ func (Course) TableName() string { return "courses" }
 | 4 | `4_transcripts_content_default` | `ALTER transcripts.content` 补 `DEFAULT ('')`，避免绕过 GORM 的写入在 `STRICT_TRANS_TABLES` 下触发 1364 |
 | 5 | `5_evaluation_drafts` | 新建 `evaluation_drafts`（`uk_draft(session_id, supervisor_id)`） |
 | 6 | `6_transcripts_engine_width` | `ALTER transcripts.engine` / `engine_version` 放宽到 `VARCHAR(64)`——原 `VARCHAR(32)` 装不下百炼真实模型名 `qwen-audio-3.1-asr-flash-filetrans`（34 字符），写入触发 1406 并回滚 |
+| 7 | `7_evaluations_ai_model_version_width` | `ALTER evaluations.ai_model_version` 放宽到 `VARCHAR(64)` |
+| 8 | `8_ai_tasks_and_reports` | 新建 `ai_tasks`（`uk_ai_task(kind,ref_type,ref_id)` 幂等）+ `teacher_ai_reports`（`uk_ai_report(teacher_id,semester,course_id)`）；与 RAG 方案 §4.1 一致 |
+| 9 | `9_teaching_reflections` | 新建 `teaching_reflections`（N5 教学反思） |
+| 10 | `10_improvement_items` | 新建 `improvement_items`（N4 待改进清单，`status ENUM(open,done_self,closed)`） |
+| 11 | `11_user_notifications` | 新建 `user_notifications`（B12 站内信，`type ENUM(supervisor_comment,ai_issue)`） |
+| 12 | `12_course_timetable_and_created_by` | 新建 `course_timetable`（B11）；`ALTER teaching_sessions ADD created_by`（建课人） |
 
 > 查看当前库已应用的版本：`go run ./cmd/migrate -config config.yaml version`（`make migrate-version`）。
 
