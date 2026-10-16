@@ -30,17 +30,23 @@ type sessionService struct {
 	courses  repository.CourseRepository
 	users    repository.UserRepository
 	cfg      config.EvaluationConfig
+	notifier Notifier
 }
 
-// NewSessionService 构造授课记录服务。
+// NewSessionService 构造授课记录服务。notifier 可选（站内信副作用），测试可不传。
 func NewSessionService(
 	sessions repository.SessionRepository,
 	evals repository.EvaluationRepository,
 	courses repository.CourseRepository,
 	users repository.UserRepository,
 	cfg config.EvaluationConfig,
+	notifier ...Notifier,
 ) SessionService {
-	return &sessionService{sessions: sessions, evals: evals, courses: courses, users: users, cfg: cfg}
+	svc := &sessionService{sessions: sessions, evals: evals, courses: courses, users: users, cfg: cfg}
+	if len(notifier) > 0 {
+		svc.notifier = notifier[0]
+	}
+	return svc
 }
 
 // Create 由督导创建授课记录：评价的落点（S6.1）。
@@ -273,6 +279,10 @@ func (s *sessionService) SubmitSupervisorObservation(
 	}
 	if err := s.evals.Upsert(ctx, record); err != nil {
 		return nil, errcode.Wrap(errcode.Internal, "保存督导观察失败", err)
+	}
+	// B12：督导评语 → 站内信通知授课教师（副作用，失败不影响主流程）。
+	if s.notifier != nil {
+		s.notifier.NotifySupervisorComment(ctx, sessionID)
 	}
 
 	rows, err := s.evals.ListBySession(ctx, sessionID)

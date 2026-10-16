@@ -304,6 +304,29 @@ want "教师查他人 AI 观察 40302"       "40302" "$(req "$BASE/sessions/4/ai
 want "教师重试 AI 任务 40301"         "40301" "$(req -X POST "$BASE/ai-tasks/$AI_TASK_ID/retry" "${AUTH_T[@]}")" "d['code']"
 want "AI 任务不存在 40401"            "40401" "$(req "$BASE/ai-tasks/999999" "${AUTH_S[@]}")" "d['code']"
 
+echo
+echo "${c_dim}== 14. 提优闭环：清单/反思/站内信（N4/N5/B12）==${c_reset}"
+IM="$(req -X POST "$BASE/improvement-items" "${AUTH_T[@]}" -H 'Content-Type: application/json' \
+  -d '{"title":"增加课堂互动","sessionId":1,"source":"self"}')"
+want "教师创建改进项成功"               "0"         "$IM" "d['code']"
+IM_ID="$(json "$IM" "d['data']['id']")"
+want "改进项初始状态=open"              "open"      "$IM" "d['data']['status']"
+want "未自评先关闭返回 40002"           "40002"     "$(req -X PUT "$BASE/improvement-items/$IM_ID/close" "${AUTH_S[@]}" -H 'Content-Type: application/json' -d '{}')" "d['code']"
+want "教师自评完成=done_self"           "done_self" "$(req -X PUT "$BASE/improvement-items/$IM_ID/complete" "${AUTH_T[@]}" -H 'Content-Type: application/json' -d '{"doneNote":"已改进"}')" "d['data']['status']"
+want "督导确认关闭=closed"              "closed"    "$(req -X PUT "$BASE/improvement-items/$IM_ID/close" "${AUTH_S[@]}" -H 'Content-Type: application/json' -d '{}')" "d['data']['status']"
+want "主任访问清单返回 40301"           "40301"     "$(req "$BASE/improvement-items" "${AUTH_D[@]}")" "d['code']"
+want "教师创建反思成功"                 "0"         "$(req -X POST "$BASE/teaching-reflections" "${AUTH_T[@]}" -H 'Content-Type: application/json' -d '{"sessionId":1,"content":"反思内容"}')" "d['code']"
+want "教师反思列表非空"                 "True"      "$(req "$BASE/teaching-reflections" "${AUTH_T[@]}")" "len(d['data'])>0"
+want "督导提交观察成功（站内信前置）"   "0"         "$(req -X PUT "$BASE/sessions/1/supervisor-observation" "${AUTH_S[@]}" -H 'Content-Type: application/json' -d '{"comment":"站内信测试"}')" "d['code']"
+want "教师收到站内信"                   "True"      "$(req "$BASE/notifications" "${AUTH_T[@]}")" "d['data']['total']>0"
+want "站内信全部已读成功"               "0"         "$(req -X PUT "$BASE/notifications/read-all" "${AUTH_T[@]}")" "d['code']"
+want "全部已读后未读数=0"               "0"         "$(req "$BASE/notifications" "${AUTH_T[@]}")" "d['data']['unread']"
+
+# 清理本轮提优闭环新增数据，保持种子纯净
+mysql -h 127.0.0.1 -P "${MYSQL_PORT:-3306}" -u aijiaoxue -paijiaoxue_dev aijiaoxue \
+  -e "DELETE FROM improvement_items; DELETE FROM teaching_reflections; DELETE FROM user_notifications; DELETE FROM ai_tasks;" >/dev/null 2>&1 \
+  && echo "${c_dim}已清理提优闭环新增数据${c_reset}"
+
 rm -f "$TMPFILE"
 
 # 清理本次验收新增的课程，保持种子数据纯净

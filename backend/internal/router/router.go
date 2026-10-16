@@ -34,6 +34,9 @@ func New(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) (*gin.Engine, se
 	recordingRepo := repository.NewRecordingRepository(db)
 	draftRepo := repository.NewDraftRepository(db)
 	aiTaskRepo := repository.NewAiTaskRepository(db)
+	improvementRepo := repository.NewImprovementRepository(db)
+	reflectionRepo := repository.NewReflectionRepository(db)
+	notificationRepo := repository.NewNotificationRepository(db)
 
 	authSvc := service.NewAuthService(userRepo, jwt)
 	courseSvc := service.NewCourseService(courseRepo, userRepo)
@@ -41,7 +44,10 @@ func New(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) (*gin.Engine, se
 	supervisionSvc := service.NewSupervisionService(supervisionRepo)
 	dashboardSvc := service.NewDashboardService(courseRepo, userRepo, resourceRepo, supervisionRepo, draftRepo, sessionRepo)
 	dictSvc := service.NewDictService(userRepo)
-	sessionSvc := service.NewSessionService(sessionRepo, evaluationRepo, courseRepo, userRepo, cfg.Evaluation)
+	notificationSvc := service.NewNotificationService(notificationRepo, sessionRepo)
+	sessionSvc := service.NewSessionService(sessionRepo, evaluationRepo, courseRepo, userRepo, cfg.Evaluation, notificationSvc)
+	improvementSvc := service.NewImprovementService(improvementRepo)
+	reflectionSvc := service.NewReflectionService(reflectionRepo)
 	teacherScoreSvc := service.NewTeacherScoreService(userRepo, courseRepo, evaluationRepo, cfg.Evaluation)
 	// ⚠️ 不能写 Transcriber(asr.NewClient(...))：把 nil 的 *asr.Client 装进接口会得到
 	// 非 nil 接口（holds-nil-pointer），service 里的 `s.transcriber == nil` 判断会失效，
@@ -76,6 +82,9 @@ func New(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) (*gin.Engine, se
 	teacherScoreH := handler.NewTeacherScoreHandler(teacherScoreSvc)
 	recordingH := handler.NewRecordingHandler(recordingSvc)
 	aiTaskH := handler.NewAiTaskHandler(aiTaskSvc)
+	improvementH := handler.NewImprovementHandler(improvementSvc)
+	reflectionH := handler.NewReflectionHandler(reflectionSvc)
+	notificationH := handler.NewNotificationHandler(notificationSvc)
 
 	gin.SetMode(cfg.Server.Mode)
 	r := gin.New()
@@ -119,6 +128,20 @@ func New(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) (*gin.Engine, se
 	authed.GET("/sessions/:id/ai-observation", aiTaskH.Observation)
 	authed.POST("/sessions/:id/ai-observation/analyze", aiTaskH.Analyze)
 	authed.GET("/ai-tasks/:id", aiTaskH.TaskStatus)
+
+	// —— 提优闭环（2026-10-16 重构 N4/N5/B12）：清单 / 反思 / 站内信，角色与归属在 service 层判定 ——
+	authed.GET("/improvement-items", improvementH.List)
+	authed.POST("/improvement-items", improvementH.Create)
+	authed.PUT("/improvement-items/:id", improvementH.Update)
+	authed.PUT("/improvement-items/:id/complete", improvementH.Complete)
+	authed.PUT("/improvement-items/:id/close", improvementH.Close)
+	authed.GET("/teaching-reflections", reflectionH.List)
+	authed.POST("/teaching-reflections", reflectionH.Create)
+	authed.PUT("/teaching-reflections/:id", reflectionH.Update)
+	authed.GET("/notifications", notificationH.List)
+	// 🔴 注册顺序：静态段 /read-all 必须先于参数段 /:id/read。
+	authed.PUT("/notifications/read-all", notificationH.MarkAllRead)
+	authed.PUT("/notifications/:id/read", notificationH.MarkRead)
 
 	authed.Group("", middleware.RequireRoles(service.RoleDirector)).
 		POST("/courses", courseH.Create).

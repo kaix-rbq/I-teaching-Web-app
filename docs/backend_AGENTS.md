@@ -292,14 +292,14 @@ evaluation:
 - `message` 面向用户可读（中文），内部细节写日志不外泄；
 - 实现：`pkg/response.OK(c, data)` / `pkg/response.Fail(c, errcode.Params)`，handler 中**禁止手写 `c.JSON` 拼信封**。
 
-## 8. 接口契约（已注册路由共 40 条）
+## 8. 接口契约（已注册路由共 51 条）
 
 > 计数口径 = `backend/internal/router/router.go` 实际 `r.GET/POST/PUT/DELETE` 注册数，按鉴权分组：
 > 未挂 `Auth` 组 4（`GET /healthz` 根路径 + `GET /api/v1/healthz` + `POST /auth/login` + `GET /recordings/:id/stream`，
 > 最后一条自带 `AuthOrPlaybackTicket`）
-> \+ 登录 20 + director 2 + teacher 2 + supervisor 11 + director/supervisor 1。
+> \+ 登录 31 + director 2 + teacher 2 + supervisor 15 + director/supervisor 1。
 > 下文 §8.1–§8.7 为 Sprint 1 存量，§8.8 为 Sprint 2.1（14 条），§8.9 为 Sprint 2.2 阶段②（4 条），
-> §8.10 为 AI 评析任务链（2026-10-16 重构 D3 / R0.2，4 条）。
+> §8.10 为 AI 评析任务链（D3 / R0.2，4 条），§8.11 为提优闭环（N4/N5/B12，11 条）。
 
 前缀 `/api/v1`。**字段名与前端 `src/types/` 逐字对齐，本节是前后端联调的唯一事实源。**
 
@@ -749,6 +749,26 @@ type AiObservationDTO struct {
 - **S1 输出契约与校验**（RAG §6.2）：维度分 ∈ {1..5,null}；每个非空维度≥1 条能在脱敏转写中定位的引用，
   定位失败即丢弃引用，清空后该维置 `null` 并计入 `evidence.notObservable`（无证据不许给分）；
 - **配置**：`agent.*` 见 §6；API Key 只走环境变量 `AIJIAOXUE_AGENT_API_KEY`，日志只打掩码。
+
+### 8.11 提优闭环：清单 / 反思 / 站内信（2026-10-16 重构 N4/N5/B12，已实现，11 条）
+
+| 方法 路径 | 权限 | 说明 |
+|-----------|------|------|
+| GET `/improvement-items?teacherId=&status=&page=&pageSize=` | teacher（本人）/ supervisor（全部） | 待改进清单分页 |
+| POST `/improvement-items` | teacher | 创建改进项（标题 + 来源 + 关联场次） |
+| PUT `/improvement-items/:id` | teacher（本人） | 改标题 |
+| PUT `/improvement-items/:id/complete` | teacher（本人） | 教师自评完成：`open → done_self` |
+| PUT `/improvement-items/:id/close` | supervisor | 督导确认关闭：`done_self → closed`（未自评 40002） |
+| GET `/teaching-reflections?sessionId=` | teacher（本人）/ supervisor（须带 sessionId） | 教学反思列表（教师私有；督导关闭清单时可读关联反思） |
+| POST `/teaching-reflections` | teacher | 创建反思（内容/计划/下节行动 + 可选 sourceEvalId） |
+| PUT `/teaching-reflections/:id` | teacher（本人） | 修改反思 |
+| GET `/notifications?page=&pageSize=` | 登录 | 本人站内信（含 `unread` 未读数） |
+| PUT `/notifications/read-all` | 登录 | 全部已读（**注册顺序先于 `/:id/read`**） |
+| PUT `/notifications/:id/read` | 登录 | 单条已读（进入详情自动已读） |
+
+- **状态机**：`open → done_self`（教师自评）`→ closed`（督导确认）；**未确认关不掉**（40002）；不打回。
+- **站内信**：只推 `supervisor_comment`（督导提交观察时通知授课教师）与 `ai_issue`；红点收敛到工作台清单与督导任务队列两处。
+- **失败不影响主流程**：通知创建失败只记日志，不阻断观察提交。
 
 ## 9. 中间件规范（`internal/middleware/`）
 
