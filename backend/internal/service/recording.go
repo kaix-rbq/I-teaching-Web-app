@@ -56,6 +56,8 @@ type recordingService struct {
 	scrubber    Scrubber
 	// sem 是并发闸门，容量 = transcription.maxConcurrency，避免同时把多个大文件推进内存。
 	sem chan struct{}
+	// onTranscribed 是转写完成回调（异步入队 AI 评析）；为 nil 时不做任何事。
+	onTranscribed func(sessionID uint64)
 }
 
 func NewRecordingService(
@@ -65,6 +67,7 @@ func NewRecordingService(
 	transcription config.TranscriptionConfig,
 	jwt *jwtutil.Manager,
 	transcriber Transcriber,
+	onTranscribed func(sessionID uint64),
 ) RecordingService {
 	return &recordingService{
 		recordings:    r,
@@ -75,6 +78,7 @@ func NewRecordingService(
 		jwt:           jwt,
 		scrubber:      NewScrubber(transcription.StudentNames),
 		sem:           make(chan struct{}, transcription.Concurrency()),
+		onTranscribed: onTranscribed,
 	}
 }
 
@@ -121,7 +125,7 @@ func (s *recordingService) Upload(ctx context.Context, userID, sessionID uint64,
 		return nil, errcode.Wrap(errcode.Internal, "创建转写任务失败", err)
 	}
 	// 第二个参数必须是录音 id：转写任务靠它取磁盘文件路径。
-	go s.processTranscript(context.Background(), transcript.ID, record.ID)
+	go s.processTranscript(context.Background(), transcript.ID, record.ID, sessionID)
 	return &dto.RecordingDTO{ID: record.ID, OriginalName: record.OriginalName, Format: record.Format, Size: record.Size, DurationSec: record.DurationSec, StreamURL: fmt.Sprintf("/recordings/%d/stream", record.ID)}, nil
 }
 
@@ -203,7 +207,7 @@ func (s *recordingService) Retry(ctx context.Context, role string, deptID, userI
 	if err := s.recordings.UpdateTranscript(ctx, tr.ID, map[string]any{"status": model.TranscriptPending, "error_message": ""}); err != nil {
 		return errcode.Wrap(errcode.Internal, "重试转写失败", err)
 	}
-	go s.processTranscript(context.Background(), tr.ID, tr.RecordingID)
+	go s.processTranscript(context.Background(), tr.ID, tr.RecordingID, tr.SessionID)
 	return nil
 }
 
@@ -226,7 +230,7 @@ func (s *recordingService) RequeueStuck(ctx context.Context) (int, error) {
 			slog.Warn("重排转写任务失败", "transcriptID", tr.ID, "err", err)
 			continue
 		}
-		go s.processTranscript(context.Background(), tr.ID, tr.RecordingID)
+		go s.processTranscript(context.Background(), tr.ID, tr.RecordingID, tr.SessionID)
 		requeued++
 	}
 	return requeued, nil
@@ -236,7 +240,7 @@ func (s *recordingService) RequeueStuck(ctx context.Context) (int, error) {
 //
 // 与督导评分主链路完全解耦（开发计划 §4.4 硬约束）：任何失败只落到
 // transcripts.status='failed' + error_message，绝不向调用方传播，也绝不阻断评估流程。
-func (s *recordingService) processTranscript(parent context.Context, transcriptID, recordingID uint64) {
+func (s *recordingService) processTranscript(parent context.Context, transcriptID, recordingID, sessionID uint64) {
 	ctx, cancel := context.WithTimeout(parent, s.transcription.TimeoutDuration())
 	defer cancel()
 
@@ -329,6 +333,11 @@ func (s *recordingService) processTranscript(parent context.Context, transcriptI
 		"chars", len([]rune(content)),
 		"durationMs", res.DurationMS,
 	)
+
+	// 转写完成 → 异步入队 AI 评析（D3 / R0.2）。回调内自处理错误，绝不阻断转写主流程。
+	if s.onTranscribed != nil {
+		s.onTranscribed(sessionID)
+	}
 }
 
 func transcriptDTO(v *model.Transcript) *dto.TranscriptDTO {

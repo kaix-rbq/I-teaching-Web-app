@@ -284,6 +284,17 @@ want "重复提交幂等覆盖总分不变"       "95"  "$EV2" "d['data']['total
 want "幂等覆盖后评价仍为 1 条"        "1"   "$(req "$BASE/sessions/$SESS_ID/evaluation" "${AUTH_S[@]}")" "len(d['data']['supervisorScores'])"
 want "新增后课程 1 授课记录总数=4"    "4"   "$(req "$BASE/courses/1/sessions" "${AUTH_S[@]}")" "d['data']['total']"
 
+echo
+echo "${c_dim}== 13.1 AI 评析任务链（D3/R0.2，无 Key 时熔断且页面可用）==${c_reset}"
+AN="$(req -X POST "$BASE/sessions/$SESS_ID/ai-observation/analyze" "${AUTH_S[@]}")"
+want "督导入队 AI 评析成功"           "0"     "$AN" "d['code']"
+AI_TASK_ID="$(json "$AN" "d['data']['taskId']")"
+want "AI 观察详情可读（页面不被阻断）" "0"     "$(req "$BASE/sessions/1/ai-observation" "${AUTH_S[@]}")" "d['code']"
+want "AI 任务状态查询可用"            "0"     "$(req "$BASE/ai-tasks/$AI_TASK_ID" "${AUTH_S[@]}")" "d['code']"
+want "教师查他人 AI 观察 40302"       "40302" "$(req "$BASE/sessions/4/ai-observation" "${AUTH_T[@]}")" "d['code']"
+want "教师重试 AI 任务 40301"         "40301" "$(req -X POST "$BASE/ai-tasks/$AI_TASK_ID/retry" "${AUTH_T[@]}")" "d['code']"
+want "AI 任务不存在 40401"            "40401" "$(req "$BASE/ai-tasks/999999" "${AUTH_S[@]}")" "d['code']"
+
 rm -f "$TMPFILE"
 
 # 清理本次验收新增的课程，保持种子数据纯净

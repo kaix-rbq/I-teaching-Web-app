@@ -292,13 +292,14 @@ evaluation:
 - `message` 面向用户可读（中文），内部细节写日志不外泄；
 - 实现：`pkg/response.OK(c, data)` / `pkg/response.Fail(c, errcode.Params)`，handler 中**禁止手写 `c.JSON` 拼信封**。
 
-## 8. 接口契约（已注册路由共 36 条）
+## 8. 接口契约（已注册路由共 40 条）
 
 > 计数口径 = `backend/internal/router/router.go` 实际 `r.GET/POST/PUT/DELETE` 注册数，按鉴权分组：
 > 未挂 `Auth` 组 4（`GET /healthz` 根路径 + `GET /api/v1/healthz` + `POST /auth/login` + `GET /recordings/:id/stream`，
 > 最后一条自带 `AuthOrPlaybackTicket`）
-> \+ 登录 17 + director 2 + teacher 2 + supervisor 10 + director/supervisor 1。
-> 下文 §8.1–§8.7 为 Sprint 1 存量，§8.8 为 Sprint 2.1（14 条），§8.9 为 Sprint 2.2 阶段②（4 条）。
+> \+ 登录 20 + director 2 + teacher 2 + supervisor 11 + director/supervisor 1。
+> 下文 §8.1–§8.7 为 Sprint 1 存量，§8.8 为 Sprint 2.1（14 条），§8.9 为 Sprint 2.2 阶段②（4 条），
+> §8.10 为 AI 评析任务链（2026-10-16 重构 D3 / R0.2，4 条）。
 
 前缀 `/api/v1`。**字段名与前端 `src/types/` 逐字对齐，本节是前后端联调的唯一事实源。**
 
@@ -698,6 +699,54 @@ type TranscriptSegment struct {
 - **进程重启恢复**：启动时 `RequeueStuck` 把遗留的 `pending/running` 转写重新入队（幂等）。
 - **脱敏强制**：写入 `transcripts.content` / `segments` 前必须过 `Scrubber`；
   当前实现为「称谓正则 + 可选词典」，学生名册建立后可替换为 NER 实现，调用点不变。
+
+### 8.10 AI 评析任务链（2026-10-16 重构 D3 / R0.2，已实现，4 条）
+
+> 与督导主流程完全解耦（RAG §1）：任何失败只落 `ai_tasks.status='failed'`，**不影响转写、评分与页面可用性**；
+> AI 引擎未配置时任务记 `failed`（`errorMessage="AI 评析引擎未配置"`），页面照常可用（熔断验收）。
+> AI 产出写入 `evaluations`（`evaluator_type='agent'`），是本轮**唯一计分来源**（§6）。
+
+| 方法 路径 | 权限 | 说明 |
+|-----------|------|------|
+| POST `/sessions/:id/ai-observation/analyze` | 登录（数据裁剪） | 入队 AI 评析（幂等：有未完成任务直接返回同一 `taskId`，不重复建） |
+| GET `/sessions/:id/ai-observation` | 登录（数据裁剪） | AI 观察详情：任务状态 + `observation`（agent 评价行）+ 风险标签 |
+| GET `/ai-tasks/:id` | 登录 | 任务状态查询（`pending/running/done/failed` + `errorMessage`） |
+| POST `/ai-tasks/:id/retry` | supervisor | 复位失败/已完成任务并重新执行 |
+
+```go
+type AiTaskDTO struct {
+    ID           uint64 `json:"id"`
+    Kind         string `json:"kind"`      // session_eval
+    RefType      string `json:"refType"`   // session
+    RefID        uint64 `json:"refId"`
+    Status       string `json:"status"`    // pending|running|done|failed
+    Attempts     int    `json:"attempts"`
+    ErrorMessage string `json:"errorMessage"`
+    CreatedAt    string `json:"createdAt"`
+    UpdatedAt    string `json:"updatedAt"`
+}
+type AiAnalyzeResp struct {
+    TaskID uint64 `json:"taskId"`
+    Status string `json:"status"`
+}
+type AiObservationDTO struct {
+    SessionID    uint64         `json:"sessionId"`
+    TaskID       uint64         `json:"taskId"`
+    Status       string         `json:"status"`       // 无任务时为空串
+    ErrorMessage string         `json:"errorMessage"`
+    Observation  *EvaluationDTO `json:"observation"`  // agent 评价行；未评价为 null
+    Risks        []string       `json:"risks"`        // 高风险标签，仅督导可见（D8）
+}
+```
+
+- **触发**：转写 `done` 后由 recording service 回调异步入队（`EnqueueSessionEval`），不经 HTTP；
+- **幂等**：`uk_ai_task(kind,ref_type,ref_id)` 保证同一场次至多一条任务；重新生成 = 复位 `status='pending'`；
+- **重启恢复**：进程启动时 `ResumeStuck` 把遗留的 `pending/running` 任务重排（幂等）；
+- 🔴 **D8 风险脱敏**：`evidence.riskTags` 仅督导可见；`teacher` 角色请求 `ai-observation` 时
+  `risks` 恒为空数组且 `observation.evidence.riskTags` 被清空——**高风险标签永不进教师端**；
+- **S1 输出契约与校验**（RAG §6.2）：维度分 ∈ {1..5,null}；每个非空维度≥1 条能在脱敏转写中定位的引用，
+  定位失败即丢弃引用，清空后该维置 `null` 并计入 `evidence.notObservable`（无证据不许给分）；
+- **配置**：`agent.*` 见 §6；API Key 只走环境变量 `AIJIAOXUE_AGENT_API_KEY`，日志只打掩码。
 
 ## 9. 中间件规范（`internal/middleware/`）
 

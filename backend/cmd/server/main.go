@@ -54,9 +54,16 @@ func main() {
 		"maxConcurrency", cfg.Transcription.Concurrency(),
 		"diarization", cfg.Transcription.Diarization,
 	)
+	slog.Info("agent config",
+		"enabled", cfg.Agent.Enabled,
+		"llmModel", cfg.Agent.LLMModel,
+		"apiKey", cfg.Agent.MaskedAPIKey(),
+		"maxConcurrency", cfg.Agent.Concurrency(),
+		"promptVersion", cfg.Agent.PromptVersion,
+	)
 
 	jwtManager := jwtutil.New(cfg.JWT.Secret, cfg.JWT.TTLDuration())
-	engine, recordingSvc := router.New(db, cfg, jwtManager)
+	engine, recordingSvc, aiTaskSvc := router.New(db, cfg, jwtManager)
 
 	// 进程重启会把中断的转写永久卡在 running：启动时重新入队（幂等）。
 	recoverCtx, cancelRecover := context.WithTimeout(context.Background(), 10*time.Second)
@@ -64,6 +71,12 @@ func main() {
 		slog.Error("requeue stuck transcripts failed", "error", err)
 	} else if n > 0 {
 		slog.Info("requeued stuck transcripts", "count", n)
+	}
+	// 同理清扫遗留的 AI 任务（pending/running 重新入队，幂等）。
+	if n, err := aiTaskSvc.ResumeStuck(recoverCtx); err != nil {
+		slog.Error("resume stuck ai tasks failed", "error", err)
+	} else if n > 0 {
+		slog.Info("resumed stuck ai tasks", "count", n)
 	}
 	cancelRecover()
 

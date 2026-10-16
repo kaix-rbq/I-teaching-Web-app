@@ -5,6 +5,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
+	"aijiaoxue-api/internal/agent"
 	"aijiaoxue-api/internal/asr"
 	"aijiaoxue-api/internal/config"
 	"aijiaoxue-api/internal/dto"
@@ -21,7 +22,7 @@ import (
 //
 // 同时返回 recordingSvc：进程重启时需要由 main 驱动一次 RequeueStuck
 // （重新入队中断的转写任务）。路由层不承担生命周期副作用，故不在此处自行启动。
-func New(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) (*gin.Engine, service.RecordingService) {
+func New(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) (*gin.Engine, service.RecordingService, service.AiTaskService) {
 	dto.RegisterValidators()
 
 	userRepo := repository.NewUserRepository(db)
@@ -32,6 +33,7 @@ func New(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) (*gin.Engine, se
 	evaluationRepo := repository.NewEvaluationRepository(db)
 	recordingRepo := repository.NewRecordingRepository(db)
 	draftRepo := repository.NewDraftRepository(db)
+	aiTaskRepo := repository.NewAiTaskRepository(db)
 
 	authSvc := service.NewAuthService(userRepo, jwt)
 	courseSvc := service.NewCourseService(courseRepo, userRepo)
@@ -48,10 +50,20 @@ func New(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) (*gin.Engine, se
 	if client := asr.NewClient(cfg.Transcription); client != nil {
 		transcriber = client
 	}
+	// 同理：agent.NewClient 未配置时返回 nil *Client，直接装进接口同样会 holds-nil-pointer。
+	var sessionAnalyzer agent.SessionAnalyzer
+	if client := agent.NewClient(cfg.Agent); client != nil {
+		sessionAnalyzer = client
+	}
+	aiTaskSvc := service.NewAiTaskService(
+		aiTaskRepo, sessionRepo, evaluationRepo, recordingRepo,
+		sessionAnalyzer, cfg.Agent, cfg.Evaluation,
+	)
 	recordingSvc := service.NewRecordingService(
 		recordingRepo, sessionRepo,
 		cfg.Upload, cfg.Transcription,
 		jwt, transcriber,
+		aiTaskSvc.EnqueueSessionEval,
 	)
 	draftSvc := service.NewDraftService(draftRepo, sessionSvc)
 
@@ -65,6 +77,7 @@ func New(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) (*gin.Engine, se
 	teacherScoreH := handler.NewTeacherScoreHandler(teacherScoreSvc)
 	recordingH := handler.NewRecordingHandler(recordingSvc)
 	draftH := handler.NewDraftHandler(draftSvc)
+	aiTaskH := handler.NewAiTaskHandler(aiTaskSvc)
 
 	gin.SetMode(cfg.Server.Mode)
 	r := gin.New()
@@ -104,6 +117,11 @@ func New(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) (*gin.Engine, se
 	authed.GET("/teachers/:id/evaluation-summary", teacherScoreH.TeacherSummary)
 	authed.GET("/teachers/:id/evaluations", teacherScoreH.TeacherEvaluations)
 
+	// —— AI 观察（D3 / R0.2）：详情与入队；数据裁剪在 service 层（D8 教师侧风险脱敏）——
+	authed.GET("/sessions/:id/ai-observation", aiTaskH.Observation)
+	authed.POST("/sessions/:id/ai-observation/analyze", aiTaskH.Analyze)
+	authed.GET("/ai-tasks/:id", aiTaskH.TaskStatus)
+
 	authed.Group("", middleware.RequireRoles(service.RoleDirector)).
 		POST("/courses", courseH.Create).
 		PUT("/courses/:id", courseH.Update)
@@ -118,6 +136,7 @@ func New(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) (*gin.Engine, se
 		POST("/sessions", sessionH.Create).
 		PUT("/sessions/:id/supervisor-evaluation", sessionH.Submit).
 		POST("/sessions/:id/recording", recordingH.Upload).
+		POST("/ai-tasks/:id/retry", aiTaskH.Retry).
 		GET("/sessions/:id/draft", draftH.GetBySession).
 		PUT("/sessions/:id/draft", draftH.Save).
 		GET("/drafts", draftH.List).
@@ -127,5 +146,5 @@ func New(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) (*gin.Engine, se
 	authed.Group("", middleware.RequireRoles(service.RoleDirector, service.RoleSupervisor)).
 		GET("/teacher-scores", teacherScoreH.List)
 
-	return r, recordingSvc
+	return r, recordingSvc, aiTaskSvc
 }

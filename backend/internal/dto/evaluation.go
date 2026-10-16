@@ -110,6 +110,8 @@ type EvidenceDTO struct {
 	Dimensions    map[string]EvidenceDimension `json:"dimensions"`
 	NotObservable []string                     `json:"notObservable"`
 	PromptVersion string                       `json:"promptVersion"`
+	// RiskTags 是高风险标签，仅督导可见（D8）；教师侧由 service 层清空，绝不外泄。
+	RiskTags []string `json:"riskTags,omitempty"`
 }
 
 // EvidenceDimension 是单个维度的证据：置信度 + 可定位的转写引用。
@@ -275,4 +277,35 @@ type TeacherEvaluationTimelineItem struct {
 	// 结构化评语明细（督导可能多人；阶段一智能体至多一条）
 	SupervisorEvaluations []EvaluationDTO `json:"supervisorEvaluations"`
 	AgentEvaluation       *EvaluationDTO  `json:"agentEvaluation"`
+}
+
+// AiTaskDTO 是 GET /ai-tasks/:id 的响应：任务状态查询（D3）。
+type AiTaskDTO struct {
+	ID           uint64 `json:"id"`
+	Kind         string `json:"kind"`
+	RefType      string `json:"refType"`
+	RefID        uint64 `json:"refId"`
+	Status       string `json:"status"` // pending|running|done|failed
+	Attempts     int    `json:"attempts"`
+	ErrorMessage string `json:"errorMessage"`
+	CreatedAt    string `json:"createdAt"`
+	UpdatedAt    string `json:"updatedAt"`
+}
+
+// AiAnalyzeResp 是 POST /sessions/:id/ai-observation/analyze 的响应（幂等返回同一 taskId）。
+type AiAnalyzeResp struct {
+	TaskID uint64 `json:"taskId"`
+	Status string `json:"status"`
+}
+
+// AiObservationDTO 是 GET /sessions/:id/ai-observation 的响应：AI 观察详情（§4.2）。
+// teacher 侧 Risks 恒为空（D8）；未评价时 Observation 为 null，status 供前端轮询。
+type AiObservationDTO struct {
+	SessionID    uint64         `json:"sessionId"`
+	TaskID       uint64         `json:"taskId"`
+	Status       string         `json:"status"` // 无任务时为空串
+	ErrorMessage string         `json:"errorMessage"`
+	Observation  *EvaluationDTO `json:"observation"`
+	// Risks 高风险标签，仅督导可见（D8）。
+	Risks []string `json:"risks"`
 }
