@@ -311,6 +311,8 @@ func (f *fakeSessionRepo) PlanExists(ctx context.Context, planID uint64) (bool, 
 	return f.planExists(ctx, planID)
 }
 
+func (f *fakeSessionRepo) Delete(ctx context.Context, id uint64) error { return nil }
+
 type fakeDraftRepo struct {
 	upsert       func(ctx context.Context, d *model.EvaluationDraft) error
 	getBySession func(ctx context.Context, sessionID, supervisorID uint64) (*model.EvaluationDraft, error)
@@ -400,3 +402,5 @@ func (f *fakeEvalRepo) ListSessionDimRows(
 	}
 	return f.listSessionDimRows(ctx, flt)
 }
+
+func (f *fakeEvalRepo) DeleteBySession(ctx context.Context, sessionID uint64) error { return nil }

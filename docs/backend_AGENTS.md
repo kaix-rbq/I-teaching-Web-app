@@ -292,12 +292,12 @@ evaluation:
 - `message` 面向用户可读（中文），内部细节写日志不外泄；
 - 实现：`pkg/response.OK(c, data)` / `pkg/response.Fail(c, errcode.Params)`，handler 中**禁止手写 `c.JSON` 拼信封**。
 
-## 8. 接口契约（已注册路由共 51 条）
+## 8. 接口契约（已注册路由共 53 条）
 
 > 计数口径 = `backend/internal/router/router.go` 实际 `r.GET/POST/PUT/DELETE` 注册数，按鉴权分组：
 > 未挂 `Auth` 组 4（`GET /healthz` 根路径 + `GET /api/v1/healthz` + `POST /auth/login` + `GET /recordings/:id/stream`，
 > 最后一条自带 `AuthOrPlaybackTicket`）
-> \+ 登录 31 + director 2 + teacher 2 + supervisor 15 + director/supervisor 1。
+> \+ 登录 33 + director 2 + teacher 2 + supervisor 15 + director/supervisor 1。
 > 下文 §8.1–§8.7 为 Sprint 1 存量，§8.8 为 Sprint 2.1（14 条），§8.9 为 Sprint 2.2 阶段②（4 条），
 > §8.10 为 AI 评析任务链（D3 / R0.2，4 条），§8.11 为提优闭环（N4/N5/B12，11 条）。
 
@@ -521,7 +521,8 @@ type PlanItem struct {
 | 方法 路径 | 权限 | 说明 |
 |-----------|------|------|
 | GET `/courses/:id/sessions?semester=&page=&pageSize=` | 登录（数据裁剪） | 课程历史授课记录，含每场双侧评分摘要 |
-| POST `/sessions` | supervisor | 创建授课记录（日期不得晚于今天，`uk_session` 唯一） |
+| POST `/sessions` | teacher（本人课程）/ supervisor（代录） | 创建授课记录（B1；`classId` 必填，日期不得晚于今天，`uk_session` 唯一；落 `created_by`） |
+| DELETE `/sessions/:id` | 该课程任课教师本人 / supervisor | 删课并级联清理录音文件/转写/评价/清单关联（D6，service 层） |
 | GET `/sessions/:id` | 登录（数据裁剪） | 单场次基本信息 |
 | GET `/sessions/:id/evaluation` | 登录（数据裁剪） | 当堂课评估页聚合：场次 + 督导评分 + 智能体参考 + 评语 |
 | PUT `/sessions/:id/supervisor-observation` | supervisor | 提交/覆盖**督导纯评语观察**（B8，幂等；无五维分，至少填一项，否则 40002） |
@@ -654,10 +655,11 @@ type DraftDTO struct {
 
 | 方法 路径 | 权限 | 说明 |
 |-----------|------|------|
-| POST `/sessions/:id/recording` | supervisor | multipart 上传音频（`mp3/wav/m4a`，≤ `upload.maxSize`）；一节课一条主录音，重复上传 40901 |
+| POST `/sessions/:id/recording` | teacher（本人课程）/ supervisor | multipart 上传音频（`mp3/wav/m4a`，≤ `upload.maxSize`）；**覆盖语义**：已有录音则替换文件并重置转写为 `pending` |
+| DELETE `/sessions/:id/recording` | 上传者本人 / supervisor | 删录音：级联删审计+转写+文件+录音行（D6） |
 | GET `/sessions/:id/transcript` | 登录（数据裁剪） | 返回 `{recording, transcript}`；转写未完成时由 `transcript.status` 供前端轮询 |
 | POST `/sessions/:id/transcript/retry` | supervisor | 转写失败后重新入队（`status` 回到 `pending`） |
-| GET `/recordings/:id/stream` | supervisor | 音频流式播放，支持 Range；**额外允许 `?ticket=` 短时票据**（见下） |
+| GET `/recordings/:id/stream` | supervisor 全量 + **上传者本人**（B3） | 音频流式播放，支持 Range；**额外允许 `?ticket=` 短时票据**（见下） |
 
 ```go
 // RecordingDTO —— 阶段②新增 playbackUrl

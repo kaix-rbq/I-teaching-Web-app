@@ -60,6 +60,8 @@ type EvaluationRepository interface {
 	ListBySession(ctx context.Context, sessionID uint64) ([]EvaluationRow, error)
 	ListBySessionIDs(ctx context.Context, sessionIDs []uint64) ([]EvaluationRow, error)
 	ListSessionDimRows(ctx context.Context, f SessionDimFilter) ([]SessionDimRow, error)
+	// DeleteBySession 删除某场次的全部评价（删课级联用）。
+	DeleteBySession(ctx context.Context, sessionID uint64) error
 }
 
 type evaluationRepository struct {
@@ -133,6 +135,11 @@ func (r *evaluationRepository) ListBySessionIDs(ctx context.Context, sessionIDs 
 		return nil, err
 	}
 	return rows, nil
+}
+
+// DeleteBySession 删除某场次的全部评价（删课级联用；含督导观察与 AI 行）。
+func (r *evaluationRepository) DeleteBySession(ctx context.Context, sessionID uint64) error {
+	return r.db.WithContext(ctx).Where("session_id = ?", sessionID).Delete(&model.Evaluation{}).Error
 }
 
 // ListSessionDimRows 是教师级/课程级聚合的数据出口（§2.5.4）。

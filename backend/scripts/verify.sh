@@ -256,17 +256,18 @@ want "时间线未知学期 40001"              "40001"        "$(req "$BASE/tea
 
 echo
 echo "${c_dim}== 13. 督导创建授课记录与评分提交（写操作，S6.1/S6.3）==${c_reset}"
-want "主任创建授课记录返回 40301"     "40301" "$(req -X POST "$BASE/sessions" "${AUTH_D[@]}" -H 'Content-Type: application/json' -d '{"courseId":1,"sessionDate":"2026-09-16","period":"验收节次"}')" "d['code']"
-want "未来日期返回 40002"             "40002" "$(req -X POST "$BASE/sessions" "${AUTH_S[@]}" -H 'Content-Type: application/json' -d '{"courseId":1,"sessionDate":"2099-01-01","period":"1-2 节"}')" "d['code']"
-want "课程不存在返回 40401"           "40401" "$(req -X POST "$BASE/sessions" "${AUTH_S[@]}" -H 'Content-Type: application/json' -d '{"courseId":9999,"sessionDate":"2026-09-16","period":"1-2 节"}')" "d['code']"
-want "同日同节次重复返回 40901"       "40901" "$(req -X POST "$BASE/sessions" "${AUTH_S[@]}" -H 'Content-Type: application/json' -d '{"courseId":1,"sessionDate":"2026-09-12","period":"3-4 节"}')" "d['code']"
+want "主任创建授课记录返回 40301"     "40301" "$(req -X POST "$BASE/sessions" "${AUTH_D[@]}" -H 'Content-Type: application/json' -d '{"courseId":1,"classId":1,"sessionDate":"2026-09-16","period":"验收节次"}')" "d['code']"
+want "缺 classId 返回 40001"           "40001" "$(req -X POST "$BASE/sessions" "${AUTH_S[@]}" -H 'Content-Type: application/json' -d '{"courseId":1,"sessionDate":"2026-09-16","period":"验收节次"}')" "d['code']"
+want "未来日期返回 40002"             "40002" "$(req -X POST "$BASE/sessions" "${AUTH_S[@]}" -H 'Content-Type: application/json' -d '{"courseId":1,"classId":1,"sessionDate":"2099-01-01","period":"1-2 节"}')" "d['code']"
+want "课程不存在返回 40401"           "40401" "$(req -X POST "$BASE/sessions" "${AUTH_S[@]}" -H 'Content-Type: application/json' -d '{"courseId":9999,"classId":1,"sessionDate":"2026-09-16","period":"1-2 节"}')" "d['code']"
 
 SESS="$(req -X POST "$BASE/sessions" "${AUTH_S[@]}" -H 'Content-Type: application/json' \
-  -d '{"courseId":1,"sessionDate":"2026-09-16","period":"验收节次","topic":"验收脚本创建"}')"
+  -d '{"courseId":1,"classId":1,"sessionDate":"2026-09-16","period":"验收节次","topic":"验收脚本创建"}')"
 SESS_ID="$(json "$SESS" "d['data']['id']")"
 want "督导创建授课记录成功"           "0"        "$SESS" "d['code']"
 want "新场次初始状态=scheduled"       "scheduled" "$SESS" "d['data']['status']"
 want "新场次教师随课程落库=李明"      "李明"      "$SESS" "d['data']['teacherName']"
+want "同日同节次重复返回 40901"       "40901" "$(req -X POST "$BASE/sessions" "${AUTH_S[@]}" -H 'Content-Type: application/json' -d '{"courseId":1,"classId":1,"sessionDate":"2026-09-16","period":"验收节次"}')" "d['code']"
 
 EV="$(req -X PUT "$BASE/sessions/$SESS_ID/supervisor-observation" "${AUTH_S[@]}" -H 'Content-Type: application/json' \
   -d '{"comment":"verify.sh 审核意见","highlights":"亮点A","improvements":"主要问题B","suggestions":"改进建议C"}')"
@@ -303,6 +304,26 @@ want "AI 任务状态查询可用"            "0"     "$(req "$BASE/ai-tasks/$AI
 want "教师查他人 AI 观察 40302"       "40302" "$(req "$BASE/sessions/4/ai-observation" "${AUTH_T[@]}")" "d['code']"
 want "教师重试 AI 任务 40301"         "40301" "$(req -X POST "$BASE/ai-tasks/$AI_TASK_ID/retry" "${AUTH_T[@]}")" "d['code']"
 want "AI 任务不存在 40401"            "40401" "$(req "$BASE/ai-tasks/999999" "${AUTH_S[@]}")" "d['code']"
+
+echo
+echo "${c_dim}== 13.2 教师建课/录音覆盖/删除/本人回听（B1/B3/B4/D6/R1.1）==${c_reset}"
+TSESS="$(req -X POST "$BASE/sessions" "${AUTH_T[@]}" -H 'Content-Type: application/json' \
+  -d '{"courseId":1,"classId":2,"sessionDate":"2026-09-11","period":"1-2 节","topic":"教师自建"}')"
+want "教师为本人课程建课成功"           "0"     "$TSESS" "d['code']"
+TSESS_ID="$(json "$TSESS" "d['data']['id']")"
+want "教师为他人课程建课 40302"         "40302" "$(req -X POST "$BASE/sessions" "${AUTH_T[@]}" -H 'Content-Type: application/json' -d '{"courseId":2,"classId":3,"sessionDate":"2026-09-11","period":"1-2 节"}')" "d['code']"
+
+TMPAUDIO="$(mktemp /tmp/aijiaoxue-verify-XXXXXX.mp3)"
+printf 'ID3\003\000\000\000\000\000\000\000\000\000\000' > "$TMPAUDIO"
+RP="$(req -X POST "$BASE/sessions/$TSESS_ID/recording" "${AUTH_T[@]}" -F "file=@$TMPAUDIO")"
+want "教师上传录音成功"                 "0"     "$RP" "d['code']"
+RP2="$(req -X POST "$BASE/sessions/$TSESS_ID/recording" "${AUTH_T[@]}" -F "file=@$TMPAUDIO")"
+want "重复上传为覆盖语义（非 409）"      "0"     "$RP2" "d['code']"
+want "上传者本人可回听（playbackUrl 非空）" "True" "$(req "$BASE/sessions/$TSESS_ID/transcript" "${AUTH_T[@]}")" "len(d['data']['recording']['playbackUrl'])>0"
+want "教师删除本人录音成功"             "0"     "$(req -X DELETE "$BASE/sessions/$TSESS_ID/recording" "${AUTH_T[@]}")" "d['code']"
+want "教师删除本人授课记录成功"         "0"     "$(req -X DELETE "$BASE/sessions/$TSESS_ID" "${AUTH_T[@]}")" "d['code']"
+want "删除后场次不存在 40401"           "40401" "$(req "$BASE/sessions/$TSESS_ID" "${AUTH_T[@]}")" "d['code']"
+rm -f "$TMPAUDIO"
 
 echo
 echo "${c_dim}== 14. 提优闭环：清单/反思/站内信（N4/N5/B12）==${c_reset}"

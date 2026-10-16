@@ -45,7 +45,7 @@ func New(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) (*gin.Engine, se
 	dashboardSvc := service.NewDashboardService(courseRepo, userRepo, resourceRepo, supervisionRepo, draftRepo, sessionRepo)
 	dictSvc := service.NewDictService(userRepo)
 	notificationSvc := service.NewNotificationService(notificationRepo, sessionRepo)
-	sessionSvc := service.NewSessionService(sessionRepo, evaluationRepo, courseRepo, userRepo, cfg.Evaluation, notificationSvc)
+	sessionSvc := service.NewSessionServiceWithDelete(sessionRepo, evaluationRepo, courseRepo, userRepo, recordingRepo, improvementRepo, cfg.Evaluation, notificationSvc)
 	improvementSvc := service.NewImprovementService(improvementRepo)
 	reflectionSvc := service.NewReflectionService(reflectionRepo)
 	teacherScoreSvc := service.NewTeacherScoreService(userRepo, courseRepo, evaluationRepo, cfg.Evaluation)
@@ -151,15 +151,20 @@ func New(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) (*gin.Engine, se
 		POST("/courses/:id/resources", resourceH.Upload).
 		DELETE("/resources/:id", resourceH.Delete)
 
+	// —— 授课与录音（B1/D6）：teacher 本人课程 / supervisor 代录；建课即触发后续 AI 评析 ——
+	authed.Group("", middleware.RequireRoles(service.RoleTeacher, service.RoleSupervisor)).
+		POST("/sessions", sessionH.Create).
+		DELETE("/sessions/:id", sessionH.Delete).
+		POST("/sessions/:id/recording", recordingH.Upload).
+		DELETE("/sessions/:id/recording", recordingH.Delete)
+
 	authed.Group("", middleware.RequireRoles(service.RoleSupervisor)).
 		GET("/supervision/coverage", supervisionH.Coverage).
 		GET("/supervision/plans", supervisionH.Plans).
 		GET("/supervision/comment-tags", supervisionH.CommentTags).
-		POST("/sessions", sessionH.Create).
 		PUT("/sessions/:id/supervisor-observation", sessionH.SubmitObservation).
 		// 2026-10-16 重构 §4.5：五维评分与草稿箱整套停用，路由暂留并返回 50002。
 		PUT("/sessions/:id/supervisor-evaluation", handler.Deprecated("督导五维评分已废弃，请改用督导观察接口")).
-		POST("/sessions/:id/recording", recordingH.Upload).
 		POST("/ai-tasks/:id/retry", aiTaskH.Retry).
 		GET("/sessions/:id/draft", handler.Deprecated("评估草稿已停用")).
 		PUT("/sessions/:id/draft", handler.Deprecated("评估草稿已停用")).

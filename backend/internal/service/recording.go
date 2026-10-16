@@ -37,7 +37,9 @@ const playbackTicketTTL = 4 * time.Hour
 const transcriptErrMaxLen = 255
 
 type RecordingService interface {
-	Upload(ctx context.Context, userID, sessionID uint64, file *multipart.FileHeader) (*dto.RecordingDTO, error)
+	Upload(ctx context.Context, role string, deptID, userID, sessionID uint64, file *multipart.FileHeader) (*dto.RecordingDTO, error)
+	// DeleteRecording 删除录音（上传者本人 / supervisor）：删审计+转写+文件+录音行（D6）。
+	DeleteRecording(ctx context.Context, role string, deptID, userID, sessionID uint64) error
 	Media(ctx context.Context, role string, deptID, userID, sessionID uint64) (*dto.RecordingDTO, *dto.TranscriptDTO, error)
 	Stream(ctx context.Context, role string, deptID, userID, recordingID uint64) (*model.Recording, error)
 	Retry(ctx context.Context, role string, deptID, userID, sessionID uint64) error
@@ -82,7 +84,9 @@ func NewRecordingService(
 	}
 }
 
-func (s *recordingService) Upload(ctx context.Context, userID, sessionID uint64, file *multipart.FileHeader) (*dto.RecordingDTO, error) {
+// Upload 上传/覆盖课堂录音（B1/B4）：teacher 本人课程 / supervisor 均可上传。
+// 覆盖语义（§4.1）：已有录音则替换文件并重置转写为 pending（不删行重建，保证外键不断）。
+func (s *recordingService) Upload(ctx context.Context, role string, deptID, userID, sessionID uint64, file *multipart.FileHeader) (*dto.RecordingDTO, error) {
 	row, err := s.sessions.GetDetail(ctx, sessionID)
 	if err != nil {
 		if repository.IsNotFound(err) {
@@ -90,10 +94,19 @@ func (s *recordingService) Upload(ctx context.Context, userID, sessionID uint64,
 		}
 		return nil, errcode.Wrap(errcode.Internal, "查询授课记录失败", err)
 	}
+	// 权限矩阵（§5）：teacher 仅本人课程；supervisor 全部。
+	switch role {
+	case RoleSupervisor:
+	case RoleTeacher:
+		if row.TeacherID != userID {
+			return nil, errcode.New(errcode.ForbiddenData, "只能为本人课程上传录音")
+		}
+	default:
+		return nil, errcode.New(errcode.ForbiddenRole, errcode.ForbiddenRole.Message())
+	}
 	if row.TeacherID == 0 {
 		return nil, errcode.New(errcode.BizRule, "授课记录缺少教师")
 	}
-	// 只有督导调用此方法；角色校验由路由完成，用户 id 仍写入审计与记录。
 	ext := strings.ToLower(filepath.Ext(file.Filename))
 	if ext != ".mp3" && ext != ".wav" && ext != ".m4a" {
 		return nil, errcode.New(errcode.Params, "仅支持 mp3、wav、m4a 音频")
@@ -112,6 +125,32 @@ func (s *recordingService) Upload(ctx context.Context, userID, sessionID uint64,
 	if err := copyMultipart(path, file); err != nil {
 		return nil, errcode.Wrap(errcode.Internal, "保存音频失败", err)
 	}
+
+	// 覆盖语义：已有录音 → 更新行 + 重置转写，替换磁盘文件。
+	if existing, eerr := s.recordings.GetRecordingBySession(ctx, sessionID); eerr == nil && existing != nil {
+		oldPath := existing.FilePath
+		if uerr := s.recordings.UpdateRecording(ctx, existing.ID, map[string]any{
+			"file_path": path, "original_name": filepath.Base(file.Filename),
+			"format": strings.TrimPrefix(ext, "."), "size": file.Size, "duration_sec": 0,
+			"uploaded_by": userID, "uploaded_at": time.Now(),
+		}); uerr != nil {
+			_ = os.Remove(path)
+			return nil, errcode.Wrap(errcode.Internal, "覆盖录音记录失败", uerr)
+		}
+		if oldPath != "" && oldPath != path {
+			_ = os.Remove(oldPath)
+		}
+		trID, terr := s.resetTranscript(ctx, sessionID, existing.ID)
+		if terr != nil {
+			return nil, terr
+		}
+		go s.processTranscript(context.Background(), trID, existing.ID, sessionID)
+		return &dto.RecordingDTO{
+			ID: existing.ID, OriginalName: filepath.Base(file.Filename), Format: strings.TrimPrefix(ext, "."),
+			Size: file.Size, StreamURL: fmt.Sprintf("/recordings/%d/stream", existing.ID),
+		}, nil
+	}
+
 	record := &model.Recording{SessionID: sessionID, FilePath: path, OriginalName: filepath.Base(file.Filename), Format: strings.TrimPrefix(ext, "."), Size: file.Size, UploadedBy: userID, UploadedAt: time.Now()}
 	if err := s.recordings.CreateRecording(ctx, record); err != nil {
 		_ = os.Remove(path)
@@ -127,6 +166,56 @@ func (s *recordingService) Upload(ctx context.Context, userID, sessionID uint64,
 	// 第二个参数必须是录音 id：转写任务靠它取磁盘文件路径。
 	go s.processTranscript(context.Background(), transcript.ID, record.ID, sessionID)
 	return &dto.RecordingDTO{ID: record.ID, OriginalName: record.OriginalName, Format: record.Format, Size: record.Size, DurationSec: record.DurationSec, StreamURL: fmt.Sprintf("/recordings/%d/stream", record.ID)}, nil
+}
+
+// resetTranscript 覆盖上传时把转写复位为 pending（存在则更新，否则新建），返回转写 id。
+func (s *recordingService) resetTranscript(ctx context.Context, sessionID, recordingID uint64) (uint64, error) {
+	if tr, err := s.recordings.GetTranscriptBySession(ctx, sessionID); err == nil && tr != nil {
+		if uerr := s.recordings.UpdateTranscript(ctx, tr.ID, map[string]any{
+			"recording_id": recordingID, "content": "", "segments": nil,
+			"status": model.TranscriptPending, "error_message": "",
+		}); uerr != nil {
+			return 0, errcode.Wrap(errcode.Internal, "重置转写任务失败", uerr)
+		}
+		return tr.ID, nil
+	}
+	tr := &model.Transcript{SessionID: sessionID, RecordingID: recordingID, Content: "", Status: model.TranscriptPending}
+	if err := s.recordings.CreateTranscript(ctx, tr); err != nil {
+		return 0, errcode.Wrap(errcode.Internal, "创建转写任务失败", err)
+	}
+	return tr.ID, nil
+}
+
+// DeleteRecording 删除录音（上传者本人 / supervisor）：级联删审计+转写+录音行，并删磁盘文件（D6）。
+func (s *recordingService) DeleteRecording(ctx context.Context, role string, deptID, userID, sessionID uint64) error {
+	if _, err := s.sessions.GetDetail(ctx, sessionID); err != nil {
+		if repository.IsNotFound(err) {
+			return errcode.New(errcode.NotFound, "授课记录不存在")
+		}
+		return errcode.Wrap(errcode.Internal, "查询授课记录失败", err)
+	}
+	rec, err := s.recordings.GetRecordingBySession(ctx, sessionID)
+	if err != nil {
+		if repository.IsNotFound(err) {
+			return errcode.New(errcode.NotFound, "课堂录音不存在")
+		}
+		return errcode.Wrap(errcode.Internal, "查询录音失败", err)
+	}
+	// 权限（§5）：supervisor 全部；teacher 仅自己上传的这一节（上传者本人）。
+	if role != RoleSupervisor && rec.UploadedBy != userID {
+		return errcode.New(errcode.ForbiddenData, "只能删除本人上传的录音")
+	}
+	_ = s.recordings.DeletePlaybackLogsByRecording(ctx, rec.ID)
+	if err := s.recordings.DeleteTranscriptBySession(ctx, sessionID); err != nil {
+		return errcode.Wrap(errcode.Internal, "删除转写记录失败", err)
+	}
+	if err := s.recordings.DeleteRecording(ctx, rec.ID); err != nil {
+		return errcode.Wrap(errcode.Internal, "删除录音记录失败", err)
+	}
+	if rec.FilePath != "" {
+		_ = os.Remove(rec.FilePath)
+	}
+	return nil
 }
 
 func (s *recordingService) Media(ctx context.Context, role string, deptID, userID, sessionID uint64) (*dto.RecordingDTO, *dto.TranscriptDTO, error) {
@@ -152,8 +241,8 @@ func (s *recordingService) Media(ctx context.Context, role string, deptID, userI
 	var td *dto.TranscriptDTO
 	if rec != nil {
 		rd = &dto.RecordingDTO{ID: rec.ID, OriginalName: rec.OriginalName, Format: rec.Format, Size: rec.Size, DurationSec: rec.DurationSec, StreamURL: fmt.Sprintf("/recordings/%d/stream", rec.ID)}
-		// 只有督导可听音频（开发计划 §5.1 权限矩阵）：教师侧不签发播放票据。
-		if role == RoleSupervisor {
+		// B3：supervisor 全量 + 上传者本人可回听自己上传的这一节；其余教师不签发播放票据。
+		if role == RoleSupervisor || rec.UploadedBy == userID {
 			ticket, err := s.jwt.SignPlayback(userID, role, deptID, rec.ID, playbackTicketTTL, time.Now())
 			if err != nil {
 				return nil, nil, errcode.Wrap(errcode.Internal, "签发播放票据失败", err)
@@ -168,9 +257,6 @@ func (s *recordingService) Media(ctx context.Context, role string, deptID, userI
 }
 
 func (s *recordingService) Stream(ctx context.Context, role string, deptID, userID, recordingID uint64) (*model.Recording, error) {
-	if role != RoleSupervisor {
-		return nil, errcode.New(errcode.ForbiddenData, "教师端不可访问课堂音频")
-	}
 	rec, err := s.recordings.GetRecording(ctx, recordingID)
 	if err != nil {
 		if repository.IsNotFound(err) {
@@ -178,10 +264,15 @@ func (s *recordingService) Stream(ctx context.Context, role string, deptID, user
 		}
 		return nil, errcode.Wrap(errcode.Internal, "查询录音失败", err)
 	}
+	// B3：supervisor 全量 + 上传者本人可回听；其余教师不可听（40302）。
+	if role != RoleSupervisor && rec.UploadedBy != userID {
+		return nil, errcode.New(errcode.ForbiddenData, "仅上传者本人或督导可回听课堂音频")
+	}
 	row, err := s.sessions.GetDetail(ctx, rec.SessionID)
 	if err != nil {
 		return nil, errcode.Wrap(errcode.Internal, "查询授课记录失败", err)
 	}
+	// 上传者本人放行时仍校验其数据范围（教师只能触及本人课程的场次）。
 	if err := checkSessionScope(ScopeFor(role, deptID, userID), row); err != nil {
 		return nil, err
 	}

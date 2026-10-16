@@ -25,13 +25,30 @@ func (h *RecordingHandler) Upload(c *gin.Context) {
 		response.Fail(c, errcode.New(errcode.Params, "缺少上传文件字段 file"))
 		return
 	}
+	role, _ := middleware.Role(c)
 	uid, _ := middleware.UserID(c)
-	v, err := h.recordings.Upload(c.Request.Context(), uid, id, f)
+	v, err := h.recordings.Upload(c.Request.Context(), role, middleware.DeptID(c), uid, id, f)
 	if err != nil {
 		response.Fail(c, err)
 		return
 	}
 	response.OK(c, v)
+}
+
+// Delete 处理 DELETE /api/v1/sessions/:id/recording（上传者本人 / supervisor，D6）。
+func (h *RecordingHandler) Delete(c *gin.Context) {
+	id, err := pathID(c)
+	if err != nil {
+		response.Fail(c, err)
+		return
+	}
+	role, _ := middleware.Role(c)
+	uid, _ := middleware.UserID(c)
+	if err := h.recordings.DeleteRecording(c.Request.Context(), role, middleware.DeptID(c), uid, id); err != nil {
+		response.Fail(c, err)
+		return
+	}
+	response.OK(c, gin.H{})
 }
 func (h *RecordingHandler) Transcript(c *gin.Context) {
 	id, err := pathID(c)

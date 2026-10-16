@@ -430,7 +430,7 @@ func TestSessionCreateRules(t *testing.T) {
 
 	t.Run("日期晚于今天返回 40002", func(t *testing.T) {
 		svc := newSvc(&fakeSessionRepo{})
-		_, err := svc.Create(context.Background(), dto.SessionCreateReq{CourseID: 1, SessionDate: "2099-01-01", Period: "1-2 节"})
+		_, err := svc.Create(context.Background(), RoleSupervisor, 0, 9, dto.SessionCreateReq{CourseID: 1, SessionDate: "2099-01-01", Period: "1-2 节"})
 		require.Error(t, err)
 		assert.Equal(t, errcode.BizRule, errcode.From(err).Code)
 	})
@@ -442,9 +442,17 @@ func TestSessionCreateRules(t *testing.T) {
 			},
 		})
 		yesterday := time.Now().AddDate(0, 0, -1).Format("2006-01-02")
-		_, err := svc.Create(context.Background(), dto.SessionCreateReq{CourseID: 1, SessionDate: yesterday, Period: "3-4 节"})
+		_, err := svc.Create(context.Background(), RoleSupervisor, 0, 9, dto.SessionCreateReq{CourseID: 1, SessionDate: yesterday, Period: "3-4 节"})
 		require.Error(t, err)
 		assert.Equal(t, errcode.Conflict, errcode.From(err).Code)
+	})
+
+	t.Run("教师为他课建课返回 40302", func(t *testing.T) {
+		svc := newSvc(&fakeSessionRepo{})
+		yesterday := time.Now().AddDate(0, 0, -1).Format("2006-01-02")
+		_, err := svc.Create(context.Background(), RoleTeacher, 0, 99, dto.SessionCreateReq{CourseID: 1, SessionDate: yesterday, Period: "1-2 节"})
+		require.Error(t, err)
+		assert.Equal(t, errcode.ForbiddenData, errcode.From(err).Code)
 	})
 
 	t.Run("成功创建：teacher_id 随课程落库且初始状态 scheduled", func(t *testing.T) {
@@ -464,7 +472,7 @@ func TestSessionCreateRules(t *testing.T) {
 		}
 		svc := newSvc(sessions)
 		yesterday := time.Now().AddDate(0, 0, -1).Format("2006-01-02")
-		detail, err := svc.Create(context.Background(), dto.SessionCreateReq{CourseID: 1, SessionDate: yesterday, Period: "验收节次", Topic: "T"})
+		detail, err := svc.Create(context.Background(), RoleSupervisor, 0, 5, dto.SessionCreateReq{CourseID: 1, SessionDate: yesterday, Period: "验收节次", Topic: "T"})
 		require.NoError(t, err)
 		require.NotNil(t, created)
 		assert.Equal(t, uint64(2), created.TeacherID)

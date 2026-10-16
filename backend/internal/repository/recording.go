@@ -14,9 +14,15 @@ type RecordingRepository interface {
 	GetRecordingBySession(context.Context, uint64) (*model.Recording, error)
 	GetRecording(context.Context, uint64) (*model.Recording, error)
 	UpdateRecordingDuration(context.Context, uint64, int) error
+	// UpdateRecording 覆盖语义用：更新录音行（不删行重建，保证外键不断，§3.4）。
+	UpdateRecording(context.Context, uint64, map[string]any) error
+	DeleteRecording(context.Context, uint64) error
+	// DeletePlaybackLogsByRecording 删除某录音的播放审计（删录音/删课级联用，先于录音行删除）。
+	DeletePlaybackLogsByRecording(context.Context, uint64) error
 	CreateTranscript(context.Context, *model.Transcript) error
 	GetTranscriptBySession(context.Context, uint64) (*model.Transcript, error)
 	UpdateTranscript(context.Context, uint64, map[string]any) error
+	DeleteTranscriptBySession(context.Context, uint64) error
 	// ListStuckTranscripts 返回上次进程中断时遗留的未完成转写，用于启动时重新入队。
 	ListStuckTranscripts(context.Context) ([]model.Transcript, error)
 	UpsertAgentEvaluation(context.Context, *model.Evaluation) error
@@ -46,6 +52,7 @@ func (r *recordingRepository) GetRecording(ctx context.Context, id uint64) (*mod
 	}
 	return &v, nil
 }
+
 func (r *recordingRepository) UpdateRecordingDuration(ctx context.Context, id uint64, durationSec int) error {
 	// 仅在识别出有效时长时回写，避免把已知时长覆盖成 0。
 	if durationSec <= 0 {
@@ -53,6 +60,22 @@ func (r *recordingRepository) UpdateRecordingDuration(ctx context.Context, id ui
 	}
 	return r.db.WithContext(ctx).Model(&model.Recording{}).Where("id = ?", id).
 		Update("duration_sec", durationSec).Error
+}
+
+// UpdateRecording 覆盖上传时整行更新（删文件 + 更新行，不删行重建，§3.4）。
+func (r *recordingRepository) UpdateRecording(ctx context.Context, id uint64, fields map[string]any) error {
+	return r.db.WithContext(ctx).Model(&model.Recording{}).Where("id = ?", id).Updates(fields).Error
+}
+
+// DeleteRecording 删除录音行。
+func (r *recordingRepository) DeleteRecording(ctx context.Context, id uint64) error {
+	return r.db.WithContext(ctx).Delete(&model.Recording{}, id).Error
+}
+
+// DeletePlaybackLogsByRecording 删除某录音的播放审计。
+func (r *recordingRepository) DeletePlaybackLogsByRecording(ctx context.Context, recordingID uint64) error {
+	return r.db.WithContext(ctx).Table("recording_playback_logs").
+		Where("recording_id = ?", recordingID).Delete(nil).Error
 }
 func (r *recordingRepository) CreateTranscript(ctx context.Context, v *model.Transcript) error {
 	return r.db.WithContext(ctx).Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "session_id"}}, DoUpdates: clause.AssignmentColumns([]string{"recording_id", "content", "segments", "engine", "engine_version", "status", "error_message"})}).Create(v).Error
@@ -67,6 +90,11 @@ func (r *recordingRepository) GetTranscriptBySession(ctx context.Context, id uin
 }
 func (r *recordingRepository) UpdateTranscript(ctx context.Context, id uint64, fields map[string]any) error {
 	return r.db.WithContext(ctx).Model(&model.Transcript{}).Where("id = ?", id).Updates(fields).Error
+}
+
+// DeleteTranscriptBySession 删除某场次的转写行（删课级联用）。
+func (r *recordingRepository) DeleteTranscriptBySession(ctx context.Context, sessionID uint64) error {
+	return r.db.WithContext(ctx).Where("session_id = ?", sessionID).Delete(&model.Transcript{}).Error
 }
 func (r *recordingRepository) ListStuckTranscripts(ctx context.Context) ([]model.Transcript, error) {
 	var rows []model.Transcript

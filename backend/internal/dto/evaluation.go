@@ -7,10 +7,11 @@ type SessionListQuery struct {
 	PageSize int    `form:"pageSize"`
 }
 
-// SessionCreateReq 是 POST /sessions 的请求体（督导创建授课记录）。
+// SessionCreateReq 是 POST /sessions 的请求体（teacher 本人课程 / supervisor 代录，B1）。
+// classId 必填（计划 §3.4：前端下拉必选，0=未指定只允许历史数据）。
 type SessionCreateReq struct {
 	CourseID    uint64  `json:"courseId" binding:"required"`
-	ClassID     uint64  `json:"classId"`
+	ClassID     uint64  `json:"classId" binding:"required"`
 	SessionDate string  `json:"sessionDate" binding:"required"`
 	Period      string  `json:"period" binding:"required,max=32"`
 	Topic       string  `json:"topic" binding:"max=128"`
