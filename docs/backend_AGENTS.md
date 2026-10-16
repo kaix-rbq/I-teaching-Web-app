@@ -524,16 +524,18 @@ type PlanItem struct {
 | POST `/sessions` | supervisor | 创建授课记录（日期不得晚于今天，`uk_session` 唯一） |
 | GET `/sessions/:id` | 登录（数据裁剪） | 单场次基本信息 |
 | GET `/sessions/:id/evaluation` | 登录（数据裁剪） | 当堂课评估页聚合：场次 + 督导评分 + 智能体参考 + 评语 |
-| PUT `/sessions/:id/supervisor-evaluation` | supervisor | 提交/覆盖督导评分（幂等）；**五维必填**，缺失 40002 |
+| PUT `/sessions/:id/supervisor-observation` | supervisor | 提交/覆盖**督导纯评语观察**（B8，幂等；无五维分，至少填一项，否则 40002） |
+| PUT `/sessions/:id/supervisor-evaluation` | supervisor | ⚠️ **已废弃**（2026-10-16 §4.5）：五维打分停用，返回 `50002`（HTTP 501） |
+| GET `/supervision/comment-tags` | supervisor | 常用语标签库（N2，纯静态，供评语点选） |
 | GET `/teacher-scores?departmentId=&semester=&page=&pageSize=` | director（本室）/ supervisor（全校） | 教师评分列表 |
 | GET `/teachers/:id/evaluation-summary?semester=` | director（本室）/ teacher（仅自己）/ supervisor | 教师级评分面板 |
 | GET `/teachers/:id/evaluations?semester=&page=&pageSize=` | director（本室）/ teacher（仅自己）/ supervisor | 教师历次评价时间线：按课次倒序，含督导结构化评语 + 智能体参考 + 场次综合分 |
 | GET `/courses/:id/evaluation-summary?semester=` | 登录（数据裁剪） | 课程级评分，与教师级共用同一聚合函数 |
-| GET `/sessions/:id/draft` | supervisor | 读取本人该场次草稿（无草稿返回 `null`） |
-| PUT `/sessions/:id/draft` | supervisor | 保存/覆盖本人草稿（**允许部分维度为空**） |
-| GET `/drafts?keyword=&page=&pageSize=` | supervisor | 本人草稿分页列表（按课程名查询） |
-| DELETE `/drafts/:id` | supervisor | 删除本人草稿（越权/不存在 40401） |
-| POST `/drafts/:id/submit` | supervisor | 草稿转正式评价：复用正式提交口径，**五维必填**；成功后删除草稿 |
+| GET `/sessions/:id/draft` | supervisor | ⚠️ **已废弃**（2026-10-16 §4.5）：返回 `50002` |
+| PUT `/sessions/:id/draft` | supervisor | ⚠️ **已废弃**：返回 `50002` |
+| GET `/drafts?keyword=&page=&pageSize=` | supervisor | ⚠️ **已废弃**：返回 `50002` |
+| DELETE `/drafts/:id` | supervisor | ⚠️ **已废弃**：返回 `50002` |
+| POST `/drafts/:id/submit` | supervisor | ⚠️ **已废弃**：返回 `50002` |
 
 ```go
 // 五维必填：objective/content/interaction/organization/frontier，均为 1-5 整数

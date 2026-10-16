@@ -20,6 +20,8 @@ type SessionService interface {
 	Detail(ctx context.Context, role string, deptID, userID, sessionID uint64) (*dto.SessionDetail, error)
 	Evaluation(ctx context.Context, role string, deptID, userID, sessionID uint64) (*dto.SessionEvaluation, error)
 	SubmitSupervisorEvaluation(ctx context.Context, supervisorID, sessionID uint64, req dto.SupervisorEvaluationReq) (*dto.EvaluationDTO, error)
+	// SubmitSupervisorObservation 提交/覆盖督导纯评语观察（B8，无五维分，至少填一项）。
+	SubmitSupervisorObservation(ctx context.Context, supervisorID, sessionID uint64, req dto.SupervisorObservationReq) (*dto.EvaluationDTO, error)
 }
 
 type sessionService struct {
@@ -240,6 +242,50 @@ func (s *sessionService) SubmitSupervisorEvaluation(
 		}
 	}
 	return nil, errcode.Wrap(errcode.Internal, "回读督导评分失败", errcode.New(errcode.Internal, "评分写入后未找到"))
+}
+
+// SubmitSupervisorObservation 提交/覆盖督导纯评语观察（B8 / §4.3）：
+// 复用 supervisor 行、五维全 NULL、只写评语列，不写 total_score，不改场次状态；
+// 计分只按 AI，督导意见是独立「督导观察」模块（§6）。
+func (s *sessionService) SubmitSupervisorObservation(
+	ctx context.Context, supervisorID, sessionID uint64, req dto.SupervisorObservationReq,
+) (*dto.EvaluationDTO, error) {
+	if _, err := s.sessions.GetDetail(ctx, sessionID); err != nil {
+		if repository.IsNotFound(err) {
+			return nil, errcode.New(errcode.NotFound, "授课记录不存在")
+		}
+		return nil, errcode.Wrap(errcode.Internal, "查询授课记录失败", err)
+	}
+	if strings.TrimSpace(req.Comment) == "" && strings.TrimSpace(req.Highlights) == "" &&
+		strings.TrimSpace(req.Improvements) == "" && strings.TrimSpace(req.Suggestions) == "" {
+		return nil, errcode.New(errcode.BizRule, "督导观察至少填写一项评语")
+	}
+
+	record := &model.Evaluation{
+		SessionID:      sessionID,
+		EvaluatorType:  model.EvaluatorSupervisor,
+		EvaluatorID:    supervisorID,
+		FormulaVersion: s.cfg.FormulaVersion,
+		Comment:        req.Comment,
+		Highlights:     req.Highlights,
+		Improvements:   req.Improvements,
+		Suggestions:    req.Suggestions,
+	}
+	if err := s.evals.Upsert(ctx, record); err != nil {
+		return nil, errcode.Wrap(errcode.Internal, "保存督导观察失败", err)
+	}
+
+	rows, err := s.evals.ListBySession(ctx, sessionID)
+	if err != nil {
+		return nil, errcode.Wrap(errcode.Internal, "回读督导观察失败", err)
+	}
+	for _, row := range rows {
+		if row.EvaluatorType == model.EvaluatorSupervisor && row.EvaluatorID == supervisorID {
+			dtoRow := toEvaluationDTO(row)
+			return &dtoRow, nil
+		}
+	}
+	return nil, errcode.New(errcode.Internal, "督导观察写入后未找到")
 }
 
 // checkSessionScope 校验授课记录落在数据范围内（同 checkCourseScope 口径）。

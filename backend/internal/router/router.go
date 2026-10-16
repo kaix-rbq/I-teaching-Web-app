@@ -65,7 +65,6 @@ func New(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) (*gin.Engine, se
 		jwt, transcriber,
 		aiTaskSvc.EnqueueSessionEval,
 	)
-	draftSvc := service.NewDraftService(draftRepo, sessionSvc)
 
 	authH := handler.NewAuthHandler(authSvc)
 	courseH := handler.NewCourseHandler(courseSvc)
@@ -76,7 +75,6 @@ func New(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) (*gin.Engine, se
 	sessionH := handler.NewSessionHandler(sessionSvc, recordingSvc)
 	teacherScoreH := handler.NewTeacherScoreHandler(teacherScoreSvc)
 	recordingH := handler.NewRecordingHandler(recordingSvc)
-	draftH := handler.NewDraftHandler(draftSvc)
 	aiTaskH := handler.NewAiTaskHandler(aiTaskSvc)
 
 	gin.SetMode(cfg.Server.Mode)
@@ -133,15 +131,18 @@ func New(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) (*gin.Engine, se
 	authed.Group("", middleware.RequireRoles(service.RoleSupervisor)).
 		GET("/supervision/coverage", supervisionH.Coverage).
 		GET("/supervision/plans", supervisionH.Plans).
+		GET("/supervision/comment-tags", supervisionH.CommentTags).
 		POST("/sessions", sessionH.Create).
-		PUT("/sessions/:id/supervisor-evaluation", sessionH.Submit).
+		PUT("/sessions/:id/supervisor-observation", sessionH.SubmitObservation).
+		// 2026-10-16 重构 §4.5：五维评分与草稿箱整套停用，路由暂留并返回 50002。
+		PUT("/sessions/:id/supervisor-evaluation", handler.Deprecated("督导五维评分已废弃，请改用督导观察接口")).
 		POST("/sessions/:id/recording", recordingH.Upload).
 		POST("/ai-tasks/:id/retry", aiTaskH.Retry).
-		GET("/sessions/:id/draft", draftH.GetBySession).
-		PUT("/sessions/:id/draft", draftH.Save).
-		GET("/drafts", draftH.List).
-		DELETE("/drafts/:id", draftH.Delete).
-		POST("/drafts/:id/submit", draftH.Submit)
+		GET("/sessions/:id/draft", handler.Deprecated("评估草稿已停用")).
+		PUT("/sessions/:id/draft", handler.Deprecated("评估草稿已停用")).
+		GET("/drafts", handler.Deprecated("评估草稿已停用")).
+		DELETE("/drafts/:id", handler.Deprecated("评估草稿已停用")).
+		POST("/drafts/:id/submit", handler.Deprecated("评估草稿已停用"))
 
 	authed.Group("", middleware.RequireRoles(service.RoleDirector, service.RoleSupervisor)).
 		GET("/teacher-scores", teacherScoreH.List)

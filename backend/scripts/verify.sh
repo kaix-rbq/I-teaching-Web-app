@@ -268,21 +268,30 @@ want "督导创建授课记录成功"           "0"        "$SESS" "d['code']"
 want "新场次初始状态=scheduled"       "scheduled" "$SESS" "d['data']['status']"
 want "新场次教师随课程落库=李明"      "李明"      "$SESS" "d['data']['teacherName']"
 
-EV="$(req -X PUT "$BASE/sessions/$SESS_ID/supervisor-evaluation" "${AUTH_S[@]}" -H 'Content-Type: application/json' \
-  -d '{"objective":5,"content":5,"interaction":4,"organization":5,"frontier":4,"comment":"verify.sh"}')"
-want "督导提交评分成功"               "0"   "$EV" "d['code']"
-want "单次总分=95"                    "95"  "$EV" "d['data']['totalScore']"
-want "评分写入口径版本=v1"            "v1"  "$EV" "d['data']['formulaVersion']"
-want "评分后场次状态=evaluated"       "evaluated" "$(req "$BASE/sessions/$SESS_ID" "${AUTH_S[@]}")" "d['data']['status']"
-want "空维度提交返回 40002"           "40002" "$(req -X PUT "$BASE/sessions/$SESS_ID/supervisor-evaluation" "${AUTH_S[@]}" -H 'Content-Type: application/json' -d '{"comment":"无维度"}')" "d['code']"
-want "维度越界返回 40001"             "40001" "$(req -X PUT "$BASE/sessions/$SESS_ID/supervisor-evaluation" "${AUTH_S[@]}" -H 'Content-Type: application/json' -d '{"objective":6}')" "d['code']"
-want "教师提交督导评分返回 40301"     "40301" "$(req -X PUT "$BASE/sessions/$SESS_ID/supervisor-evaluation" "${AUTH_T[@]}" -H 'Content-Type: application/json' -d '{"objective":5}')" "d['code']"
+EV="$(req -X PUT "$BASE/sessions/$SESS_ID/supervisor-observation" "${AUTH_S[@]}" -H 'Content-Type: application/json' \
+  -d '{"comment":"verify.sh 审核意见","highlights":"亮点A","improvements":"主要问题B","suggestions":"改进建议C"}')"
+want "督导提交观察成功"               "0"   "$EV" "d['code']"
+want "观察无五维 objective=null"       "None" "$EV" "d['data']['objective']"
+want "观察无五维 totalScore=null"      "None" "$EV" "d['data']['totalScore']"
+want "观察 highlights 生效"            "亮点A" "$EV" "d['data']['highlights']"
+want "观察写入口径版本=v1"             "v1"  "$EV" "d['data']['formulaVersion']"
+want "督导观察不改场次状态（仍 scheduled）" "scheduled" "$(req "$BASE/sessions/$SESS_ID" "${AUTH_S[@]}")" "d['data']['status']"
+want "空观察返回 40002"                "40002" "$(req -X PUT "$BASE/sessions/$SESS_ID/supervisor-observation" "${AUTH_S[@]}" -H 'Content-Type: application/json' -d '{}')" "d['code']"
+want "教师提交督导观察返回 40301"      "40301" "$(req -X PUT "$BASE/sessions/$SESS_ID/supervisor-observation" "${AUTH_T[@]}" -H 'Content-Type: application/json' -d '{"comment":"x"}')" "d['code']"
+want "旧五维评分接口返回 50002"        "50002" "$(req -X PUT "$BASE/sessions/$SESS_ID/supervisor-evaluation" "${AUTH_S[@]}" -H 'Content-Type: application/json' -d '{"objective":5}')" "d['code']"
+want "草稿列表接口返回 50002"          "50002" "$(req "$BASE/drafts" "${AUTH_S[@]}")" "d['code']"
 
-EV2="$(req -X PUT "$BASE/sessions/$SESS_ID/supervisor-evaluation" "${AUTH_S[@]}" -H 'Content-Type: application/json' \
-  -d '{"objective":5,"content":5,"interaction":4,"organization":5,"frontier":4,"comment":"verify.sh 重提"}')"
-want "重复提交幂等覆盖总分不变"       "95"  "$EV2" "d['data']['totalScore']"
-want "幂等覆盖后评价仍为 1 条"        "1"   "$(req "$BASE/sessions/$SESS_ID/evaluation" "${AUTH_S[@]}")" "len(d['data']['supervisorScores'])"
-want "新增后课程 1 授课记录总数=4"    "4"   "$(req "$BASE/courses/1/sessions" "${AUTH_S[@]}")" "d['data']['total']"
+EV2="$(req -X PUT "$BASE/sessions/$SESS_ID/supervisor-observation" "${AUTH_S[@]}" -H 'Content-Type: application/json' \
+  -d '{"comment":"verify.sh 审核意见（重提）","highlights":"亮点A2"}')"
+want "观察幂等覆盖 comment 生效"       "verify.sh 审核意见（重提）" "$EV2" "d['data']['comment']"
+want "幂等覆盖后评价仍为 1 条"         "1"   "$(req "$BASE/sessions/$SESS_ID/evaluation" "${AUTH_S[@]}")" "len(d['data']['supervisorScores'])"
+want "新增后课程 1 授课记录总数=4"     "4"   "$(req "$BASE/courses/1/sessions" "${AUTH_S[@]}")" "d['data']['total']"
+
+echo
+echo "${c_dim}== 13.0 常用语标签库（N2）==${c_reset}"
+want "常用语标签库可用"                "0"     "$(req "$BASE/supervision/comment-tags" "${AUTH_S[@]}")" "d['code']"
+want "标签分组非空"                    "True"  "$(req "$BASE/supervision/comment-tags" "${AUTH_S[@]}")" "len(d['data'])>0"
+want "教师访问标签库 40301"            "40301" "$(req "$BASE/supervision/comment-tags" "${AUTH_T[@]}")" "d['code']"
 
 echo
 echo "${c_dim}== 13.1 AI 评析任务链（D3/R0.2，无 Key 时熔断且页面可用）==${c_reset}"

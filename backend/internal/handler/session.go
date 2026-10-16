@@ -127,3 +127,26 @@ func (h *SessionHandler) Submit(c *gin.Context) {
 	}
 	response.OK(c, data)
 }
+
+// SubmitObservation 处理 PUT /api/v1/sessions/:id/supervisor-observation（仅 supervisor，B8）。
+// 督导纯评语观察：无五维分，至少填一项，幂等覆盖。
+func (h *SessionHandler) SubmitObservation(c *gin.Context) {
+	id, err := pathID(c)
+	if err != nil {
+		response.Fail(c, err)
+		return
+	}
+	var req dto.SupervisorObservationReq
+	if err := bindJSON(c, &req); err != nil {
+		response.Fail(c, err)
+		return
+	}
+	supervisorID, _ := middleware.UserID(c)
+
+	data, err := h.sessions.SubmitSupervisorObservation(c.Request.Context(), supervisorID, id, req)
+	if err != nil {
+		response.Fail(c, err)
+		return
+	}
+	response.OK(c, data)
+}

@@ -64,6 +64,8 @@ type PendingSessionItem struct {
 // SupervisorEvaluationReq 是 PUT /sessions/:id/supervisor-evaluation 的请求体。
 // 督导评分强制 5 个维度全部录入：维度分 1-5 整数，任一维度缺失返回 40002，越界返回 40001。
 // （仅智能体侧允许维度为 null，见开发计划 §2.1。）
+//
+// ⚠️ 2026-10-16 重构后该接口已废弃（返回 50002）；督导改为纯评语，见 SupervisorObservationReq。
 type SupervisorEvaluationReq struct {
 	Objective    *int   `json:"objective" binding:"omitempty,min=1,max=5"`
 	Content      *int   `json:"content" binding:"omitempty,min=1,max=5"`
@@ -74,6 +76,29 @@ type SupervisorEvaluationReq struct {
 	Highlights   string `json:"highlights" binding:"max=1000"`
 	Improvements string `json:"improvements" binding:"max=1000"`
 	Suggestions  string `json:"suggestions" binding:"max=1000"`
+}
+
+// SupervisorObservationReq 是 PUT /sessions/:id/supervisor-observation 的请求体（B8，督导纯评语，无五维分）。
+//
+// 字段映射到 evaluations 的 4 个评语列（§4.3 的 6 项按最小破坏映射，不加列）：
+//
+//	comment      ← 审核意见（含学生参与观察）
+//	highlights   ← 亮点
+//	improvements ← 主要问题
+//	suggestions  ← 改进建议（含复查要求）
+//
+// 至少填写一项，否则 40002。
+type SupervisorObservationReq struct {
+	Comment      string `json:"comment" binding:"max=2000"`
+	Highlights   string `json:"highlights" binding:"max=1000"`
+	Improvements string `json:"improvements" binding:"max=1000"`
+	Suggestions  string `json:"suggestions" binding:"max=1000"`
+}
+
+// CommentTagDTO 是常用语标签分组（N2，督导评语可点选）。
+type CommentTagDTO struct {
+	Category string   `json:"category"`
+	Items    []string `json:"items"`
 }
 
 // EvaluationDTO 是一条评价的完整展示（督导评分表单回填 / 智能体参考面板共用）。
