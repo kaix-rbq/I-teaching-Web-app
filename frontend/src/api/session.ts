@@ -6,7 +6,8 @@ import type {
   SessionDetail,
   SessionEvaluation,
   SessionListItem,
-  SupervisorEvaluationPayload
+  SupervisorEvaluationPayload,
+  SupervisorObservationPayload
 } from '@/types/evaluation'
 import type { RecordingDTO, TranscriptDTO } from '@/types/evaluation'
 
@@ -43,13 +44,25 @@ export function fetchSessionEvaluationApi(id: number | string): Promise<SessionE
   return request<SessionEvaluation>({ url: `/sessions/${id}/evaluation`, method: 'get' })
 }
 
-/** 提交/覆盖督导评分与评语（PUT 幂等，五维必填） */
+/** 提交/覆盖督导评分与评语（PUT 幂等，五维必填）——已废弃（返回 50002），保留以兼容旧调用 */
 export function submitSupervisorEvaluationApi(
   id: number | string,
   payload: SupervisorEvaluationPayload
 ): Promise<EvaluationDTO> {
   return request<EvaluationDTO>({
     url: `/sessions/${id}/supervisor-evaluation`,
+    method: 'put',
+    data: payload
+  })
+}
+
+/** 提交/覆盖督导纯评语观察（PUT 幂等，B8 无五维分，至少填一项） */
+export function submitSupervisorObservationApi(
+  id: number | string,
+  payload: SupervisorObservationPayload
+): Promise<EvaluationDTO> {
+  return request<EvaluationDTO>({
+    url: `/sessions/${id}/supervisor-observation`,
     method: 'put',
     data: payload
   })

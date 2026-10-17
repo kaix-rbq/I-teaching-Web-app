@@ -22,6 +22,7 @@ type Config struct {
 	Evaluation    EvaluationConfig    `mapstructure:"evaluation"`
 	Transcription TranscriptionConfig `mapstructure:"transcription"`
 	Agent         AgentConfig         `mapstructure:"agent"`
+	Demo          DemoConfig          `mapstructure:"demo"`
 }
 
 // ServerConfig 描述 HTTP 服务监听参数。
@@ -157,6 +158,11 @@ func (a AgentConfig) MaskedAPIKey() string {
 	return a.APIKey[:6] + "***" + a.APIKey[len(a.APIKey)-4:]
 }
 
+// DemoConfig 描述演示模式开关（B6/N7）。仅本地/dev 环境开启，生产必须关闭。
+type DemoConfig struct {
+	Enabled bool `mapstructure:"enabled"`
+}
+
 // CORSConfig 描述跨域白名单。
 type CORSConfig struct {
 	Origins []string `mapstructure:"origins"`
@@ -242,6 +248,7 @@ func Load(path string) (*Config, error) {
 	v.SetDefault("agent.timeout", "3m")
 	v.SetDefault("agent.maxConcurrency", 2)
 	v.SetDefault("agent.promptVersion", "v1")
+	v.SetDefault("demo.enabled", false)
 	v.SetDefault("cors.allowAnyOrigin", false)
 
 	// 评分口径默认值 = 开发计划 §2.2（frontier 为观测项，权重 0）。
@@ -270,6 +277,7 @@ func Load(path string) (*Config, error) {
 	_ = v.BindEnv("agent.workspaceId", "AIJIAOXUE_AGENT_WORKSPACE_ID")
 	_ = v.BindEnv("agent.llmModel", "AIJIAOXUE_AGENT_LLM_MODEL")
 	_ = v.BindEnv("agent.baseUrl", "AIJIAOXUE_AGENT_BASE_URL")
+	_ = v.BindEnv("demo.enabled", "AIJIAOXUE_DEMO_ENABLED")
 
 	if err := v.ReadInConfig(); err != nil {
 		return nil, fmt.Errorf("read config %s: %w", path, err)

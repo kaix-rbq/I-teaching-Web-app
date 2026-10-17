@@ -60,6 +60,12 @@ agent:
   maxConcurrency: 2 # 并发闸门
   promptVersion: "v1" # 写入 evidence.promptVersion，变更提示词时必须递增
 
+# 演示模式（B6/N7）：一键载入示例转写/AI 报告。
+# 🔴 仅本地/dev 开启，生产必须 false（会清空 transcripts/recordings/清单/反思/站内信）。
+# 环境变量覆盖：AIJIAOXUE_DEMO_ENABLED=true
+demo:
+  enabled: false
+
 cors:
   origins: ["http://localhost:5173", "http://127.0.0.1:5173"] # 前端 dev 地址
   # allowAnyOrigin: 放行任意来源，仅限本地/局域网联调。

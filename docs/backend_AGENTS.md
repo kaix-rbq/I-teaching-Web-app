@@ -292,14 +292,15 @@ evaluation:
 - `message` 面向用户可读（中文），内部细节写日志不外泄；
 - 实现：`pkg/response.OK(c, data)` / `pkg/response.Fail(c, errcode.Params)`，handler 中**禁止手写 `c.JSON` 拼信封**。
 
-## 8. 接口契约（已注册路由共 56 条）
+## 8. 接口契约（已注册路由共 58 条）
 
 > 计数口径 = `backend/internal/router/router.go` 实际注册数，按鉴权分组：
 > 未挂 `Auth` 组 4（`GET /healthz` 根路径 + `GET /api/v1/healthz` + `POST /auth/login` + `GET /recordings/:id/stream`，
 > 最后一条自带 `AuthOrPlaybackTicket`）
-> \+ 登录 31 + teacher/supervisor 4 + director 2 + teacher 2 + supervisor 12 + director/supervisor 1。
+> \+ 登录 32 + teacher/supervisor 4 + director 2 + teacher 2 + supervisor 12 + director/supervisor 2。
 > 下文 §8.1–§8.7 为 Sprint 1 存量，§8.8 为 Sprint 2.1（14 条），§8.9 为 Sprint 2.2 阶段②（4 条），
-> §8.10 为 AI 评析任务链（D3 / R0.2，4 条），§8.11 为提优闭环（N4/N5/B12，11 条），§8.12 为督导抽样队列（R1.2，1 条）。
+> §8.10 为 AI 评析任务链（D3 / R0.2，4 条），§8.11 为提优闭环（N4/N5/B12，11 条），§8.12 为督导抽样队列（R1.2，1 条），
+> §8.13 为报告导出与演示模式（N9/B6，2 条）。
 
 前缀 `/api/v1`。**字段名与前端 `src/types/` 逐字对齐，本节是前后端联调的唯一事实源。**
 
@@ -803,6 +804,40 @@ type SupervisorTaskDTO struct {
 - **批次划分**：第 k 批 = 时间上第 k 组 5 条（正序分块），保证历史样本稳定不漂移；
 - **待人工复评**：样本尚未有督导观察（`reviewed=false`）；已有观察即视为已复评（`pending=1` 过滤掉）；
 - **风险脱敏**：`riskTags` 来自 agent 行 `evidence.riskTags`，仅在本接口（supervisor 专属）暴露。
+
+### 8.13 报告导出与演示模式（2026-10-16 重构 N9/B6，已实现，2 条）
+
+| 方法 路径 | 权限 | 说明 |
+|-----------|------|------|
+| GET `/teachers/:id/report?semester=` | teacher（本人）/ director（本室）/ supervisor | 一页纸报告数据（N9/T2）：综合分 + 五维 + 最近 3 条督导评语 + 待改进清单；前端另做打印视图 |
+| POST `/demo/seed` | director / supervisor | 一键载入示例转写/清单等演示数据（B6/N7）；**仅本地/dev**（`demo.enabled` / `AIJIAOXUE_DEMO_ENABLED`），未开启返回 `40301`，调用前前端二次确认 |
+
+```go
+type TeacherReportDTO struct {
+    TeacherID        uint64               `json:"teacherId"`
+    TeacherName      string               `json:"teacherName"`
+    JobNo            string               `json:"jobNo"`
+    Department       string               `json:"department"`
+    Semester         string               `json:"semester"`
+    Summary          ScoreSummary         `json:"summary"`
+    RecentComments   []EvaluationDTO      `json:"recentComments"`   // 最近 3 条督导评语
+    ImprovementItems []ImprovementItemDTO `json:"improvementItems"`
+    GeneratedAt      string               `json:"generatedAt"`
+}
+type DemoSeedResp struct {
+    Recordings    int    `json:"recordings"`
+    Transcripts   int    `json:"transcripts"`
+    Improvements  int    `json:"improvements"`
+    Reflections   int    `json:"reflections"`
+    Notifications int    `json:"notifications"`
+    Message       string `json:"message"`
+}
+```
+
+- 🔴 **演示模式仅本地/dev**：`demo.enabled=false` 时 `POST /demo/seed` 返回 `40301`（不泄露是否存在）；
+  开启后会在**单事务**内清空 `transcripts` / `recordings` / `recording_playback_logs` / 清单 / 反思 / 站内信并写回演示数据；
+  **不触碰用户、课程、评价**（AI 报告沿用种子 agent 行）。
+- **报告口径**：与教师面板同源（单一 `scoring.Aggregate`），前端打印视图只展示、不重算。
 
 ## 9. 中间件规范（`internal/middleware/`）
 

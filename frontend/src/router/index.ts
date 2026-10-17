@@ -94,10 +94,10 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '我的质量档案', roles: ['teacher'] }
       },
       {
-        path: 'drafts',
-        name: 'draft-box',
-        component: () => import('@/views/DraftBoxView.vue'),
-        meta: { title: '草稿箱', roles: ['supervisor'] }
+        path: 'teachers/:id/report',
+        name: 'teacher-report',
+        component: () => import('@/views/TeacherReportView.vue'),
+        meta: { title: '质量报告', roles: ['director', 'supervisor', 'teacher'] }
       },
       {
         path: 'profile',

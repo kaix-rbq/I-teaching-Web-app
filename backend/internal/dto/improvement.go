@@ -101,3 +101,13 @@ type NotificationListQuery struct {
 	Page     int `form:"page"`
 	PageSize int `form:"pageSize"`
 }
+
+// DemoSeedResp 是 POST /demo/seed 的响应（B6/N7）。
+type DemoSeedResp struct {
+	Recordings    int    `json:"recordings"`
+	Transcripts   int    `json:"transcripts"`
+	Improvements  int    `json:"improvements"`
+	Reflections   int    `json:"reflections"`
+	Notifications int    `json:"notifications"`
+	Message       string `json:"message"`
+}

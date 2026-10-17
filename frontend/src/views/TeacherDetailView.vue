@@ -59,6 +59,10 @@ function goBack(): void {
   router.back()
 }
 
+function goReport(): void {
+  void router.push({ name: 'teacher-report', params: { id: teacherId.value }, query: semester.value ? { semester: semester.value } : {} })
+}
+
 function handleSelectCourse(courseId: number): void {
   void router.push({ name: 'course-detail', params: { id: courseId } })
 }
@@ -95,6 +99,7 @@ onMounted(() => {
             :value="item"
           />
         </el-select>
+        <el-button type="primary" plain @click="goReport">质量报告</el-button>
       </template>
     </PageHeader>
 

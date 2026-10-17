@@ -169,6 +169,14 @@ export interface SupervisorEvaluationPayload {
   suggestions?: string
 }
 
+/** 督导纯评语观察提交体（PUT /sessions/:id/supervisor-observation，B8 无五维分，至少填一项） */
+export interface SupervisorObservationPayload {
+  comment?: string
+  highlights?: string
+  improvements?: string
+  suggestions?: string
+}
+
 /** 创建授课记录提交体（POST /sessions，仅督导） */
 export interface SessionCreatePayload {
   courseId: number

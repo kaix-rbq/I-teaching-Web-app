@@ -12,6 +12,7 @@ declare module 'vue' {
     AiBadge: typeof import('./components/common/AiBadge.vue')['default']
     AnchorScale: typeof import('./components/evaluation/AnchorScale.vue')['default']
     AudioPlayer: typeof import('./components/session/AudioPlayer.vue')['default']
+    BrowserRecorder: typeof import('./components/session/BrowserRecorder.vue')['default']
     CommentPanel: typeof import('./components/evaluation/CommentPanel.vue')['default']
     CourseCard: typeof import('./components/course/CourseCard.vue')['default']
     CourseInfoForm: typeof import('./components/course/CourseInfoForm.vue')['default']

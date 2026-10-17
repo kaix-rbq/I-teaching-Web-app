@@ -360,6 +360,26 @@ mysql -h 127.0.0.1 -P "${MYSQL_PORT:-3306}" -u aijiaoxue -paijiaoxue_dev aijiaox
   -e "DELETE FROM improvement_items; DELETE FROM teaching_reflections; DELETE FROM user_notifications; DELETE FROM ai_tasks;" >/dev/null 2>&1 \
   && echo "${c_dim}已清理提优闭环新增数据${c_reset}"
 
+echo
+echo "${c_dim}== 15. 报告导出（N9）与演示模式（B6/N7）==${c_reset}"
+REP="$(req "$BASE/teachers/2/report" "${AUTH_D[@]}")"
+want "教师报告接口可用"                 "0"     "$REP" "d['code']"
+want "报告综合分=72.5"                  "72.5"  "$REP" "d['data']['summary']['compositeScore']"
+want "报告含最近督导评语"               "True"  "$REP" "len(d['data']['recentComments'])>0"
+want "报告含待改进清单字段"             "True"  "$REP" "'improvementItems' in d['data']"
+want "报告含教师姓名=李明"              "李明"  "$REP" "d['data']['teacherName']"
+want "教师查他人报告 40302"             "40302" "$(req "$BASE/teachers/3/report" "${AUTH_T[@]}")" "d['code']"
+
+DEMO="$(req -X POST "$BASE/demo/seed" "${AUTH_S[@]}")"
+DEMO_CODE="$(json "$DEMO" "d['code']")"
+if [ "$DEMO_CODE" = "0" ]; then
+  want "演示数据载入成功"               "0"  "$DEMO" "d['code']"
+  want "演示转写条数=14"                "14" "$DEMO" "d['data']['transcripts']"
+  want "演示载入后可读示例转写"          "done" "$(req "$BASE/sessions/1/transcript" "${AUTH_S[@]}")" "d['data']['transcript']['status']"
+else
+  want "演示模式未开启返回 40301"       "40301" "$DEMO" "d['code']"
+fi
+
 rm -f "$TMPFILE"
 
 # 清理本次验收新增的课程，保持种子数据纯净

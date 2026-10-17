@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"sort"
+	"time"
 
 	"aijiaoxue-api/internal/config"
 	"aijiaoxue-api/internal/dto"
@@ -22,23 +23,31 @@ type TeacherScoreService interface {
 	TeacherSummary(ctx context.Context, role string, deptID, userID, teacherID uint64, semester string) (*dto.TeacherEvaluationSummary, error)
 	CourseSummary(ctx context.Context, role string, deptID, userID, courseID uint64, semester string) (*dto.CourseEvaluationSummary, error)
 	TeacherEvaluations(ctx context.Context, role string, deptID, userID, teacherID uint64, q dto.TeacherEvaluationTimelineQuery) (*dto.PageResult[dto.TeacherEvaluationTimelineItem], error)
+	// Report 返回教师报告数据（N9 一页纸：综合分 + 五维 + 最近 3 条督导评语 + 待改进清单）。
+	Report(ctx context.Context, role string, deptID, userID, teacherID uint64, semester string) (*dto.TeacherReportDTO, error)
 }
 
 type teacherScoreService struct {
-	users   repository.UserRepository
-	courses repository.CourseRepository
-	evals   repository.EvaluationRepository
-	cfg     config.EvaluationConfig
+	users        repository.UserRepository
+	courses      repository.CourseRepository
+	evals        repository.EvaluationRepository
+	improvements repository.ImprovementRepository
+	cfg          config.EvaluationConfig
 }
 
-// NewTeacherScoreService 构造教师评分聚合服务。
+// NewTeacherScoreService 构造教师评分聚合服务。improvements 可选（报告接口用）。
 func NewTeacherScoreService(
 	users repository.UserRepository,
 	courses repository.CourseRepository,
 	evals repository.EvaluationRepository,
 	cfg config.EvaluationConfig,
+	improvements ...repository.ImprovementRepository,
 ) TeacherScoreService {
-	return &teacherScoreService{users: users, courses: courses, evals: evals, cfg: cfg}
+	svc := &teacherScoreService{users: users, courses: courses, evals: evals, cfg: cfg}
+	if len(improvements) > 0 {
+		svc.improvements = improvements[0]
+	}
+	return svc
 }
 
 // List 返回教师评分列表（S6.4）：director 本室 / supervisor 全校或按教研室筛选。
@@ -340,6 +349,96 @@ func (s *teacherScoreService) TeacherEvaluations(
 		items = append(items, item)
 	}
 	return dto.NewPageResult(items, int64(total), page, pageSize), nil
+}
+
+// Report 返回教师报告数据（N9 / T2）：综合分 + 五维 + 最近 3 条督导评语 + 待改进清单。
+// 权限与教师面板一致（teacher 仅自己 / director 本室 / supervisor 全校）。
+func (s *teacherScoreService) Report(
+	ctx context.Context, role string, deptID, userID, teacherID uint64, semester string,
+) (*dto.TeacherReportDTO, error) {
+	sem, err := resolveSemester(semester)
+	if err != nil {
+		return nil, err
+	}
+	teacher, err := s.checkTeacherAccess(ctx, role, deptID, userID, teacherID)
+	if err != nil {
+		return nil, err
+	}
+
+	rows, err := s.evals.ListSessionDimRows(ctx, repository.SessionDimFilter{
+		TeacherID: teacherID, Semester: sem, FormulaVersion: s.cfg.FormulaVersion,
+	})
+	if err != nil {
+		return nil, errcode.Wrap(errcode.Internal, "查询教师报告失败", err)
+	}
+	summary := s.toScoreSummary(s.aggregate(rows))
+
+	// 最近 3 条督导评语：按课次倒序累计督导观察评语。
+	evaluated := make([]repository.SessionDimRow, 0, len(rows))
+	for _, row := range rows {
+		if row.HasSupervisor || row.HasAgent {
+			evaluated = append(evaluated, row)
+		}
+	}
+	sort.SliceStable(evaluated, func(i, j int) bool {
+		if !evaluated[i].SessionDate.Equal(evaluated[j].SessionDate) {
+			return evaluated[i].SessionDate.After(evaluated[j].SessionDate)
+		}
+		return evaluated[i].SessionID > evaluated[j].SessionID
+	})
+	ids := make([]uint64, 0, len(evaluated))
+	for _, row := range evaluated {
+		ids = append(ids, row.SessionID)
+	}
+	evalRows, err := s.evals.ListBySessionIDs(ctx, ids)
+	if err != nil {
+		return nil, errcode.Wrap(errcode.Internal, "查询督导评语失败", err)
+	}
+	bySession := make(map[uint64][]repository.EvaluationRow, len(ids))
+	for _, e := range evalRows {
+		bySession[e.SessionID] = append(bySession[e.SessionID], e)
+	}
+	comments := make([]dto.EvaluationDTO, 0, 3)
+	for _, id := range ids {
+		for _, e := range bySession[id] {
+			if e.EvaluatorType != model.EvaluatorSupervisor {
+				continue
+			}
+			comments = append(comments, toEvaluationDTO(e))
+			if len(comments) >= 3 {
+				break
+			}
+		}
+		if len(comments) >= 3 {
+			break
+		}
+	}
+
+	items := make([]dto.ImprovementItemDTO, 0)
+	if s.improvements != nil {
+		improvements, _, ierr := s.improvements.List(ctx, repository.ImprovementListFilter{
+			TeacherID: teacherID, Page: 1, PageSize: 20,
+		})
+		if ierr != nil {
+			return nil, errcode.Wrap(errcode.Internal, "查询待改进清单失败", ierr)
+		}
+		for _, it := range improvements {
+			items = append(items, toImprovementDTO(it))
+		}
+	}
+
+	deptName, _ := s.users.GetDepartmentName(ctx, teacher.DeptID())
+	return &dto.TeacherReportDTO{
+		TeacherID:        teacherID,
+		TeacherName:      teacher.Name,
+		JobNo:            teacher.JobNo,
+		Department:       deptName,
+		Semester:         sem,
+		Summary:          summary,
+		RecentComments:   comments,
+		ImprovementItems: items,
+		GeneratedAt:      time.Now().Format(time.RFC3339),
+	}, nil
 }
 
 // sessionScoreFromDim 把一行场次维度均分映射为 scoring.SessionScore。

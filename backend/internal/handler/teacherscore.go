@@ -100,3 +100,22 @@ func (h *TeacherScoreHandler) TeacherEvaluations(c *gin.Context) {
 	}
 	response.OK(c, data)
 }
+
+// Report 处理 GET /api/v1/teachers/:id/report（N9 一页纸报告数据）。
+// 权限与教师面板一致：director 本室 / teacher 仅自己 / supervisor 全校。
+func (h *TeacherScoreHandler) Report(c *gin.Context) {
+	id, err := pathID(c)
+	if err != nil {
+		response.Fail(c, err)
+		return
+	}
+	role, _ := middleware.Role(c)
+	userID, _ := middleware.UserID(c)
+
+	data, err := h.teacherScores.Report(c.Request.Context(), role, middleware.DeptID(c), userID, id, c.Query("semester"))
+	if err != nil {
+		response.Fail(c, err)
+		return
+	}
+	response.OK(c, data)
+}

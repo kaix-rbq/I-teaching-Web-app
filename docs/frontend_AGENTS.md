@@ -19,6 +19,8 @@
 > **接口契约以后端 [`backend_AGENTS.md`](./backend_AGENTS.md) §8 为准**；文档冲突时以开发计划与后端契约文档为准（契约先行：先改文档，再改代码）。
 >
 > ⚠️ **效力声明（2026-10-16 重构）**：本手册的技术栈、目录、设计令牌继续有效；但路由页面（§6/§7：草稿箱、督导五维表单、教师落点、督导队列）与展示口径已被 [`2026-10-16-教学提优重构开发计划.md`](./2026-10-16-教学提优重构开发计划.md) §6–§7 取代——教师工作台改造 `/me/quality`（不新建路由）、督导队列改造 `DashboardView`、评估页督导态只留评语表单、草稿箱入口删除。重构 PR 必须同步更新 §6/§7，冲突处以 10.16 计划为准。
+>
+> **重构已落地的前端变更（本轮）**：① 草稿箱路由 `/drafts` 与侧边栏入口删除（`EvaluationForm` 移除「保存草稿」，提交改 `PUT /sessions/:id/supervisor-observation`）；② 督导侧边栏补「听评课管理」（`/supervision`，N12）；③ 评估页督导态 `EvaluationForm` 以 `comment-only` 渲染（无五维刻度，只留评语，B8）；④ 录音区新增 `BrowserRecorder` 浏览器录音**演示占位**（禁用、不调接口，R2.4/B5）；⑤ 新增 `/teachers/:id/report` 一页纸报告打印视图（`TeacherReportView`，N9）；⑥ 顶栏新增 DEV 可见「载入演示数据」按钮（`POST /demo/seed`，B6/N7）。
 
 ---
 
@@ -205,7 +207,7 @@
 | 当堂课质量评估 | `/sessions/:id/evaluation` | 只读 本室 | 只读 本人 | ✓ 唯一可写 | S2①（S2② 增强） |
 | 课程综合评分（督导复盘） | `/supervision/courses/:id` | ✗ | ✗ | ✓ 仅本人负责评估的课程 | v1.3 |
 | 我的质量档案 | `/me/quality` | ✗ | ✓ 仅本人 | ✗ | v1.2（教师登录首页） |
-| 草稿箱 | `/drafts` | ✗ | ✗ | ✓ 仅本人 | v1.2 |
+| 草稿箱 | `/drafts` | ✗ | ✗ | ✗（2026-10-16 下线，入口与路由删除） | v1.2 → 重构停用 |
 | 听评课管理 | `/supervision` | ✗ | ✗ | ✓ | S1（S2① 改造） |
 | 个人中心 | `/profile` | ✓ | ✓ | ✓ | S1 |
 
@@ -419,7 +421,7 @@ frontend/                       # 包名 aijiaoxue-web
 | `/sessions/:id/evaluation` | session-evaluation | SessionEvaluationView | App | 登录（督导可写，他人只读；无 `meta.roles`） | S2① 新增（v1.2 增「保存草稿」；v1.3 教师由授课快照进入，增智能体文字评价与转写入口） |
 | `/supervision/courses/:id` | supervisor-course | SupervisorCourseView | App | supervisor | v1.3 新增（督导课程综合评分 + 授课记录评估/录音上传） |
 | `/me/quality` | profile-quality | ProfileQualityView | App | teacher | v1.0 新增（v1.2 为教师首页） |
-| `/drafts` | draft-box | DraftBoxView | App | supervisor | v1.2 新增（督导草稿箱） |
+| `/teachers/:id/report` | teacher-report | TeacherReportView | App | director / supervisor / teacher | 2026-10-16 重构新增（N9 一页纸报告打印视图） |
 | `/supervision` | supervision | SupervisionView | App | supervisor | S1（v1.2 起从督导菜单摘除，保留后备） |
 | `/profile` | profile | ProfileView | App | 登录 | S1 |
 | `/403` | forbidden | ForbiddenView | Blank | 公开 | S1 |
@@ -532,7 +534,7 @@ frontend/                       # 包名 aijiaoxue-web
 
 - 侧边栏菜单**按角色渲染**（实现：`frontend/src/layouts/AppLayout.vue:36-64`，单一 `menuItems` 计算属性 + 角色分支）：
   - 教师（`AppLayout.vue:40-45`）：**我的质量档案**（`profile-quality`）/ **我的课程**（`course-list`）/ 个人中心；
-  - 督导（`AppLayout.vue:49-56`）：**工作台**（`dashboard`）/ **课程列表**（`course-list`）/ **草稿箱**（`draft-box`）/ 个人中心；
+  - 督导（`AppLayout.vue`）：**工作台**（`dashboard`）/ **课程列表**（`course-list`）/ **听评课管理**（`supervision`，N12 补齐）/ 个人中心；草稿箱入口已于 2026-10-16 下线；
   - 主任（`AppLayout.vue:58-63`）：**质量驾驶舱**（`dashboard`）/ **课程库**（`course-list`）/ **教师画像**（`teacher-list`）/ 个人中心；
   - **禁止为每个角色写一份菜单模板**；
 - 菜单项：40px 高，激活态浅蓝底 `--color-primary-bg` + 主色文字 + 左侧 3px 指示条；

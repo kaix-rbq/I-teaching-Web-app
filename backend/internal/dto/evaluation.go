@@ -335,6 +335,20 @@ type SupervisorTaskListQuery struct {
 	PageSize int    `form:"pageSize"`
 }
 
+// TeacherReportDTO 是 GET /teachers/:id/report 的响应（N9 一页纸报告）。
+// T2 确认：综合分 + 五维条 + 最近 3 条督导评语 + 待改进清单；前端另做打印视图。
+type TeacherReportDTO struct {
+	TeacherID        uint64               `json:"teacherId"`
+	TeacherName      string               `json:"teacherName"`
+	JobNo            string               `json:"jobNo"`
+	Department       string               `json:"department"`
+	Semester         string               `json:"semester"`
+	Summary          ScoreSummary         `json:"summary"`
+	RecentComments   []EvaluationDTO      `json:"recentComments"`
+	ImprovementItems []ImprovementItemDTO `json:"improvementItems"`
+	GeneratedAt      string               `json:"generatedAt"`
+}
+
 // AiTaskDTO 是 GET /ai-tasks/:id 的响应：任务状态查询（D3）。
 type AiTaskDTO struct {
 	ID           uint64 `json:"id"`

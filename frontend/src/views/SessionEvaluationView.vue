@@ -9,11 +9,11 @@ import EvaluationCompare from '@/components/evaluation/EvaluationCompare.vue'
 import ScoreRadar from '@/components/evaluation/ScoreRadar.vue'
 import {
   fetchSessionEvaluationApi,
-  submitSupervisorEvaluationApi
+  submitSupervisorObservationApi
 } from '@/api/session'
 import { fetchSessionTranscriptApi, retrySessionTranscriptApi, uploadSessionRecordingApi } from '@/api/session'
-import { fetchSessionDraftApi, saveSessionDraftApi } from '@/api/draft'
 import AudioPlayer from '@/components/session/AudioPlayer.vue'
+import BrowserRecorder from '@/components/session/BrowserRecorder.vue'
 import TranscriptViewer from '@/components/evaluation/TranscriptViewer.vue'
 import AiBadge from '@/components/common/AiBadge.vue'
 import { useAuthStore } from '@/stores/auth'
@@ -23,9 +23,8 @@ import type {
   EvaluationDTO,
   EvaluationFormModel,
   SessionEvaluation,
-  SupervisorEvaluationPayload
+  SupervisorObservationPayload
 } from '@/types/evaluation'
-import type { DraftDTO, DraftUpsertPayload } from '@/types/draft'
 
 const route = useRoute()
 const router = useRouter()
@@ -35,7 +34,6 @@ const data = ref<SessionEvaluation | null>(null)
 const loading = ref(true)
 const error = ref(false)
 const submitting = ref(false)
-const draftSaving = ref(false)
 const activeEvaluation = ref<EvaluationDTO | null>(null)
 
 const sessionId = computed(() => String(route.params.id ?? ''))
@@ -67,20 +65,6 @@ function fromEvaluation(evaluation: EvaluationDTO): EvaluationFormModel {
     highlights: evaluation.highlights ?? '',
     improvements: evaluation.improvements ?? '',
     suggestions: evaluation.suggestions ?? ''
-  }
-}
-
-function fromDraft(draft: DraftDTO): EvaluationFormModel {
-  return {
-    objective: draft.objective,
-    content: draft.content,
-    interaction: draft.interaction,
-    organization: draft.organization,
-    frontier: draft.frontier,
-    comment: draft.comment ?? '',
-    highlights: draft.highlights ?? '',
-    improvements: draft.improvements ?? '',
-    suggestions: draft.suggestions ?? ''
   }
 }
 
@@ -222,15 +206,6 @@ async function load(): Promise<void> {
     } else {
       form.value = emptyForm()
     }
-    // 督导：草稿优先于已提交评价，便于继续未完成的编辑。
-    if (isSupervisor.value) {
-      try {
-        const savedDraft = await fetchSessionDraftApi(sessionId.value)
-        if (savedDraft) form.value = fromDraft(savedDraft)
-      } catch {
-        // 草稿读取失败不阻断评估页
-      }
-    }
     await loadMedia()
   } catch {
     error.value = true
@@ -246,67 +221,29 @@ function latestFrom(result: SessionEvaluation): EvaluationDTO | null {
   return [...list].sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1))[0]
 }
 
-function buildPayload(): SupervisorEvaluationPayload | null {
+function buildObservationPayload(): SupervisorObservationPayload | null {
   const value = form.value
-  if (
-    value.objective === null ||
-    value.content === null ||
-    value.interaction === null ||
-    value.organization === null ||
-    value.frontier === null
-  ) {
-    return null
-  }
-  return {
-    objective: value.objective,
-    content: value.content,
-    interaction: value.interaction,
-    organization: value.organization,
-    frontier: value.frontier,
+  const payload: SupervisorObservationPayload = {
     comment: value.comment,
     highlights: value.highlights,
     improvements: value.improvements,
     suggestions: value.suggestions
   }
-}
-
-/** 草稿允许部分维度为空，直接透传表单当前状态。 */
-function buildDraftPayload(): DraftUpsertPayload {
-  const value = form.value
-  return {
-    objective: value.objective,
-    content: value.content,
-    interaction: value.interaction,
-    organization: value.organization,
-    frontier: value.frontier,
-    comment: value.comment,
-    highlights: value.highlights,
-    improvements: value.improvements,
-    suggestions: value.suggestions
-  }
-}
-
-async function handleSaveDraft(): Promise<void> {
-  draftSaving.value = true
-  try {
-    await saveSessionDraftApi(sessionId.value, buildDraftPayload())
-    ElMessage.success('草稿已保存，可在草稿箱继续编辑')
-  } catch {
-    // 错误提示由 api/http.ts 拦截器统一处理
-  } finally {
-    draftSaving.value = false
-  }
+  const filled = [payload.comment, payload.highlights, payload.improvements, payload.suggestions].some(
+    (v) => (v ?? '').trim() !== ''
+  )
+  return filled ? payload : null
 }
 
 async function handleSubmit(): Promise<void> {
-  const payload = buildPayload()
+  const payload = buildObservationPayload()
   if (!payload) {
-    ElMessage.error('请先完成五个维度的评分')
+    ElMessage.error('请至少填写一项督导观察评语')
     return
   }
   if (ownEvaluation.value) {
     try {
-      await ElMessageBox.confirm('你已提交过本次课的评分，继续将覆盖上次的评分与评语。', '覆盖确认', {
+      await ElMessageBox.confirm('你已提交过本次课的观察，继续将覆盖上次的评语。', '覆盖确认', {
         type: 'warning',
         confirmButtonText: '覆盖提交',
         cancelButtonText: '取消'
@@ -317,8 +254,8 @@ async function handleSubmit(): Promise<void> {
   }
   submitting.value = true
   try {
-    await submitSupervisorEvaluationApi(sessionId.value, payload)
-    ElMessage.success('评分已提交')
+    await submitSupervisorObservationApi(sessionId.value, payload)
+    ElMessage.success('督导观察已提交')
     await load()
   } catch {
     // 错误提示由 api/http.ts 拦截器统一处理
@@ -471,15 +408,13 @@ onUnmounted(() => { if (pollTimer) clearTimeout(pollTimer) })
       <div class="session-evaluation__grid">
         <div class="session-evaluation__main">
           <section class="session-evaluation__card">
-            <h2 class="session-evaluation__card-title">督导评分</h2>
+            <h2 class="session-evaluation__card-title">{{ isSupervisor ? '督导观察' : '督导评分' }}</h2>
             <EvaluationForm
               v-model="form"
               :readonly="readonly"
               :submitting="submitting"
-              :show-draft="isSupervisor"
-              :draft-saving="draftSaving"
+              :comment-only="isSupervisor"
               @submit="handleSubmit"
-              @save-draft="handleSaveDraft"
             />
           </section>
         </div>
@@ -515,6 +450,7 @@ onUnmounted(() => { if (pollTimer) clearTimeout(pollTimer) })
               </el-upload>
               <el-progress v-if="uploadProgress > 0 && uploadProgress < 100" :percentage="uploadProgress" />
               <AudioPlayer v-if="media.recording" :src="recordingURL" :name="media.recording.originalName" />
+              <BrowserRecorder />
             </template>
             <p v-else-if="media.recording" class="session-evaluation__muted">
               课堂录音已收录（{{ media.recording.originalName }}）；回放仅教学督导可见，

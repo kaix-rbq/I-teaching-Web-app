@@ -37,6 +37,7 @@ func New(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) (*gin.Engine, se
 	improvementRepo := repository.NewImprovementRepository(db)
 	reflectionRepo := repository.NewReflectionRepository(db)
 	notificationRepo := repository.NewNotificationRepository(db)
+	demoRepo := repository.NewDemoRepository(db)
 
 	authSvc := service.NewAuthService(userRepo, jwt)
 	courseSvc := service.NewCourseService(courseRepo, userRepo)
@@ -49,7 +50,8 @@ func New(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) (*gin.Engine, se
 	improvementSvc := service.NewImprovementService(improvementRepo)
 	reflectionSvc := service.NewReflectionService(reflectionRepo)
 	supervisionTaskSvc := service.NewSupervisionTaskService(evaluationRepo, cfg.Evaluation)
-	teacherScoreSvc := service.NewTeacherScoreService(userRepo, courseRepo, evaluationRepo, cfg.Evaluation)
+	demoSvc := service.NewDemoService(demoRepo, cfg.Demo.Enabled)
+	teacherScoreSvc := service.NewTeacherScoreService(userRepo, courseRepo, evaluationRepo, cfg.Evaluation, improvementRepo)
 	// ⚠️ 不能写 Transcriber(asr.NewClient(...))：把 nil 的 *asr.Client 装进接口会得到
 	// 非 nil 接口（holds-nil-pointer），service 里的 `s.transcriber == nil` 判断会失效，
 	// 调用时直接空指针 panic。必须显式判空后再赋值。
@@ -87,6 +89,7 @@ func New(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) (*gin.Engine, se
 	reflectionH := handler.NewReflectionHandler(reflectionSvc)
 	notificationH := handler.NewNotificationHandler(notificationSvc)
 	supervisionTaskH := handler.NewSupervisionTaskHandler(supervisionTaskSvc)
+	demoH := handler.NewDemoHandler(demoSvc)
 
 	gin.SetMode(cfg.Server.Mode)
 	r := gin.New()
@@ -125,6 +128,7 @@ func New(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) (*gin.Engine, se
 	authed.POST("/sessions/:id/transcript/retry", recordingH.Retry)
 	authed.GET("/teachers/:id/evaluation-summary", teacherScoreH.TeacherSummary)
 	authed.GET("/teachers/:id/evaluations", teacherScoreH.TeacherEvaluations)
+	authed.GET("/teachers/:id/report", teacherScoreH.Report)
 
 	// —— AI 观察（D3 / R0.2）：详情与入队；数据裁剪在 service 层（D8 教师侧风险脱敏）——
 	authed.GET("/sessions/:id/ai-observation", aiTaskH.Observation)
@@ -176,7 +180,8 @@ func New(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) (*gin.Engine, se
 		POST("/drafts/:id/submit", handler.Deprecated("评估草稿已停用"))
 
 	authed.Group("", middleware.RequireRoles(service.RoleDirector, service.RoleSupervisor)).
-		GET("/teacher-scores", teacherScoreH.List)
+		GET("/teacher-scores", teacherScoreH.List).
+		POST("/demo/seed", demoH.Seed)
 
 	return r, recordingSvc, aiTaskSvc
 }
