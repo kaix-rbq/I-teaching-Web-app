@@ -80,9 +80,9 @@ func buildDemoData() repository.DemoData {
 		})
 		data.Recordings = append(data.Recordings, repository.DemoRecording{
 			SessionID: ds.ID, UploadedBy: demoUploader,
-			FilePath:     fmt.Sprintf("uploads/recordings/%d/demo.mp3", ds.ID),
-			OriginalName: fmt.Sprintf("demo-session-%d.mp3", ds.ID), Format: "mp3",
-			Size: 1_000_000, DurationSec: 2700,
+			FilePath:     fmt.Sprintf("uploads/recordings/%d/demo.wav", ds.ID),
+			OriginalName: fmt.Sprintf("demo-session-%d.wav", ds.ID), Format: "wav",
+			DurationSec: 120,
 		})
 		data.Transcripts = append(data.Transcripts, repository.DemoTranscript{
 			SessionID: ds.ID, Content: content, Segments: string(segments),

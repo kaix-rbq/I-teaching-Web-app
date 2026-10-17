@@ -1,7 +1,12 @@
 package repository
 
 import (
+	"bytes"
 	"context"
+	"encoding/binary"
+	"log/slog"
+	"os"
+	"path/filepath"
 	"time"
 
 	"gorm.io/gorm"
@@ -73,9 +78,16 @@ func (r *demoRepository) Seed(ctx context.Context, data DemoData) (DemoCounts, e
 
 		recIDBySession := make(map[uint64]uint64, len(data.Recordings))
 		for _, rec := range data.Recordings {
+			// 写一段真实可播放的静音 WAV（演示占位音频），避免前端播放器 404。
+			wav := silentWAV(2)
+			if err := os.MkdirAll(filepath.Dir(rec.FilePath), 0o755); err == nil {
+				if werr := os.WriteFile(rec.FilePath, wav, 0o640); werr != nil {
+					slog.Warn("写入演示音频失败", "path", rec.FilePath, "err", werr)
+				}
+			}
 			record := &model.Recording{
 				SessionID: rec.SessionID, FilePath: rec.FilePath, OriginalName: rec.OriginalName,
-				Format: rec.Format, Size: rec.Size, DurationSec: rec.DurationSec, UploadedBy: rec.UploadedBy,
+				Format: rec.Format, Size: int64(len(wav)), DurationSec: rec.DurationSec, UploadedBy: rec.UploadedBy,
 				UploadedAt: time.Now(),
 			}
 			if err := tx.Create(record).Error; err != nil {
@@ -115,4 +127,30 @@ func (r *demoRepository) Seed(ctx context.Context, data DemoData) (DemoCounts, e
 		return nil
 	})
 	return counts, err
+}
+
+// silentWAV 生成一段静音 PCM WAV（8000Hz / 单声道 / 16bit），用于演示音频占位。
+func silentWAV(seconds int) []byte {
+	const (
+		sampleRate = 8000
+		channels   = 1
+		bits       = 16
+	)
+	dataSize := sampleRate * channels * (bits / 8) * seconds
+	buf := new(bytes.Buffer)
+	buf.WriteString("RIFF")
+	_ = binary.Write(buf, binary.LittleEndian, uint32(36+dataSize))
+	buf.WriteString("WAVE")
+	buf.WriteString("fmt ")
+	_ = binary.Write(buf, binary.LittleEndian, uint32(16))
+	_ = binary.Write(buf, binary.LittleEndian, uint16(1))
+	_ = binary.Write(buf, binary.LittleEndian, uint16(channels))
+	_ = binary.Write(buf, binary.LittleEndian, uint32(sampleRate))
+	_ = binary.Write(buf, binary.LittleEndian, uint32(sampleRate*channels*bits/8))
+	_ = binary.Write(buf, binary.LittleEndian, uint16(channels*bits/8))
+	_ = binary.Write(buf, binary.LittleEndian, uint16(bits))
+	buf.WriteString("data")
+	_ = binary.Write(buf, binary.LittleEndian, uint32(dataSize))
+	buf.Write(make([]byte, dataSize))
+	return buf.Bytes()
 }

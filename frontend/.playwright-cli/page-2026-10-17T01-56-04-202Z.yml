@@ -1,0 +1,32 @@
+- generic [active] [ref=f1e1]:
+  - generic [ref=f1e4]:
+    - generic [ref=f1e6]:
+      - generic [ref=f1e7]:
+        - generic [ref=f1e8]: 爱
+        - generic [ref=f1e9]: 爱教学
+      - heading "让教学质量持续可测" [level=1] [ref=f1e10]
+      - img "五维教学质量雷达示意" [ref=f1e11]:
+        - generic [ref=f1e30]:
+          - generic [ref=f1e31]: 目标内容
+          - generic [ref=f1e32]: 内容深度
+          - generic [ref=f1e33]: 互动参与
+          - generic [ref=f1e34]: 组织节奏
+          - generic [ref=f1e35]: 前沿交叉
+      - generic [ref=f1e36]: AI 提优建议 · 让改进有落点
+    - generic [ref=f1e39]:
+      - heading "欢迎登录" [level=2] [ref=f1e40]
+      - paragraph [ref=f1e41]: 请使用统一账号按角色登录
+      - generic [ref=f1e42]:
+        - textbox "请输入账号" [ref=f1e47]
+        - textbox "请输入密码" [ref=f1e53]
+        - generic [ref=f1e55]:
+          - button "登录" [disabled]
+      - separator [ref=f1e58]:
+        - generic [ref=f1e59]: 演示角色快捷入口
+      - generic [ref=f1e60]:
+        - button "以主任身份体验" [disabled] [ref=f1e61]
+        - button "以教师身份体验" [disabled] [ref=f1e63]
+        - button "以督导身份体验" [disabled] [ref=f1e65]
+      - paragraph [ref=f1e67]: 演示账号密码统一为 123456
+  - alert [ref=f1e69]:
+    - paragraph [ref=f1e73]: 已进入演示账号
