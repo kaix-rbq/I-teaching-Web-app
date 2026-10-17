@@ -123,6 +123,28 @@ func (s *sessionService) Create(ctx context.Context, role string, deptID, userID
 		}
 	}
 
+	// B11/classId 必填（计划 §4.1）：杜绝 class_id=0 导致的 uk_session 碰撞。
+	// 例外：经听评课计划快捷建课（planId 非空）时计划本身无班级信息，允许 0。
+	if req.ClassID == 0 && (req.PlanID == nil || *req.PlanID == 0) {
+		return nil, errcode.New(errcode.BizRule, "创建授课记录须选择班级")
+	}
+	if req.ClassID != 0 {
+		classes, cerr := s.courses.ListClasses(ctx, req.CourseID)
+		if cerr != nil {
+			return nil, errcode.Wrap(errcode.Internal, "查询开课班级失败", cerr)
+		}
+		ok := false
+		for _, c := range classes {
+			if c.ID == req.ClassID {
+				ok = true
+				break
+			}
+		}
+		if !ok {
+			return nil, errcode.New(errcode.BizRule, "班级不归属该课程")
+		}
+	}
+
 	duplicate, err := s.sessions.ExistsDuplicate(ctx, req.CourseID, req.ClassID, date, req.Period, 0)
 	if err != nil {
 		return nil, errcode.Wrap(errcode.Internal, "校验授课记录唯一性失败", err)

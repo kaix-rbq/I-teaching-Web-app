@@ -38,13 +38,14 @@ func New(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) (*gin.Engine, se
 	reflectionRepo := repository.NewReflectionRepository(db)
 	notificationRepo := repository.NewNotificationRepository(db)
 	demoRepo := repository.NewDemoRepository(db)
+	timetableRepo := repository.NewTimetableRepository(db)
 
 	authSvc := service.NewAuthService(userRepo, jwt)
 	courseSvc := service.NewCourseService(courseRepo, userRepo)
 	resourceSvc := service.NewResourceService(resourceRepo, courseRepo, cfg.Upload)
 	supervisionSvc := service.NewSupervisionService(supervisionRepo)
 	dashboardSvc := service.NewDashboardService(courseRepo, userRepo, resourceRepo, supervisionRepo, draftRepo, sessionRepo)
-	dictSvc := service.NewDictService(userRepo)
+	dictSvc := service.NewDictService(userRepo, courseRepo, timetableRepo)
 	notificationSvc := service.NewNotificationService(notificationRepo, sessionRepo)
 	sessionSvc := service.NewSessionServiceWithDelete(sessionRepo, evaluationRepo, courseRepo, userRepo, recordingRepo, improvementRepo, cfg.Evaluation, notificationSvc)
 	improvementSvc := service.NewImprovementService(improvementRepo)
@@ -118,6 +119,8 @@ func New(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) (*gin.Engine, se
 	authed.GET("/resources/:id/download", resourceH.Download)
 	authed.GET("/departments", dictH.Departments)
 	authed.GET("/teachers", dictH.Teachers)
+	// B11 最小课表下拉：建课时课程/班级下拉数据源（维护见下方 director/supervisor 组）。
+	authed.GET("/timetable/mine", dictH.MyTimetable)
 
 	// Sprint 2.1：评价闭环（数据裁剪在 service 层，铁律见后端 AGENTS.md §3）。
 	authed.GET("/courses/:id/sessions", sessionH.ListByCourse)
@@ -181,6 +184,8 @@ func New(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) (*gin.Engine, se
 
 	authed.Group("", middleware.RequireRoles(service.RoleDirector, service.RoleSupervisor)).
 		GET("/teacher-scores", teacherScoreH.List).
+		POST("/timetable", dictH.CreateTimetable).
+		DELETE("/timetable/:id", dictH.DeleteTimetable).
 		POST("/demo/seed", demoH.Seed)
 
 	return r, recordingSvc, aiTaskSvc

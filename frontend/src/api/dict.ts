@@ -1,6 +1,6 @@
 import { request } from './http'
 import { SEMESTERS } from '@/constants'
-import type { DepartmentOption, DictData, TeacherOption } from '@/types/dict'
+import type { DepartmentOption, DictData, TeacherOption, TimetableItem } from '@/types/dict'
 
 /**
  * 字典数据源：后端提供 /departments 与 /teachers 两个接口，
@@ -16,4 +16,9 @@ export async function fetchDictApi(): Promise<DictData> {
     departments: departments ?? [],
     teachers: teachers ?? []
   }
+}
+
+/** 最小课表下拉（B11）：teacher 查本人，supervisor 可带 teacherId。 */
+export function fetchMyTimetableApi(params: { teacherId?: number; semester?: string } = {}): Promise<TimetableItem[]> {
+  return request<TimetableItem[]>({ url: '/timetable/mine', method: 'get', params })
 }

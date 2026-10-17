@@ -5,7 +5,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"aijiaoxue-api/internal/dto"
+	"aijiaoxue-api/internal/middleware"
 	"aijiaoxue-api/internal/service"
+	"aijiaoxue-api/pkg/errcode"
 	"aijiaoxue-api/pkg/response"
 )
 
@@ -44,4 +47,51 @@ func (h *DictHandler) Teachers(c *gin.Context) {
 		return
 	}
 	response.OK(c, data)
+}
+
+// MyTimetable 处理 GET /api/v1/timetable/mine?teacherId=&semester=（B11 建课下拉）。
+func (h *DictHandler) MyTimetable(c *gin.Context) {
+	var teacherID uint64
+	if raw := c.Query("teacherId"); raw != "" {
+		if parsed, err := strconv.ParseUint(raw, 10, 64); err == nil {
+			teacherID = parsed
+		}
+	}
+	role, _ := middleware.Role(c)
+	uid, _ := middleware.UserID(c)
+	data, err := h.dict.MyTimetable(c.Request.Context(), role, middleware.DeptID(c), uid, teacherID, c.Query("semester"))
+	if err != nil {
+		response.Fail(c, err)
+		return
+	}
+	response.OK(c, data)
+}
+
+// CreateTimetable 处理 POST /api/v1/timetable（director / supervisor 维护）。
+func (h *DictHandler) CreateTimetable(c *gin.Context) {
+	var req dto.TimetableCreateReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Fail(c, errcode.New(errcode.Params, "请求参数错误"))
+		return
+	}
+	data, err := h.dict.CreateTimetableEntry(c.Request.Context(), req)
+	if err != nil {
+		response.Fail(c, err)
+		return
+	}
+	response.OK(c, data)
+}
+
+// DeleteTimetable 处理 DELETE /api/v1/timetable/:id。
+func (h *DictHandler) DeleteTimetable(c *gin.Context) {
+	id, err := pathID(c)
+	if err != nil {
+		response.Fail(c, err)
+		return
+	}
+	if err := h.dict.DeleteTimetableEntry(c.Request.Context(), id); err != nil {
+		response.Fail(c, err)
+		return
+	}
+	response.OK(c, gin.H{"id": id})
 }

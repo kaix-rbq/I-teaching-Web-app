@@ -12,6 +12,7 @@ TRUNCATE TABLE `evaluations`;
 TRUNCATE TABLE `teaching_sessions`;
 TRUNCATE TABLE `supervision_plans`;
 TRUNCATE TABLE `resources`;
+TRUNCATE TABLE `course_timetable`;
 TRUNCATE TABLE `course_classes`;
 TRUNCATE TABLE `courses`;
 TRUNCATE TABLE `users`;
@@ -60,6 +61,22 @@ INSERT INTO `course_classes` (`course_id`, `class_name`, `schedule`, `location`,
 (6, '计科2401',  '周一 5-6 节', '知行楼201', 46),
 (6, '计科2402',  '周一 5-6 节', '知行楼202', 45),
 (8, '智科2301',  '周三 1-2 节', '智慧楼201', 50);
+
+-- 最小课表（B11，仅建课下拉用；班级 id 与上方开课班级插入顺序一致）
+INSERT INTO `course_timetable` (`course_id`, `class_id`, `teacher_id`, `semester`) VALUES
+(1, 1, 2, '2026-2027-1'),
+(1, 2, 2, '2026-2027-1'),
+(2, 3, 3, '2026-2027-1'),
+(2, 4, 3, '2026-2027-1'),
+(2, 5, 3, '2026-2027-1'),
+(3, 6, 4, '2026-2027-1'),
+(3, 7, 4, '2026-2027-1'),
+(4, 8, 2, '2026-2027-1'),
+(4, 9, 2, '2026-2027-1'),
+(5, 10, 6, '2026-2027-1'),
+(5, 11, 6, '2026-2027-1'),
+(6, 12, 4, '2026-2027-1'),
+(6, 13, 4, '2026-2027-1');
 
 -- 课程资源（file_path 为示例相对路径，实际由上传接口生成）
 INSERT INTO `resources` (`course_id`, `name`, `type`, `size`, `file_path`, `uploader_id`, `uploaded_at`) VALUES

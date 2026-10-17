@@ -11,7 +11,9 @@ type SessionListQuery struct {
 // classId 必填（计划 §3.4：前端下拉必选，0=未指定只允许历史数据）。
 type SessionCreateReq struct {
 	CourseID    uint64  `json:"courseId" binding:"required"`
-	ClassID     uint64  `json:"classId" binding:"required"`
+	// ClassID 不在 bind 层 required：缺失/错配由 service 层判 40002，
+	// 且经听评课计划快捷建课（planId 非空）时允许省略（计划 §4.1 例外）。
+	ClassID     uint64  `json:"classId"`
 	SessionDate string  `json:"sessionDate" binding:"required"`
 	Period      string  `json:"period" binding:"required,max=32"`
 	Topic       string  `json:"topic" binding:"max=128"`

@@ -269,7 +269,7 @@ want "教师访问抽样队列 40301"           "40301"  "$(req "$BASE/supervisi
 echo
 echo "${c_dim}== 13. 督导创建授课记录与评分提交（写操作，S6.1/S6.3）==${c_reset}"
 want "主任创建授课记录返回 40301"     "40301" "$(req -X POST "$BASE/sessions" "${AUTH_D[@]}" -H 'Content-Type: application/json' -d '{"courseId":1,"classId":1,"sessionDate":"2026-09-16","period":"验收节次"}')" "d['code']"
-want "缺 classId 返回 40001"           "40001" "$(req -X POST "$BASE/sessions" "${AUTH_S[@]}" -H 'Content-Type: application/json' -d '{"courseId":1,"sessionDate":"2026-09-16","period":"验收节次"}')" "d['code']"
+want "缺 classId 返回 40002"           "40002" "$(req -X POST "$BASE/sessions" "${AUTH_S[@]}" -H 'Content-Type: application/json' -d '{"courseId":1,"sessionDate":"2026-09-16","period":"验收节次"}')" "d['code']"
 want "未来日期返回 40002"             "40002" "$(req -X POST "$BASE/sessions" "${AUTH_S[@]}" -H 'Content-Type: application/json' -d '{"courseId":1,"classId":1,"sessionDate":"2099-01-01","period":"1-2 节"}')" "d['code']"
 want "课程不存在返回 40401"           "40401" "$(req -X POST "$BASE/sessions" "${AUTH_S[@]}" -H 'Content-Type: application/json' -d '{"courseId":9999,"classId":1,"sessionDate":"2026-09-16","period":"1-2 节"}')" "d['code']"
 
@@ -336,6 +336,21 @@ want "教师删除本人录音成功"             "0"     "$(req -X DELETE "$BAS
 want "教师删除本人授课记录成功"         "0"     "$(req -X DELETE "$BASE/sessions/$TSESS_ID" "${AUTH_T[@]}")" "d['code']"
 want "删除后场次不存在 40401"           "40401" "$(req "$BASE/sessions/$TSESS_ID" "${AUTH_T[@]}")" "d['code']"
 rm -f "$TMPAUDIO"
+
+echo
+echo "${c_dim}== 13.3 最小课表下拉与建课班级必填（B11）==${c_reset}"
+TT="$(req "$BASE/timetable/mine" "${AUTH_T[@]}")"
+want "教师课表可读且非空"                "True"  "$TT" "len(d['data'])>0"
+want "教师课表只含本人条目"              "True"  "$TT" "len([x for x in d['data'] if x['teacherId']!=2])==0"
+want "教师传他人 id 仍只返回本人课表"    "True"  "$(req "$BASE/timetable/mine?teacherId=3" "${AUTH_T[@]}")" "len([x for x in d['data'] if x['teacherId']!=2])==0"
+want "建课缺班级返回 40002"              "40002" "$(req -X POST "$BASE/sessions" "${AUTH_T[@]}" -H 'Content-Type: application/json' -d '{"courseId":1,"sessionDate":"2026-09-11","period":"1-2 节"}')" "d['code']"
+want "建课班级错配返回 40002"            "40002" "$(req -X POST "$BASE/sessions" "${AUTH_T[@]}" -H 'Content-Type: application/json' -d '{"courseId":1,"classId":3,"sessionDate":"2026-09-11","period":"1-2 节"}')" "d['code']"
+want "教师维护课表返回 40301"            "40301" "$(req -X POST "$BASE/timetable" "${AUTH_T[@]}" -H 'Content-Type: application/json' -d '{"courseId":1,"classId":1}')" "d['code']"
+NT="$(req -X POST "$BASE/timetable" "${AUTH_S[@]}" -H 'Content-Type: application/json' -d '{"courseId":8,"classId":14}')"
+want "督导新增课表成功"                  "0"     "$NT" "d['code']"
+NT_ID="$(json "$NT" "d['data']['id']")"
+want "重复课表返回 40901"                "40901" "$(req -X POST "$BASE/timetable" "${AUTH_S[@]}" -H 'Content-Type: application/json' -d '{"courseId":1,"classId":1,"teacherId":2}')" "d['code']"
+want "督导删除课表成功"                  "0"     "$(req -X DELETE "$BASE/timetable/$NT_ID" "${AUTH_S[@]}")" "d['code']"
 
 echo
 echo "${c_dim}== 14. 提优闭环：清单/反思/站内信（N4/N5/B12）==${c_reset}"

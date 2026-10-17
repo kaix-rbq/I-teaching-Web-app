@@ -200,10 +200,10 @@ export interface AiObservation {
   risks: string[]
 }
 
-/** 创建授课记录提交体（POST /sessions，仅督导） */
+/** 创建授课记录提交体（POST /sessions，teacher 本人课程 / supervisor） */
 export interface SessionCreatePayload {
   courseId: number
-  /** 0 / 不传 = 未指定班级 */
+  /** 班级 id（必填；经听评课计划快捷建课 planId 非空时可省略） */
   classId?: number
   /** YYYY-MM-DD，不得晚于今天 */
   sessionDate: string

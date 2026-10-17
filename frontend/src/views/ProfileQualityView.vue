@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import PageHeader from '@/components/common/PageHeader.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
@@ -9,6 +9,10 @@ import QualityCompass from '@/components/evaluation/QualityCompass.vue'
 import ScoreDimensionsCard from '@/components/evaluation/ScoreDimensionsCard.vue'
 import { fetchTeacherEvaluationsApi, fetchTeacherSummaryApi } from '@/api/teacher'
 import { fetchImprovementsApi } from '@/api/improvement'
+import { createSessionApi } from '@/api/session'
+import { fetchCourseDetailApi } from '@/api/course'
+import { fetchMyTimetableApi } from '@/api/dict'
+import type { TimetableItem } from '@/types/dict'
 import { useAuthStore } from '@/stores/auth'
 import { useSemester } from '@/composables/useSemester'
 import { flagText } from '@/constants'
@@ -109,6 +113,131 @@ function goImprove(courseId: number): void {
 function goSessionRecord(sessionId: number): void {
   void router.push({ name: 'session-evaluation', params: { id: sessionId } })
 }
+
+/* ===== 教师自建授课（B1）：本人课表下拉课程/班级 ===== */
+const createVisible = ref(false)
+const createSubmitting = ref(false)
+const timetable = ref<TimetableItem[]>([])
+const timetableLoading = ref(false)
+const createForm = reactive<{
+  courseId: number | ''
+  classId: number | ''
+  sessionDate: string
+  period: string
+  topic: string
+}>({
+  courseId: '',
+  classId: '',
+  sessionDate: '',
+  period: '',
+  topic: ''
+})
+
+const courseOptions = computed(() => {
+  const seen = new Map<number, { id: number; name: string; code: string }>()
+  for (const row of timetable.value) {
+    if (!seen.has(row.courseId)) {
+      seen.set(row.courseId, { id: row.courseId, name: row.courseName, code: row.courseCode })
+    }
+  }
+  /* 课表未维护时回退到本人课程（班级再按课程详情回退），对话框不被卡死 */
+  if (!seen.size && summary.value) {
+    for (const c of summary.value.courses) {
+      if (!seen.has(c.courseId)) {
+        seen.set(c.courseId, { id: c.courseId, name: c.courseName, code: c.courseCode })
+      }
+    }
+  }
+  return [...seen.values()]
+})
+
+const fallbackClasses = ref<Array<{ id: number; className: string }>>([])
+
+const classOptions = computed(() => {
+  if (createForm.courseId === '') return []
+  const fromTimetable = timetable.value
+    .filter((row) => row.courseId === createForm.courseId)
+    .map((row) => ({ id: row.classId, name: row.className }))
+  if (fromTimetable.length) return fromTimetable
+  return fallbackClasses.value.map((c) => ({ id: c.id, name: c.className }))
+})
+
+function disabledFuture(date: Date): boolean {
+  return date.getTime() > Date.now()
+}
+
+async function openCreate(): Promise<void> {
+  createForm.courseId = ''
+  createForm.classId = ''
+  createForm.sessionDate = ''
+  createForm.period = ''
+  createForm.topic = ''
+  createVisible.value = true
+  timetableLoading.value = true
+  try {
+    timetable.value = await fetchMyTimetableApi() ?? []
+  } catch {
+    timetable.value = []
+  } finally {
+    timetableLoading.value = false
+  }
+}
+
+async function submitCreate(): Promise<void> {
+  if (createForm.courseId === '') {
+    ElMessage.error('请选择课程')
+    return
+  }
+  if (createForm.classId === '') {
+    ElMessage.error('请选择班级')
+    return
+  }
+  if (!createForm.sessionDate) {
+    ElMessage.error('请选择授课日期')
+    return
+  }
+  if (!createForm.period.trim()) {
+    ElMessage.error('请填写节次')
+    return
+  }
+  createSubmitting.value = true
+  try {
+    await createSessionApi({
+      courseId: createForm.courseId,
+      classId: createForm.classId,
+      sessionDate: createForm.sessionDate,
+      period: createForm.period.trim(),
+      topic: createForm.topic.trim()
+    })
+    ElMessage.success('授课记录已创建，可补传录音走 AI 评析')
+    createVisible.value = false
+    await load()
+  } catch {
+    // 错误提示由 api/http.ts 拦截器统一处理
+  } finally {
+    createSubmitting.value = false
+  }
+}
+
+watch(
+  () => createForm.courseId,
+  (courseId) => {
+    createForm.classId = ''
+    /* 课表无该课班级时回退拉取课程开课班级 */
+    if (courseId === '' || timetable.value.some((row) => row.courseId === courseId)) {
+      fallbackClasses.value = []
+      return
+    }
+    void (async () => {
+      try {
+        const detail = await fetchCourseDetailApi(courseId)
+        fallbackClasses.value = (detail.classes ?? []).map((c) => ({ id: c.id, className: c.className }))
+      } catch {
+        fallbackClasses.value = []
+      }
+    })()
+  }
+)
 
 /* ===== 授课快照：按质量水平标注亮点或主要不足 ===== */
 
@@ -258,7 +387,12 @@ watch(semester, () => {
 
       <!-- 授课快照：逐次授课卡片，颜色对应质量水平，标注亮点或不足 -->
       <section class="my-quality__block">
-        <h2 class="my-quality__title">授课快照</h2>
+        <div class="my-quality__block-head">
+          <h2 class="my-quality__title">授课快照</h2>
+          <el-button type="primary" plain size="small" round @click="openCreate">
+            + 新增授课记录
+          </el-button>
+        </div>
         <div v-if="timeline.length" class="my-quality__snapshots">
           <article
             v-for="item in timeline"
@@ -372,6 +506,76 @@ watch(semester, () => {
       </section>
     </template>
   </div>
+
+  <!-- 教师自建授课（B1）：课表下拉课程/班级，建课后可补传录音走 AI 评析 -->
+  <el-dialog v-model="createVisible" title="新增授课记录" width="480px">
+    <el-form label-width="72px">
+      <el-form-item label="课程" required>
+        <el-select
+          v-model="createForm.courseId"
+          placeholder="请选择课程"
+          filterable
+          :loading="timetableLoading"
+          class="my-quality__dialog-field"
+        >
+          <el-option
+            v-for="course in courseOptions"
+            :key="course.id"
+            :label="`${course.name}（${course.code}）`"
+            :value="course.id"
+          />
+        </el-select>
+      </el-form-item>
+      <el-form-item label="班级" required>
+        <el-select
+          v-model="createForm.classId"
+          placeholder="请选择班级"
+          filterable
+          :disabled="createForm.courseId === ''"
+          class="my-quality__dialog-field"
+        >
+          <el-option
+            v-for="cls in classOptions"
+            :key="cls.id"
+            :label="cls.name"
+            :value="cls.id"
+          />
+        </el-select>
+      </el-form-item>
+      <el-form-item label="授课日期" required>
+        <el-date-picker
+          v-model="createForm.sessionDate"
+          type="date"
+          placeholder="不得晚于今天"
+          value-format="YYYY-MM-DD"
+          :disabled-date="disabledFuture"
+          class="my-quality__dialog-field"
+        />
+      </el-form-item>
+      <el-form-item label="节次" required>
+        <el-input
+          v-model="createForm.period"
+          placeholder="如 3-4 节"
+          maxlength="32"
+          class="my-quality__dialog-field"
+        />
+      </el-form-item>
+      <el-form-item label="主题">
+        <el-input
+          v-model="createForm.topic"
+          placeholder="本次课主题（选填）"
+          maxlength="128"
+          class="my-quality__dialog-field"
+        />
+      </el-form-item>
+    </el-form>
+    <template #footer>
+      <el-button @click="createVisible = false">取消</el-button>
+      <el-button type="primary" :loading="createSubmitting" @click="submitCreate">
+        创建
+      </el-button>
+    </template>
+  </el-dialog>
 </template>
 
 <style scoped lang="scss">

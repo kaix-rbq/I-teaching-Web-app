@@ -386,6 +386,9 @@ type PendingSessionItem struct { // 手动新增/尚未评价的授课记录（s
 |-----------|------|------|
 | GET `/departments` | 登录 | 教研室列表 `[{id, name}]` |
 | GET `/teachers?departmentId=` | 登录 | 教师列表 `[{id, name}]`，按教研室过滤 |
+| GET `/timetable/mine?teacherId=&semester=` | 登录 | 最小课表下拉（B11）：teacher 只能看本人（传他人 id 按本人处理）；supervisor / director 可按 `teacherId` 过滤；`semester` 缺省当前学期 |
+| POST `/timetable` | director / supervisor | 手动新增课表：`{courseId*, classId*, teacherId(缺省取课程任课教师), semester(缺省当前学期)}`；班级须归属课程，否则 40002；重复 40901 |
+| DELETE `/timetable/:id` | director / supervisor | 删除课表条目（不影响已有授课记录） |
 
 > 注：此二接口为前端 AGENTS.md §10.2 的补充项（前端文档已同步更新）。学期选项由前端常量维护，不设接口。
 
@@ -522,7 +525,7 @@ type PlanItem struct {
 | 方法 路径 | 权限 | 说明 |
 |-----------|------|------|
 | GET `/courses/:id/sessions?semester=&page=&pageSize=` | 登录（数据裁剪） | 课程历史授课记录，含每场双侧评分摘要 |
-| POST `/sessions` | teacher（本人课程）/ supervisor（代录） | 创建授课记录（B1；`classId` 必填，日期不得晚于今天，`uk_session` 唯一；落 `created_by`） |
+| POST `/sessions` | teacher（本人课程）/ supervisor（代录） | 创建授课记录（B1；`classId` 必填且须归属该课程，否则 40002，例外：经听评课计划快捷建课 `planId` 非空时可省略；日期不得晚于今天，`uk_session` 唯一；落 `created_by`） |
 | DELETE `/sessions/:id` | 该课程任课教师本人 / supervisor | 删课并级联清理录音文件/转写/评价/清单关联（D6，service 层） |
 | GET `/sessions/:id` | 登录（数据裁剪） | 单场次基本信息 |
 | GET `/sessions/:id/evaluation` | 登录（数据裁剪） | 当堂课评估页聚合：场次 + 督导评分 + 智能体参考 + 评语 |
