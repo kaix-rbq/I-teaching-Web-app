@@ -255,6 +255,18 @@ want "主任查他室教师时间线 40302"         "40302"        "$(req "$BASE
 want "时间线未知学期 40001"              "40001"        "$(req "$BASE/teachers/2/evaluations?semester=2099-2100-1" "${AUTH_D[@]}")" "d['code']"
 
 echo
+echo "${c_dim}== 12.2 督导抽样任务队列（R1.2 / B2·T1）==${c_reset}"
+AT="$(req "$BASE/supervision/ai-tasks" "${AUTH_S[@]}")"
+want "抽样任务队列可用"                 "0"      "$AT" "d['code']"
+want "抽样任务总数=1（李明满5条AI终评）" "1"      "$AT" "d['data']['total']"
+want "抽样命中最低 AI 分场次=1"          "1"      "$AT" "d['data']['list'][0]['sessionId']"
+want "抽样原因=lowest"                  "lowest" "$AT" "d['data']['list'][0]['reason']"
+want "首批批号=1"                       "1"      "$AT" "d['data']['list'][0]['batch']"
+want "已有督导观察标记 reviewed"        "True"   "$AT" "d['data']['list'][0]['reviewed']"
+want "pending=1 过滤后为空（已复评）"   "0"      "$(req "$BASE/supervision/ai-tasks?pending=1" "${AUTH_S[@]}")" "d['data']['total']"
+want "教师访问抽样队列 40301"           "40301"  "$(req "$BASE/supervision/ai-tasks" "${AUTH_T[@]}")" "d['code']"
+
+echo
 echo "${c_dim}== 13. 督导创建授课记录与评分提交（写操作，S6.1/S6.3）==${c_reset}"
 want "主任创建授课记录返回 40301"     "40301" "$(req -X POST "$BASE/sessions" "${AUTH_D[@]}" -H 'Content-Type: application/json' -d '{"courseId":1,"classId":1,"sessionDate":"2026-09-16","period":"验收节次"}')" "d['code']"
 want "缺 classId 返回 40001"           "40001" "$(req -X POST "$BASE/sessions" "${AUTH_S[@]}" -H 'Content-Type: application/json' -d '{"courseId":1,"sessionDate":"2026-09-16","period":"验收节次"}')" "d['code']"

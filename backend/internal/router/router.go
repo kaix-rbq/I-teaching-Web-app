@@ -48,6 +48,7 @@ func New(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) (*gin.Engine, se
 	sessionSvc := service.NewSessionServiceWithDelete(sessionRepo, evaluationRepo, courseRepo, userRepo, recordingRepo, improvementRepo, cfg.Evaluation, notificationSvc)
 	improvementSvc := service.NewImprovementService(improvementRepo)
 	reflectionSvc := service.NewReflectionService(reflectionRepo)
+	supervisionTaskSvc := service.NewSupervisionTaskService(evaluationRepo, cfg.Evaluation)
 	teacherScoreSvc := service.NewTeacherScoreService(userRepo, courseRepo, evaluationRepo, cfg.Evaluation)
 	// ⚠️ 不能写 Transcriber(asr.NewClient(...))：把 nil 的 *asr.Client 装进接口会得到
 	// 非 nil 接口（holds-nil-pointer），service 里的 `s.transcriber == nil` 判断会失效，
@@ -85,6 +86,7 @@ func New(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) (*gin.Engine, se
 	improvementH := handler.NewImprovementHandler(improvementSvc)
 	reflectionH := handler.NewReflectionHandler(reflectionSvc)
 	notificationH := handler.NewNotificationHandler(notificationSvc)
+	supervisionTaskH := handler.NewSupervisionTaskHandler(supervisionTaskSvc)
 
 	gin.SetMode(cfg.Server.Mode)
 	r := gin.New()
@@ -162,6 +164,7 @@ func New(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) (*gin.Engine, se
 		GET("/supervision/coverage", supervisionH.Coverage).
 		GET("/supervision/plans", supervisionH.Plans).
 		GET("/supervision/comment-tags", supervisionH.CommentTags).
+		GET("/supervision/ai-tasks", supervisionTaskH.Queue).
 		PUT("/sessions/:id/supervisor-observation", sessionH.SubmitObservation).
 		// 2026-10-16 重构 §4.5：五维评分与草稿箱整套停用，路由暂留并返回 50002。
 		PUT("/sessions/:id/supervisor-evaluation", handler.Deprecated("督导五维评分已废弃，请改用督导观察接口")).

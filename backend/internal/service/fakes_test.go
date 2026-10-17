@@ -371,6 +371,7 @@ type fakeEvalRepo struct {
 	listBySession      func(ctx context.Context, sessionID uint64) ([]repository.EvaluationRow, error)
 	listBySessionIDs   func(ctx context.Context, sessionIDs []uint64) ([]repository.EvaluationRow, error)
 	listSessionDimRows func(ctx context.Context, flt repository.SessionDimFilter) ([]repository.SessionDimRow, error)
+	listAgentSessions  func(ctx context.Context, semester, formulaVersion string) ([]repository.AgentSessionRow, error)
 }
 
 func (f *fakeEvalRepo) Upsert(ctx context.Context, e *model.Evaluation) error {
@@ -404,3 +405,10 @@ func (f *fakeEvalRepo) ListSessionDimRows(
 }
 
 func (f *fakeEvalRepo) DeleteBySession(ctx context.Context, sessionID uint64) error { return nil }
+
+func (f *fakeEvalRepo) ListAgentSessions(ctx context.Context, semester, formulaVersion string) ([]repository.AgentSessionRow, error) {
+	if f.listAgentSessions == nil {
+		return nil, nil
+	}
+	return f.listAgentSessions(ctx, semester, formulaVersion)
+}

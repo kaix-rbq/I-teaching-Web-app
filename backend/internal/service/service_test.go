@@ -705,6 +705,74 @@ func TestTeacherEvaluationsTimeline(t *testing.T) {
 	})
 }
 
+// TestSupervisionSamplingDispatch 覆盖 R1.2 抽样规则：
+// 每满 5 条抽 1 条；有风险标签优先，否则取 AI 总分最低；pending 过滤与 reviewed 标记。
+func TestSupervisionSamplingDispatch(t *testing.T) {
+	f := func(v float64) *float64 { return &v }
+	mk := func(id, teacher uint64, date string, total float64, evidence string, supCnt int) repository.AgentSessionRow {
+		d, _ := time.Parse("2006-01-02", date)
+		row := repository.AgentSessionRow{
+			SessionID: id, TeacherID: teacher, TeacherName: "李明", CourseID: 1,
+			CourseCode: "SE3101", CourseName: "软件项目管理", SessionDate: d, Period: "3-4 节",
+			AITotal: f(total), SupervisorCnt: supCnt,
+		}
+		if evidence != "" {
+			row.Evidence = &evidence
+		}
+		return row
+	}
+	ctx := context.Background()
+	newSvc := func(rows []repository.AgentSessionRow) SupervisionTaskService {
+		return NewSupervisionTaskService(&fakeEvalRepo{
+			listAgentSessions: func(context.Context, string, string) ([]repository.AgentSessionRow, error) {
+				return rows, nil
+			},
+		}, evalCfg())
+	}
+
+	// 满 5 条、无风险 → 取 AI 总分最低（id=5, 50），且尚无督导观察 → pending。
+	rows := []repository.AgentSessionRow{
+		mk(1, 2, "2026-09-26", 75, "", 0),
+		mk(2, 2, "2026-09-24", 80, "", 0),
+		mk(3, 2, "2026-09-19", 70, "", 0),
+		mk(4, 2, "2026-09-17", 65, "", 0),
+		mk(5, 2, "2026-09-12", 50, "", 0),
+	}
+	res, err := newSvc(rows).Queue(ctx, dto.SupervisorTaskListQuery{})
+	require.NoError(t, err)
+	require.Len(t, res.List, 1)
+	assert.Equal(t, uint64(5), res.List[0].SessionID)
+	assert.Equal(t, "lowest", res.List[0].Reason)
+	assert.False(t, res.List[0].Reviewed)
+
+	// 有风险标签 → 优先取标签项（id=3）。
+	rowsRisk := append([]repository.AgentSessionRow{}, rows...)
+	ev := `{"riskTags":["学生参与度低"]}`
+	rowsRisk[2].Evidence = &ev
+	resRisk, err := newSvc(rowsRisk).Queue(ctx, dto.SupervisorTaskListQuery{})
+	require.NoError(t, err)
+	require.Len(t, resRisk.List, 1)
+	assert.Equal(t, uint64(3), resRisk.List[0].SessionID)
+	assert.Equal(t, "risk", resRisk.List[0].Reason)
+	assert.Equal(t, []string{"学生参与度低"}, resRisk.List[0].RiskTags)
+
+	// 已有督导观察 → reviewed=true，pending 过滤后为空。
+	rowsReviewed := append([]repository.AgentSessionRow{}, rows...)
+	rowsReviewed[4].SupervisorCnt = 1
+	resReviewed, err := newSvc(rowsReviewed).Queue(ctx, dto.SupervisorTaskListQuery{})
+	require.NoError(t, err)
+	require.Len(t, resReviewed.List, 1)
+	assert.True(t, resReviewed.List[0].Reviewed)
+	resPending, err := newSvc(rowsReviewed).Queue(ctx, dto.SupervisorTaskListQuery{Pending: true})
+	require.NoError(t, err)
+	assert.Empty(t, resPending.List)
+
+	// 不足 5 条 → 不产生样本。
+	short, err := newSvc(rows[:3]).Queue(ctx, dto.SupervisorTaskListQuery{})
+	require.NoError(t, err)
+	assert.Empty(t, short.List)
+}
+
 // TestDraftService 覆盖督导评估草稿：部分维度可保存、提交需五维齐全、提交成功后删除草稿。
 func TestDraftService(t *testing.T) {
 	ctx := context.Background()

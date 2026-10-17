@@ -292,14 +292,14 @@ evaluation:
 - `message` 面向用户可读（中文），内部细节写日志不外泄；
 - 实现：`pkg/response.OK(c, data)` / `pkg/response.Fail(c, errcode.Params)`，handler 中**禁止手写 `c.JSON` 拼信封**。
 
-## 8. 接口契约（已注册路由共 53 条）
+## 8. 接口契约（已注册路由共 56 条）
 
-> 计数口径 = `backend/internal/router/router.go` 实际 `r.GET/POST/PUT/DELETE` 注册数，按鉴权分组：
+> 计数口径 = `backend/internal/router/router.go` 实际注册数，按鉴权分组：
 > 未挂 `Auth` 组 4（`GET /healthz` 根路径 + `GET /api/v1/healthz` + `POST /auth/login` + `GET /recordings/:id/stream`，
 > 最后一条自带 `AuthOrPlaybackTicket`）
-> \+ 登录 33 + director 2 + teacher 2 + supervisor 15 + director/supervisor 1。
+> \+ 登录 31 + teacher/supervisor 4 + director 2 + teacher 2 + supervisor 12 + director/supervisor 1。
 > 下文 §8.1–§8.7 为 Sprint 1 存量，§8.8 为 Sprint 2.1（14 条），§8.9 为 Sprint 2.2 阶段②（4 条），
-> §8.10 为 AI 评析任务链（D3 / R0.2，4 条），§8.11 为提优闭环（N4/N5/B12，11 条）。
+> §8.10 为 AI 评析任务链（D3 / R0.2，4 条），§8.11 为提优闭环（N4/N5/B12，11 条），§8.12 为督导抽样队列（R1.2，1 条）。
 
 前缀 `/api/v1`。**字段名与前端 `src/types/` 逐字对齐，本节是前后端联调的唯一事实源。**
 
@@ -771,6 +771,38 @@ type AiObservationDTO struct {
 - **状态机**：`open → done_self`（教师自评）`→ closed`（督导确认）；**未确认关不掉**（40002）；不打回。
 - **站内信**：只推 `supervisor_comment`（督导提交观察时通知授课教师）与 `ai_issue`；红点收敛到工作台清单与督导任务队列两处。
 - **失败不影响主流程**：通知创建失败只记日志，不阻断观察提交。
+
+### 8.12 督导抽样任务队列（2026-10-16 重构 R1.2，已实现，1 条）
+
+| 方法 路径 | 权限 | 说明 |
+|-----------|------|------|
+| GET `/supervision/ai-tasks?semester=&pending=&page=&pageSize=` | supervisor | 抽样任务队列：待人工复评（被抽中且尚无督导观察）+ 可浏览全部历史；分页 + 学期切片 |
+
+```go
+type SupervisorTaskDTO struct {
+    SessionID         uint64   `json:"sessionId"`
+    CourseID          uint64   `json:"courseId"`
+    CourseCode        string   `json:"courseCode"`
+    CourseName        string   `json:"courseName"`
+    TeacherID         uint64   `json:"teacherId"`
+    TeacherName       string   `json:"teacherName"`
+    SessionDate       string   `json:"sessionDate"`
+    Period            string   `json:"period"`
+    Topic             string   `json:"topic"`
+    Batch             int      `json:"batch"`      // 第几批（第 n 个满 5 条）
+    AITotal           *float64 `json:"aiTotal"`
+    Reason            string   `json:"reason"`     // risk | lowest
+    RiskTags          []string `json:"riskTags"`
+    Reviewed          bool     `json:"reviewed"`   // 是否已有督导观察
+    SupervisorComment string   `json:"supervisorComment"`
+}
+```
+
+- **抽样规则（B2 / T1，不建计数器表）**：该教师 AI 终评**每满 5 条抽 1 条**；候选 = 该批最近 5 条；
+  **有高风险标签优先取标签项，否则取 AI 综合分最低 1 条**；
+- **批次划分**：第 k 批 = 时间上第 k 组 5 条（正序分块），保证历史样本稳定不漂移；
+- **待人工复评**：样本尚未有督导观察（`reviewed=false`）；已有观察即视为已复评（`pending=1` 过滤掉）；
+- **风险脱敏**：`riskTags` 来自 agent 行 `evidence.riskTags`，仅在本接口（supervisor 专属）暴露。
 
 ## 9. 中间件规范（`internal/middleware/`）
 

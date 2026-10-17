@@ -305,6 +305,36 @@ type TeacherEvaluationTimelineItem struct {
 	AgentEvaluation       *EvaluationDTO  `json:"agentEvaluation"`
 }
 
+// SupervisorTaskDTO 是督导抽样任务行（§4.3）。
+// 抽样规则（B2/T1，不建计数器）：该教师 AI 终评每满 5 条抽 1 条；
+// 候选 = 该批最近 5 条，有高风险标签优先取标签项，否则取 AI 综合分最低 1 条。
+type SupervisorTaskDTO struct {
+	SessionID         uint64   `json:"sessionId"`
+	CourseID          uint64   `json:"courseId"`
+	CourseCode        string   `json:"courseCode"`
+	CourseName        string   `json:"courseName"`
+	TeacherID         uint64   `json:"teacherId"`
+	TeacherName       string   `json:"teacherName"`
+	SessionDate       string   `json:"sessionDate"`
+	Period            string   `json:"period"`
+	Topic             string   `json:"topic"`
+	Batch             int      `json:"batch"` // 第几批（第 n 个满 5 条）
+	AITotal           *float64 `json:"aiTotal"`
+	Reason            string   `json:"reason"` // risk | lowest
+	RiskTags          []string `json:"riskTags"`
+	Reviewed          bool     `json:"reviewed"`
+	SupervisorComment string   `json:"supervisorComment"`
+}
+
+// SupervisorTaskListQuery 是 GET /supervision/ai-tasks 的查询参数。
+// pending=1 只看待人工复评（被抽中且尚无督导观察）。
+type SupervisorTaskListQuery struct {
+	Semester string `form:"semester"`
+	Pending  bool   `form:"pending"`
+	Page     int    `form:"page"`
+	PageSize int    `form:"pageSize"`
+}
+
 // AiTaskDTO 是 GET /ai-tasks/:id 的响应：任务状态查询（D3）。
 type AiTaskDTO struct {
 	ID           uint64 `json:"id"`

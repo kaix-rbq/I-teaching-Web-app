@@ -54,12 +54,32 @@ type SessionDimFilter struct {
 	FormulaVersion    string
 }
 
+// AgentSessionRow 是「有 AI 终评的场次」行（抽样分派的输入，§4.3）：
+// 含场次/课程/教师上下文 + AI 总分 + 证据（取 riskTags）+ 是否已有督导观察。
+type AgentSessionRow struct {
+	SessionID      uint64    `gorm:"column:session_id"`
+	TeacherID      uint64    `gorm:"column:teacher_id"`
+	TeacherName    string    `gorm:"column:teacher_name"`
+	CourseID       uint64    `gorm:"column:course_id"`
+	CourseCode     string    `gorm:"column:course_code"`
+	CourseName     string    `gorm:"column:course_name"`
+	SessionDate    time.Time `gorm:"column:session_date"`
+	Period         string    `gorm:"column:period"`
+	Topic          string    `gorm:"column:topic"`
+	AITotal        *float64  `gorm:"column:ai_total"`
+	Evidence       *string   `gorm:"column:evidence"`
+	SupervisorCnt  int       `gorm:"column:supervisor_cnt"`
+	SupervisorNote string    `gorm:"column:supervisor_note"`
+}
+
 // EvaluationRepository 定义课堂评价数据访问。
 type EvaluationRepository interface {
 	Upsert(ctx context.Context, e *model.Evaluation) error
 	ListBySession(ctx context.Context, sessionID uint64) ([]EvaluationRow, error)
 	ListBySessionIDs(ctx context.Context, sessionIDs []uint64) ([]EvaluationRow, error)
 	ListSessionDimRows(ctx context.Context, f SessionDimFilter) ([]SessionDimRow, error)
+	// ListAgentSessions 返回有 AI 终评的场次（抽样分派输入，§4.3），按教师 + 课次倒序。
+	ListAgentSessions(ctx context.Context, semester, formulaVersion string) ([]AgentSessionRow, error)
 	// DeleteBySession 删除某场次的全部评价（删课级联用）。
 	DeleteBySession(ctx context.Context, sessionID uint64) error
 }
@@ -135,6 +155,27 @@ func (r *evaluationRepository) ListBySessionIDs(ctx context.Context, sessionIDs 
 		return nil, err
 	}
 	return rows, nil
+}
+
+// ListAgentSessions 返回有 AI 终评的场次（抽样分派输入，§4.3）。
+func (r *evaluationRepository) ListAgentSessions(ctx context.Context, semester, formulaVersion string) ([]AgentSessionRow, error) {
+	tx := r.db.WithContext(ctx).
+		Table("teaching_sessions AS ts").
+		Select(`ts.id AS session_id, ts.teacher_id, u.name AS teacher_name,
+			ts.course_id, c.code AS course_code, c.name AS course_name,
+			ts.session_date, ts.period, ts.topic,
+			e.total_score AS ai_total, e.evidence AS evidence,
+			(SELECT COUNT(*) FROM evaluations s WHERE s.session_id = ts.id AND s.evaluator_type = 'supervisor') AS supervisor_cnt,
+			COALESCE((SELECT GROUP_CONCAT(s2.comment SEPARATOR '\n') FROM evaluations s2 WHERE s2.session_id = ts.id AND s2.evaluator_type = 'supervisor'), '') AS supervisor_note`).
+		Joins("JOIN courses AS c ON c.id = ts.course_id").
+		Joins("JOIN users AS u ON u.id = ts.teacher_id").
+		Joins("JOIN evaluations AS e ON e.session_id = ts.id AND e.evaluator_type = 'agent' AND e.formula_version = ?", formulaVersion)
+	if semester != "" {
+		tx = tx.Where("c.semester = ?", semester)
+	}
+	var rows []AgentSessionRow
+	err := tx.Order("ts.teacher_id ASC, ts.session_date DESC, ts.id DESC").Scan(&rows).Error
+	return rows, err
 }
 
 // DeleteBySession 删除某场次的全部评价（删课级联用；含督导观察与 AI 行）。
