@@ -1,6 +1,7 @@
 import { request } from './http'
 import type { PageResult } from '@/types/api'
 import type {
+  AiObservation,
   EvaluationDTO,
   SessionCreatePayload,
   SessionDetail,
@@ -66,6 +67,16 @@ export function submitSupervisorObservationApi(
     method: 'put',
     data: payload
   })
+}
+
+/** AI 观察详情（GET /sessions/:id/ai-observation，D8 教师侧 risks 恒空） */
+export function fetchAiObservationApi(id: number | string): Promise<AiObservation> {
+  return request<AiObservation>({ url: `/sessions/${id}/ai-observation`, method: 'get' })
+}
+
+/** 入队 AI 评析（POST /sessions/:id/ai-observation/analyze，幂等） */
+export function analyzeSessionApi(id: number | string): Promise<{ taskId: number; status: string }> {
+  return request({ url: `/sessions/${id}/ai-observation/analyze`, method: 'post' })
 }
 
 export function uploadSessionRecordingApi(id: number | string, file: File, onProgress?: (percent: number) => void): Promise<RecordingDTO> {

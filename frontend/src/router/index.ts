@@ -100,6 +100,24 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '质量报告', roles: ['director', 'supervisor', 'teacher'] }
       },
       {
+        path: 'improvements',
+        name: 'improvements',
+        component: () => import('@/views/ImprovementListView.vue'),
+        meta: { title: '待改进清单', roles: ['teacher', 'supervisor'] }
+      },
+      {
+        path: 'reflections',
+        name: 'reflections',
+        component: () => import('@/views/ReflectionView.vue'),
+        meta: { title: '教学反思', roles: ['teacher'] }
+      },
+      {
+        path: 'notifications',
+        name: 'notifications',
+        component: () => import('@/views/NotificationsView.vue'),
+        meta: { title: '站内信' }
+      },
+      {
         path: 'profile',
         name: 'profile',
         component: () => import('@/views/ProfileView.vue'),

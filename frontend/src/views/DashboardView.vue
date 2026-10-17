@@ -8,13 +8,14 @@ import ScoreHeatmap from '@/components/evaluation/ScoreHeatmap.vue'
 import EvaluationQueue from '@/components/supervision/EvaluationQueue.vue'
 import { fetchDashboardApi } from '@/api/dashboard'
 import { fetchTeacherScoresApi } from '@/api/teacher'
+import { fetchSamplingTasksApi } from '@/api/supervision'
 import { createSessionApi } from '@/api/session'
 import { fetchCoursesApi } from '@/api/course'
 import { useAuthStore } from '@/stores/auth'
 import { useDictStore } from '@/stores/dict'
 import { useSemester } from '@/composables/useSemester'
 import { EVALUATION_DIMENSIONS, getRoleMeta } from '@/constants'
-import type { DashboardData, SupervisionPlan } from '@/types/supervision'
+import type { DashboardData, SamplingTask, SupervisionPlan } from '@/types/supervision'
 import type { Course } from '@/types/course'
 import type { TeacherScoreItem } from '@/types/teacher'
 
@@ -241,17 +242,31 @@ async function submitCreateSession(): Promise<void> {
   }
 }
 
-function goDraftBox(): void {
-  void router.push({ name: 'draft-box' })
+/* 督导：抽样任务队列（B2/T1，R1.2）——每满 5 条 AI 终评抽 1 条待人工复评 */
+const sampling = ref<SamplingTask[]>([])
+const samplingLoading = ref(false)
+
+async function loadSampling(): Promise<void> {
+  if (auth.role !== 'supervisor') return
+  samplingLoading.value = true
+  try {
+    const page = await fetchSamplingTasksApi({ semester: semester.value, pending: true, pageSize: 8 })
+    sampling.value = page.list ?? []
+  } catch {
+    sampling.value = []
+  } finally {
+    samplingLoading.value = false
+  }
 }
 
-function goDraftEdit(sessionId: number): void {
-  void router.push({ name: 'session-evaluation', params: { id: sessionId }, query: { draft: '1' } })
+function goSamplingEvaluate(task: SamplingTask): void {
+  void router.push({ name: 'session-evaluation', params: { id: task.sessionId } })
 }
 
 function reloadQuality(): void {
   void loadData()
   if (auth.hasRole('director')) void loadDirectorScores()
+  if (auth.role === 'supervisor') void loadSampling()
 }
 
 watch(semester, reloadQuality)
@@ -383,30 +398,38 @@ onMounted(reloadQuality)
           <aside class="dashboard__side">
             <section class="dashboard__panel">
               <div class="dashboard__panel-head">
-                <h2 class="dashboard__panel-title">草稿箱</h2>
-                <el-button link type="primary" @click="goDraftBox">更多&gt;&gt;</el-button>
+                <h2 class="dashboard__panel-title">抽样复评队列</h2>
+                <span class="dashboard__panel-sub">每 5 条 AI 终评抽 1 条</span>
               </div>
-              <ul v-if="(data?.recentDrafts ?? []).length" class="dashboard__drafts">
+              <el-skeleton v-if="samplingLoading" :rows="3" animated />
+              <ul v-else-if="sampling.length" class="dashboard__sampling">
                 <li
-                  v-for="draft in data?.recentDrafts ?? []"
-                  :key="draft.id"
-                  class="dashboard__draft"
-                  @click="goDraftEdit(draft.sessionId)"
+                  v-for="(task, index) in sampling"
+                  :key="task.sessionId"
+                  class="dashboard__sample anim-rise"
+                  :style="{ '--stagger': `${Math.min(index, 6) * 50}ms` }"
+                  @click="goSamplingEvaluate(task)"
                 >
-                  <div class="dashboard__draft-head">
-                    <span class="dashboard__draft-course">{{ draft.courseName }}</span>
-                    <el-tag size="small" effect="plain" round>草稿</el-tag>
+                  <div class="dashboard__sample-head">
+                    <span class="dashboard__sample-course">{{ task.courseName }}</span>
+                    <el-tag
+                      size="small"
+                      :type="task.reason === 'risk' ? 'danger' : 'info'"
+                      effect="light"
+                      round
+                    >
+                      {{ task.reason === 'risk' ? '高风险' : 'AI 最低分' }}
+                    </el-tag>
                   </div>
-                  <p class="dashboard__draft-meta">
-                    {{ draft.sessionDate }} · {{ draft.period || '—' }}
+                  <p class="dashboard__sample-meta">
+                    {{ task.teacherName }} · {{ task.sessionDate }} · 第 {{ task.batch }} 批
+                  </p>
+                  <p v-if="task.riskTags.length" class="dashboard__sample-risks">
+                    {{ task.riskTags.join('、') }}
                   </p>
                 </li>
               </ul>
-              <EmptyState v-else description="暂无草稿">
-                <template #action>
-                  <el-button link type="primary" @click="goDraftBox">前往草稿箱</el-button>
-                </template>
-              </EmptyState>
+              <EmptyState v-else description="暂无待复评样本" />
             </section>
           </aside>
         </div>
@@ -693,7 +716,7 @@ onMounted(reloadQuality)
     }
   }
 
-  &__drafts {
+  &__sampling {
     display: flex;
     flex-direction: column;
     gap: var(--spacing-2);
@@ -702,15 +725,20 @@ onMounted(reloadQuality)
     list-style: none;
   }
 
-  &__draft {
+  &__sample {
     padding: var(--spacing-3);
     cursor: pointer;
     background-color: var(--color-bg-page);
+    border: 1px solid transparent;
     border-radius: var(--radius-md);
-    transition: box-shadow var(--duration-fast) ease;
+    transition: box-shadow var(--duration-fast) var(--ease-out-soft),
+      border-color var(--duration-fast) var(--ease-out-soft),
+      transform var(--duration-fast) var(--ease-out-soft);
 
     &:hover {
+      border-color: var(--color-primary-hover);
       box-shadow: var(--shadow-card-hover);
+      transform: translateY(-1px);
     }
 
     &-head {
@@ -733,6 +761,12 @@ onMounted(reloadQuality)
       margin-top: 2px;
       font-size: var(--font-size-xs);
       color: var(--color-text-tertiary);
+    }
+
+    &-risks {
+      margin-top: var(--spacing-1);
+      font-size: var(--font-size-xs);
+      color: var(--color-error);
     }
   }
 }

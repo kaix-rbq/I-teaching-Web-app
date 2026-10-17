@@ -21,6 +21,8 @@
 > ⚠️ **效力声明（2026-10-16 重构）**：本手册的技术栈、目录、设计令牌继续有效；但路由页面（§6/§7：草稿箱、督导五维表单、教师落点、督导队列）与展示口径已被 [`2026-10-16-教学提优重构开发计划.md`](./2026-10-16-教学提优重构开发计划.md) §6–§7 取代——教师工作台改造 `/me/quality`（不新建路由）、督导队列改造 `DashboardView`、评估页督导态只留评语表单、草稿箱入口删除。重构 PR 必须同步更新 §6/§7，冲突处以 10.16 计划为准。
 >
 > **重构已落地的前端变更（本轮）**：① 草稿箱路由 `/drafts` 与侧边栏入口删除（`EvaluationForm` 移除「保存草稿」，提交改 `PUT /sessions/:id/supervisor-observation`）；② 督导侧边栏补「听评课管理」（`/supervision`，N12）；③ 评估页督导态 `EvaluationForm` 以 `comment-only` 渲染（无五维刻度，只留评语，B8）；④ 录音区新增 `BrowserRecorder` 浏览器录音**演示占位**（禁用、不调接口，R2.4/B5）；⑤ 新增 `/teachers/:id/report` 一页纸报告打印视图（`TeacherReportView`，N9）；⑥ 顶栏新增 DEV 可见「载入演示数据」按钮（`POST /demo/seed`，B6/N7）。
+>
+> **重构已落地的前端变更（提优闭环批次）**：⑦ 新增 `/improvements`（教师自评 / 督导确认关闭，含关联反思只读弹窗）、`/reflections`（教师反思 CRUD）、`/notifications`（站内信）三页；⑧ 顶栏新增站内信铃铛 + 未读红点（`el-badge`，进详情自动已读 → 红点收敛）；⑨ 督导侧边栏新增「改进清单」，教师侧边栏新增「改进清单 / 教学反思」；⑩ 督导工作台「草稿箱」区块替换为**抽样复评队列**（`GET /supervision/ai-tasks?pending=1`，B2/T1）；⑪ 教师工作台 `/me/quality` 追加「待改进清单」与「督导意见与 AI 观察」双源并置区块。动画统一走 `styles/base.scss` 的 `.anim-rise`（带 `--stagger` 级联）与 `.anim-grow-x`，`prefers-reduced-motion` 下禁用。
 
 ---
 
@@ -422,6 +424,9 @@ frontend/                       # 包名 aijiaoxue-web
 | `/supervision/courses/:id` | supervisor-course | SupervisorCourseView | App | supervisor | v1.3 新增（督导课程综合评分 + 授课记录评估/录音上传） |
 | `/me/quality` | profile-quality | ProfileQualityView | App | teacher | v1.0 新增（v1.2 为教师首页） |
 | `/teachers/:id/report` | teacher-report | TeacherReportView | App | director / supervisor / teacher | 2026-10-16 重构新增（N9 一页纸报告打印视图） |
+| `/improvements` | improvements | ImprovementListView | App | teacher / supervisor | 2026-10-16 重构新增（N4 待改进清单：教师自评 → 督导确认） |
+| `/reflections` | reflections | ReflectionView | App | teacher | 2026-10-16 重构新增（N5 教学反思，教师私有） |
+| `/notifications` | notifications | NotificationsView | App | 登录 | 2026-10-16 重构新增（B12 站内信；顶栏红点入口） |
 | `/supervision` | supervision | SupervisionView | App | supervisor | S1（v1.2 起从督导菜单摘除，保留后备） |
 | `/profile` | profile | ProfileView | App | 登录 | S1 |
 | `/403` | forbidden | ForbiddenView | Blank | 公开 | S1 |

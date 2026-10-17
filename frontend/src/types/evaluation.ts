@@ -177,6 +177,29 @@ export interface SupervisorObservationPayload {
   suggestions?: string
 }
 
+/** AI 评析任务状态（GET /ai-tasks/:id，D3） */
+export interface AiTask {
+  id: number
+  kind: string
+  refType: string
+  refId: number
+  status: 'pending' | 'running' | 'done' | 'failed' | string
+  attempts: number
+  errorMessage: string
+  createdAt: string
+  updatedAt: string
+}
+
+/** AI 观察详情（GET /sessions/:id/ai-observation，§4.2）；risks 仅督导可见（D8） */
+export interface AiObservation {
+  sessionId: number
+  taskId: number
+  status: string
+  errorMessage: string
+  observation: EvaluationDTO | null
+  risks: string[]
+}
+
 /** 创建授课记录提交体（POST /sessions，仅督导） */
 export interface SessionCreatePayload {
   courseId: number

@@ -8,11 +8,13 @@ import QualityBadge from '@/components/common/QualityBadge.vue'
 import QualityCompass from '@/components/evaluation/QualityCompass.vue'
 import ScoreDimensionsCard from '@/components/evaluation/ScoreDimensionsCard.vue'
 import { fetchTeacherEvaluationsApi, fetchTeacherSummaryApi } from '@/api/teacher'
+import { fetchImprovementsApi } from '@/api/improvement'
 import { useAuthStore } from '@/stores/auth'
 import { useSemester } from '@/composables/useSemester'
 import { flagText } from '@/constants'
 import { scoreTone, scoreToneColor } from '@/utils/format'
 import type { TeacherSummary, TeacherTimelineItem } from '@/types/teacher'
+import type { ImprovementItem } from '@/types/improvement'
 
 /**
  * 我的质量档案（教师首页，替代原「质量驾驶舱」，避免信息重复）。
@@ -28,10 +30,19 @@ const { semester } = useSemester()
 
 const summary = ref<TeacherSummary | null>(null)
 const timeline = ref<TeacherTimelineItem[]>([])
+const improvements = ref<ImprovementItem[]>([])
 const loading = ref(true)
 const error = ref(false)
 
 const flags = computed(() => summary.value?.flags ?? [])
+const openImprovements = computed(() => improvements.value.filter((it) => it.status !== 'closed'))
+const recentNotes = computed(() =>
+  timeline.value.filter((t) => t.supervisorEvaluations?.length || t.agentEvaluation).slice(0, 3)
+)
+
+function goImprovements(): void {
+  void router.push({ name: 'improvements' })
+}
 
 /**
  * 提优分析（预留 AI 接口，当前为示例文本）。
@@ -77,6 +88,13 @@ async function load(): Promise<void> {
     timeline.value = page.list
   } catch {
     timeline.value = []
+  }
+
+  try {
+    const items = await fetchImprovementsApi({ pageSize: 20 })
+    improvements.value = items.list ?? []
+  } catch {
+    improvements.value = []
   }
 }
 
@@ -294,6 +312,63 @@ watch(semester, () => {
           </article>
         </div>
         <p v-else class="my-quality__muted">本学期暂无授课记录</p>
+      </section>
+
+      <!-- 待改进清单（N4）：教师自评 → 督导确认 -->
+      <section class="my-quality__block">
+        <div class="my-quality__block-head">
+          <h2 class="my-quality__title">待改进清单</h2>
+          <el-button link type="primary" @click="goImprovements">全部清单 →</el-button>
+        </div>
+        <ul v-if="openImprovements.length" class="my-quality__improve-list">
+          <li
+            v-for="(it, index) in openImprovements.slice(0, 5)"
+            :key="it.id"
+            class="my-quality__improve-row anim-rise"
+            :style="{ '--stagger': `${index * 45}ms` }"
+          >
+            <span class="my-quality__improve-status" :data-status="it.status">
+              {{ it.status === 'done_self' ? '待督导确认' : '进行中' }}
+            </span>
+            <span class="my-quality__improve-title">{{ it.title }}</span>
+          </li>
+        </ul>
+        <p v-else class="my-quality__muted">
+          暂无待改进项，去
+          <el-button link type="primary" @click="goImprovements">改进清单</el-button>
+          新建一条。
+        </p>
+      </section>
+
+      <!-- 督导意见与 AI 观察：双源并置（督导实线 / AI 虚线） -->
+      <section class="my-quality__block">
+        <h2 class="my-quality__title">督导意见与 AI 观察</h2>
+        <div v-if="recentNotes.length" class="my-quality__notes">
+          <article
+            v-for="(item, index) in recentNotes"
+            :key="item.sessionId"
+            class="my-quality__note anim-rise"
+            :style="{ '--stagger': `${index * 60}ms` }"
+          >
+            <header class="my-quality__note-head">
+              <span class="my-quality__note-course">{{ item.courseName }}</span>
+              <span class="my-quality__note-date tabular-nums">{{ item.sessionDate }}</span>
+            </header>
+            <div v-if="item.supervisorEvaluations?.length" class="my-quality__note-block">
+              <span class="my-quality__note-tag">督导观察</span>
+              <p class="my-quality__note-text">
+                {{ item.supervisorEvaluations[0].comment || item.supervisorEvaluations[0].highlights || '—' }}
+              </p>
+            </div>
+            <div v-if="item.agentEvaluation" class="my-quality__note-block ai-panel my-quality__note-block--ai">
+              <span class="my-quality__note-tag my-quality__note-tag--ai">AI 观察</span>
+              <p class="my-quality__note-text">
+                {{ item.agentEvaluation.highlights || item.agentEvaluation.comment || '—' }}
+              </p>
+            </div>
+          </article>
+        </div>
+        <p v-else class="my-quality__muted">本学期暂无评价意见</p>
       </section>
     </template>
   </div>
@@ -568,6 +643,118 @@ watch(semester, () => {
   &__muted {
     font-size: var(--font-size-sm);
     color: var(--color-text-tertiary);
+  }
+
+  &__block-head {
+    display: flex;
+    gap: var(--spacing-2);
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: var(--spacing-4);
+  }
+
+  &__improve-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-2);
+  }
+
+  &__improve-row {
+    display: flex;
+    gap: var(--spacing-3);
+    align-items: center;
+    padding: var(--spacing-3) var(--spacing-4);
+    background-color: var(--color-bg-page);
+    border-radius: var(--radius-md);
+  }
+
+  &__improve-status {
+    flex-shrink: 0;
+    padding: 2px 10px;
+    font-size: var(--font-size-xs);
+    color: var(--color-info);
+    background-color: rgba(19, 194, 194, 0.12);
+    border-radius: 999px;
+
+    &[data-status='done_self'] {
+      color: var(--color-warning);
+      background-color: rgba(250, 173, 20, 0.14);
+    }
+  }
+
+  &__improve-title {
+    font-size: var(--font-size-sm);
+    color: var(--color-text-primary);
+  }
+
+  &__notes {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: var(--spacing-4);
+
+    @media (max-width: 1200px) {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  &__note {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-2);
+    padding: var(--spacing-4);
+    background-color: var(--color-bg-page);
+    border: 1px solid var(--color-divider);
+    border-radius: var(--radius-lg);
+  }
+
+  &__note-head {
+    display: flex;
+    gap: var(--spacing-2);
+    align-items: baseline;
+    justify-content: space-between;
+    padding-bottom: var(--spacing-2);
+    border-bottom: 1px dashed var(--color-divider);
+  }
+
+  &__note-course {
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+    color: var(--color-text-primary);
+  }
+
+  &__note-date {
+    font-size: var(--font-size-xs);
+    color: var(--color-text-tertiary);
+  }
+
+  &__note-block {
+    display: flex;
+    gap: var(--spacing-2);
+    align-items: flex-start;
+
+    &--ai {
+      padding: var(--spacing-2) var(--spacing-3);
+    }
+  }
+
+  &__note-tag {
+    flex-shrink: 0;
+    padding: 1px 8px;
+    font-size: var(--font-size-xs);
+    color: var(--color-supervisor);
+    background-color: var(--color-supervisor-bg);
+    border-radius: 999px;
+
+    &--ai {
+      color: var(--color-ai-deep);
+      background-color: transparent;
+    }
+  }
+
+  &__note-text {
+    font-size: var(--font-size-sm);
+    line-height: 1.6;
+    color: var(--color-text-secondary);
   }
 }
 </style>
