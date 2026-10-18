@@ -43,6 +43,29 @@ transcription:
   diarization: false # 说话人分离：仅支持单声道音频
   studentNames: [] # 脱敏词典；为空时仅用称谓正则（开发计划 §5.2-5）
 
+# AI 评析（LLM，2026-10-16 重构 · D3 / R0.2）
+# 🔴 API Key 只走环境变量，禁止写入本文件、禁止入库：
+#     export AIJIAOXUE_AGENT_API_KEY="sk-xxxxxxxx"
+#     export AIJIAOXUE_AGENT_WORKSPACE_ID="ws-xxxxxxxx"
+#     export AIJIAOXUE_AGENT_LLM_MODEL="<控制台模型列表中的对话模型名>"
+# enabled=true 但 Key / 模型名为空时，服务在启动阶段直接报错退出（Fail-Fast）。
+# 未启用时：转写完成仍会入队 ai_tasks，但任务记 failed（"AI 评析引擎未配置"），页面不受影响。
+agent:
+  enabled: false
+  apiKey: "" # 永远留空，由环境变量 AIJIAOXUE_AGENT_API_KEY 覆盖
+  workspaceId: "" # 百炼业务空间 ID，如 ws-xxxxxxxx
+  llmModel: "" # 必填（启用时），模型名配置化，避免厂商下线旧版本
+  baseUrl: "" # 留空则按 workspaceId 推导北京地域 chat/completions
+  timeout: "3m" # 单次评析超时
+  maxConcurrency: 2 # 并发闸门
+  promptVersion: "v1" # 写入 evidence.promptVersion，变更提示词时必须递增
+
+# 演示模式（B6/N7）：一键载入示例转写/AI 报告。
+# 🔴 仅本地/dev 开启，生产必须 false（会清空 transcripts/recordings/清单/反思/站内信）。
+# 环境变量覆盖：AIJIAOXUE_DEMO_ENABLED=true
+demo:
+  enabled: false
+
 cors:
   origins: ["http://localhost:5173", "http://127.0.0.1:5173"] # 前端 dev 地址
   # allowAnyOrigin: 放行任意来源，仅限本地/局域网联调。
@@ -61,7 +84,7 @@ evaluation:
     interaction: 0.20
     organization: 0.20
     frontier: 0.00
-  supervisorWeight: 0.5 # α：综合分中督导评分权重
-  agentWeight: 0.5 # 1−α：综合分中智能体评分权重
+  supervisorWeight: 0.5 # ⚠️ 已废弃（2026-10-16 §6）：督导不计分，聚合层不再使用
+  agentWeight: 0.5 # ⚠️ 已废弃：计分只按 AI，综合分 = AI 单侧总分
   formulaVersion: "v1"
   minSampleSize: 3 # 低于该值标记"样本不足"

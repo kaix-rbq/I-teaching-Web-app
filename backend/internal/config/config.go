@@ -21,6 +21,8 @@ type Config struct {
 	CORS          CORSConfig          `mapstructure:"cors"`
 	Evaluation    EvaluationConfig    `mapstructure:"evaluation"`
 	Transcription TranscriptionConfig `mapstructure:"transcription"`
+	Agent         AgentConfig         `mapstructure:"agent"`
+	Demo          DemoConfig          `mapstructure:"demo"`
 }
 
 // ServerConfig 描述 HTTP 服务监听参数。
@@ -110,6 +112,57 @@ func (t TranscriptionConfig) MaskedAPIKey() string {
 	return t.APIKey[:6] + "***" + t.APIKey[len(t.APIKey)-4:]
 }
 
+// AgentConfig 描述 AI 评析（LLM）参数（2026-10-16 重构 · D3 / R0.2）。
+//
+// 安全约定：APIKey 只允许来自环境变量 AIJIAOXUE_AGENT_API_KEY，
+// config.yaml 中保持空串；本结构体禁止出现在任何 DTO 中。
+type AgentConfig struct {
+	Enabled bool `mapstructure:"enabled"`
+	// APIKey 只允许来自环境变量 AIJIAOXUE_AGENT_API_KEY；排障只用 MaskedAPIKey()。
+	APIKey      string `mapstructure:"apiKey"`
+	WorkspaceID string `mapstructure:"workspaceId"`
+	// LLMModel 为控制台模型名，必须配置化（模型名带版本且会迭代）。
+	LLMModel       string `mapstructure:"llmModel"`
+	BaseURL        string `mapstructure:"baseUrl"`
+	Timeout        string `mapstructure:"timeout"`
+	MaxConcurrency int    `mapstructure:"maxConcurrency"`
+	// PromptVersion 写入 evidence.promptVersion，变更提示词时必须递增。
+	PromptVersion string `mapstructure:"promptVersion"`
+}
+
+// TimeoutDuration 解析单次评析超时，缺省 3 分钟。
+func (a AgentConfig) TimeoutDuration() time.Duration {
+	d, err := time.ParseDuration(a.Timeout)
+	if err != nil || d <= 0 {
+		return 3 * time.Minute
+	}
+	return d
+}
+
+// Concurrency 返回并发闸门容量，缺省 2，且不小于 1。
+func (a AgentConfig) Concurrency() int {
+	if a.MaxConcurrency < 1 {
+		return 2
+	}
+	return a.MaxConcurrency
+}
+
+// MaskedAPIKey 返回可安全写入日志的掩码形式；禁止记录原始 APIKey。
+func (a AgentConfig) MaskedAPIKey() string {
+	if a.APIKey == "" {
+		return "(未配置)"
+	}
+	if len(a.APIKey) <= 10 {
+		return "***"
+	}
+	return a.APIKey[:6] + "***" + a.APIKey[len(a.APIKey)-4:]
+}
+
+// DemoConfig 描述演示模式开关（B6/N7）。仅本地/dev 环境开启，生产必须关闭。
+type DemoConfig struct {
+	Enabled bool `mapstructure:"enabled"`
+}
+
 // CORSConfig 描述跨域白名单。
 type CORSConfig struct {
 	Origins []string `mapstructure:"origins"`
@@ -187,6 +240,15 @@ func Load(path string) (*Config, error) {
 	v.SetDefault("transcription.pollInterval", "5s")
 	v.SetDefault("transcription.maxConcurrency", 2)
 	v.SetDefault("transcription.diarization", false)
+	v.SetDefault("agent.enabled", false)
+	v.SetDefault("agent.apiKey", "")
+	v.SetDefault("agent.workspaceId", "")
+	v.SetDefault("agent.llmModel", "")
+	v.SetDefault("agent.baseUrl", "")
+	v.SetDefault("agent.timeout", "3m")
+	v.SetDefault("agent.maxConcurrency", 2)
+	v.SetDefault("agent.promptVersion", "v1")
+	v.SetDefault("demo.enabled", false)
 	v.SetDefault("cors.allowAnyOrigin", false)
 
 	// 评分口径默认值 = 开发计划 §2.2（frontier 为观测项，权重 0）。
@@ -211,6 +273,11 @@ func Load(path string) (*Config, error) {
 	_ = v.BindEnv("transcription.workspaceId", "AIJIAOXUE_TRANSCRIPTION_WORKSPACE_ID")
 	_ = v.BindEnv("transcription.model", "AIJIAOXUE_TRANSCRIPTION_MODEL")
 	_ = v.BindEnv("transcription.baseUrl", "AIJIAOXUE_TRANSCRIPTION_BASE_URL")
+	_ = v.BindEnv("agent.apiKey", "AIJIAOXUE_AGENT_API_KEY")
+	_ = v.BindEnv("agent.workspaceId", "AIJIAOXUE_AGENT_WORKSPACE_ID")
+	_ = v.BindEnv("agent.llmModel", "AIJIAOXUE_AGENT_LLM_MODEL")
+	_ = v.BindEnv("agent.baseUrl", "AIJIAOXUE_AGENT_BASE_URL")
+	_ = v.BindEnv("demo.enabled", "AIJIAOXUE_DEMO_ENABLED")
 
 	if err := v.ReadInConfig(); err != nil {
 		return nil, fmt.Errorf("read config %s: %w", path, err)
@@ -248,6 +315,15 @@ func Load(path string) (*Config, error) {
 		}
 	} else if strings.TrimSpace(cfg.Transcription.APIKey) != "" {
 		slog.Warn("transcription 未启用，但检测到 API Key 已注入，本次启动将忽略 ASR")
+	}
+	// AI 评析开启时做启动期校验：宁可起不来，也不要等转写完成才发现 Key/模型缺失。
+	if cfg.Agent.Enabled {
+		if strings.TrimSpace(cfg.Agent.APIKey) == "" {
+			return nil, fmt.Errorf("config: 已启用 agent，但环境变量 AIJIAOXUE_AGENT_API_KEY 为空")
+		}
+		if strings.TrimSpace(cfg.Agent.LLMModel) == "" {
+			return nil, fmt.Errorf("config: 已启用 agent，但 agent.llmModel 未配置")
+		}
 	}
 	if cfg.CORS.AllowAnyOrigin {
 		// 与 AllowCredentials=true 组合等于放弃跨域保护，必须让运维在日志里一眼看到。

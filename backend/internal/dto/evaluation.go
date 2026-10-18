@@ -7,9 +7,12 @@ type SessionListQuery struct {
 	PageSize int    `form:"pageSize"`
 }
 
-// SessionCreateReq 是 POST /sessions 的请求体（督导创建授课记录）。
+// SessionCreateReq 是 POST /sessions 的请求体（teacher 本人课程 / supervisor 代录，B1）。
+// classId 必填（计划 §3.4：前端下拉必选，0=未指定只允许历史数据）。
 type SessionCreateReq struct {
 	CourseID    uint64  `json:"courseId" binding:"required"`
+	// ClassID 不在 bind 层 required：缺失/错配由 service 层判 40002，
+	// 且经听评课计划快捷建课（planId 非空）时允许省略（计划 §4.1 例外）。
 	ClassID     uint64  `json:"classId"`
 	SessionDate string  `json:"sessionDate" binding:"required"`
 	Period      string  `json:"period" binding:"required,max=32"`
@@ -64,6 +67,8 @@ type PendingSessionItem struct {
 // SupervisorEvaluationReq 是 PUT /sessions/:id/supervisor-evaluation 的请求体。
 // 督导评分强制 5 个维度全部录入：维度分 1-5 整数，任一维度缺失返回 40002，越界返回 40001。
 // （仅智能体侧允许维度为 null，见开发计划 §2.1。）
+//
+// ⚠️ 2026-10-16 重构后该接口已废弃（返回 50002）；督导改为纯评语，见 SupervisorObservationReq。
 type SupervisorEvaluationReq struct {
 	Objective    *int   `json:"objective" binding:"omitempty,min=1,max=5"`
 	Content      *int   `json:"content" binding:"omitempty,min=1,max=5"`
@@ -74,6 +79,29 @@ type SupervisorEvaluationReq struct {
 	Highlights   string `json:"highlights" binding:"max=1000"`
 	Improvements string `json:"improvements" binding:"max=1000"`
 	Suggestions  string `json:"suggestions" binding:"max=1000"`
+}
+
+// SupervisorObservationReq 是 PUT /sessions/:id/supervisor-observation 的请求体（B8，督导纯评语，无五维分）。
+//
+// 字段映射到 evaluations 的 4 个评语列（§4.3 的 6 项按最小破坏映射，不加列）：
+//
+//	comment      ← 审核意见（含学生参与观察）
+//	highlights   ← 亮点
+//	improvements ← 主要问题
+//	suggestions  ← 改进建议（含复查要求）
+//
+// 至少填写一项，否则 40002。
+type SupervisorObservationReq struct {
+	Comment      string `json:"comment" binding:"max=2000"`
+	Highlights   string `json:"highlights" binding:"max=1000"`
+	Improvements string `json:"improvements" binding:"max=1000"`
+	Suggestions  string `json:"suggestions" binding:"max=1000"`
+}
+
+// CommentTagDTO 是常用语标签分组（N2，督导评语可点选）。
+type CommentTagDTO struct {
+	Category string   `json:"category"`
+	Items    []string `json:"items"`
 }
 
 // EvaluationDTO 是一条评价的完整展示（督导评分表单回填 / 智能体参考面板共用）。
@@ -110,6 +138,8 @@ type EvidenceDTO struct {
 	Dimensions    map[string]EvidenceDimension `json:"dimensions"`
 	NotObservable []string                     `json:"notObservable"`
 	PromptVersion string                       `json:"promptVersion"`
+	// RiskTags 是高风险标签，仅督导可见（D8）；教师侧由 service 层清空，绝不外泄。
+	RiskTags []string `json:"riskTags,omitempty"`
 }
 
 // EvidenceDimension 是单个维度的证据：置信度 + 可定位的转写引用。
@@ -275,4 +305,79 @@ type TeacherEvaluationTimelineItem struct {
 	// 结构化评语明细（督导可能多人；阶段一智能体至多一条）
 	SupervisorEvaluations []EvaluationDTO `json:"supervisorEvaluations"`
 	AgentEvaluation       *EvaluationDTO  `json:"agentEvaluation"`
+}
+
+// SupervisorTaskDTO 是督导抽样任务行（§4.3）。
+// 抽样规则（B2/T1，不建计数器）：该教师 AI 终评每满 5 条抽 1 条；
+// 候选 = 该批最近 5 条，有高风险标签优先取标签项，否则取 AI 综合分最低 1 条。
+type SupervisorTaskDTO struct {
+	SessionID         uint64   `json:"sessionId"`
+	CourseID          uint64   `json:"courseId"`
+	CourseCode        string   `json:"courseCode"`
+	CourseName        string   `json:"courseName"`
+	TeacherID         uint64   `json:"teacherId"`
+	TeacherName       string   `json:"teacherName"`
+	SessionDate       string   `json:"sessionDate"`
+	Period            string   `json:"period"`
+	Topic             string   `json:"topic"`
+	Batch             int      `json:"batch"` // 第几批（第 n 个满 5 条）
+	AITotal           *float64 `json:"aiTotal"`
+	Reason            string   `json:"reason"` // risk | lowest
+	RiskTags          []string `json:"riskTags"`
+	Reviewed          bool     `json:"reviewed"`
+	SupervisorComment string   `json:"supervisorComment"`
+}
+
+// SupervisorTaskListQuery 是 GET /supervision/ai-tasks 的查询参数。
+// pending=1 只看待人工复评（被抽中且尚无督导观察）。
+type SupervisorTaskListQuery struct {
+	Semester string `form:"semester"`
+	Pending  bool   `form:"pending"`
+	Page     int    `form:"page"`
+	PageSize int    `form:"pageSize"`
+}
+
+// TeacherReportDTO 是 GET /teachers/:id/report 的响应（N9 一页纸报告）。
+// T2 确认：综合分 + 五维条 + 最近 3 条督导评语 + 待改进清单；前端另做打印视图。
+type TeacherReportDTO struct {
+	TeacherID        uint64               `json:"teacherId"`
+	TeacherName      string               `json:"teacherName"`
+	JobNo            string               `json:"jobNo"`
+	Department       string               `json:"department"`
+	Semester         string               `json:"semester"`
+	Summary          ScoreSummary         `json:"summary"`
+	RecentComments   []EvaluationDTO      `json:"recentComments"`
+	ImprovementItems []ImprovementItemDTO `json:"improvementItems"`
+	GeneratedAt      string               `json:"generatedAt"`
+}
+
+// AiTaskDTO 是 GET /ai-tasks/:id 的响应：任务状态查询（D3）。
+type AiTaskDTO struct {
+	ID           uint64 `json:"id"`
+	Kind         string `json:"kind"`
+	RefType      string `json:"refType"`
+	RefID        uint64 `json:"refId"`
+	Status       string `json:"status"` // pending|running|done|failed
+	Attempts     int    `json:"attempts"`
+	ErrorMessage string `json:"errorMessage"`
+	CreatedAt    string `json:"createdAt"`
+	UpdatedAt    string `json:"updatedAt"`
+}
+
+// AiAnalyzeResp 是 POST /sessions/:id/ai-observation/analyze 的响应（幂等返回同一 taskId）。
+type AiAnalyzeResp struct {
+	TaskID uint64 `json:"taskId"`
+	Status string `json:"status"`
+}
+
+// AiObservationDTO 是 GET /sessions/:id/ai-observation 的响应：AI 观察详情（§4.2）。
+// teacher 侧 Risks 恒为空（D8）；未评价时 Observation 为 null，status 供前端轮询。
+type AiObservationDTO struct {
+	SessionID    uint64         `json:"sessionId"`
+	TaskID       uint64         `json:"taskId"`
+	Status       string         `json:"status"` // 无任务时为空串
+	ErrorMessage string         `json:"errorMessage"`
+	Observation  *EvaluationDTO `json:"observation"`
+	// Risks 高风险标签，仅督导可见（D8）。
+	Risks []string `json:"risks"`
 }

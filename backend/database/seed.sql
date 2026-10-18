@@ -12,6 +12,7 @@ TRUNCATE TABLE `evaluations`;
 TRUNCATE TABLE `teaching_sessions`;
 TRUNCATE TABLE `supervision_plans`;
 TRUNCATE TABLE `resources`;
+TRUNCATE TABLE `course_timetable`;
 TRUNCATE TABLE `course_classes`;
 TRUNCATE TABLE `courses`;
 TRUNCATE TABLE `users`;
@@ -61,6 +62,22 @@ INSERT INTO `course_classes` (`course_id`, `class_name`, `schedule`, `location`,
 (6, '计科2402',  '周一 5-6 节', '知行楼202', 45),
 (8, '智科2301',  '周三 1-2 节', '智慧楼201', 50);
 
+-- 最小课表（B11，仅建课下拉用；班级 id 与上方开课班级插入顺序一致）
+INSERT INTO `course_timetable` (`course_id`, `class_id`, `teacher_id`, `semester`) VALUES
+(1, 1, 2, '2026-2027-1'),
+(1, 2, 2, '2026-2027-1'),
+(2, 3, 3, '2026-2027-1'),
+(2, 4, 3, '2026-2027-1'),
+(2, 5, 3, '2026-2027-1'),
+(3, 6, 4, '2026-2027-1'),
+(3, 7, 4, '2026-2027-1'),
+(4, 8, 2, '2026-2027-1'),
+(4, 9, 2, '2026-2027-1'),
+(5, 10, 6, '2026-2027-1'),
+(5, 11, 6, '2026-2027-1'),
+(6, 12, 4, '2026-2027-1'),
+(6, 13, 4, '2026-2027-1');
+
 -- 课程资源（file_path 为示例相对路径，实际由上传接口生成）
 INSERT INTO `resources` (`course_id`, `name`, `type`, `size`, `file_path`, `uploader_id`, `uploaded_at`) VALUES
 (1, '第01讲-项目立项与章程.pdf', 'pdf',  2516582,  'uploads/1/3f2a-demo-01.pdf', 2, '2026-09-02 09:30:00'),
@@ -87,9 +104,9 @@ INSERT INTO `supervision_plans` (`id`,`course_id`,`supervisor_id`,`planned_date`
 -- Sprint 2.1：授课记录与课堂评价（开发计划 §3.4）
 -- 表结构由 migrations/V2 建。本段数据为多教师、多课程、多记录的验收样本：
 --   覆盖 4 位教师（李明/张华/刘洋/赵磊）、6 门课程、14 次授课，每门课程配同一位督导（陈静）；
---   每次课同时具备督导与智能体两侧评价，且两侧均覆盖五维（智能体 objective 不再留空，
---   修复雷达图缺角）；单侧总分 = Σ w×dim（w=0.30/0.30/0.20/0.20，frontier 观测项权重 0）。
---   综合分 = 各场次综合分（α=0.5 双源融合后加权）的算术平均（§2.5.2 恒等式）。
+--   每次课同时具备督导观察（纯评语）与智能体评价；
+--   计分只按 AI（计划 §6 重构口径）：单侧总分 = Σ w×dim（w=0.30/0.30/0.20/0.20，frontier 观测项权重 0），
+--   综合分 = 各场次 AI 单侧总分的算术平均；督导行五维全 NULL，不进入聚合。
 --   数值由 pkg/scoring 口径离线计算得出，如算法变更需同步重算本段并更新注释。
 -- ============================================================
 
@@ -112,41 +129,41 @@ INSERT INTO `teaching_sessions`
 (13, 6, 0, 4, '2026-09-14', '5-6 节', '指令系统',           NULL, 'evaluated'),
 (14, 6, 0, 4, '2026-09-21', '5-6 节', '存储层次',           NULL, 'evaluated');
 
--- 督导评价（陈静 id=5）：五维齐全；total_score 为单侧加权总分
+-- 督导观察（陈静 id=5，B8/§3.3）：只写评语列，五维全 NULL、不写 total_score；
+-- 重构后计分只按 AI，督导分不进入任何聚合口径（计划 §6）。
 INSERT INTO `evaluations`
-  (`session_id`,`evaluator_type`,`evaluator_id`,`objective_score`,`content_score`,
-   `interaction_score`,`organization_score`,`frontier_score`,`total_score`,
+  (`session_id`,`evaluator_type`,`evaluator_id`,
    `comment`,`highlights`,`improvements`,`suggestions`) VALUES
-(1,'supervisor',5, 4,3,2,3,2, 52.50, '开篇结构完整，但互动偏少。',
+(1,'supervisor',5, '开篇结构完整，但互动偏少。',
    '课程框架清晰','提问后等待时间不足','增加案例讨论环节'),
-(2,'supervisor',5, 4,4,3,4,3, 70.00, '用户故事讲解透彻，小组讨论有效。',
+(2,'supervisor',5, '用户故事讲解透彻，小组讨论有效。',
    '小组讨论组织得当','个别小组偏离主题','为每组设定明确产出物'),
-(3,'supervisor',5, 5,4,4,4,3, 82.50, '估点练习设计巧妙，学生参与度高。',
+(3,'supervisor',5, '估点练习设计巧妙，学生参与度高。',
    '练习设计贴近实战','时间略紧','预留 5 分钟总结'),
-(4,'supervisor',5, 5,4,3,4,2, 77.50, '进程模型讲解清晰，课堂节奏平稳。',
+(4,'supervisor',5, '进程模型讲解清晰，课堂节奏平稳。',
    '概念对比清晰','形成性提问偏少','每讲插入一道课堂小测'),
-(5,'supervisor',5, 4,4,4,4,3, 75.00, '死锁案例生动，学生讨论投入。',
+(5,'supervisor',5, '死锁案例生动，学生讨论投入。',
    '案例贴近操作系统实践','讨论收敛稍慢','为讨论设置明确时限'),
-(6,'supervisor',5, 5,5,4,5,4, 95.00, '内存管理重点突出，练习反馈及时。',
+(6,'supervisor',5, '内存管理重点突出，练习反馈及时。',
    '重难点处理到位','节奏偏快','给基础薄弱学生留缓冲'),
-(7,'supervisor',5, 3,3,2,3,2, 45.00, '范式概念铺垫充分，但互动不足。',
+(7,'supervisor',5, '范式概念铺垫充分，但互动不足。',
    '概念铺垫完整','课堂互动薄弱','增加小组判断练习'),
-(8,'supervisor',5, 4,4,3,4,3, 70.00, 'SQL 优化讲解到位，示例贴近实战。',
+(8,'supervisor',5, 'SQL 优化讲解到位，示例贴近实战。',
    '示例贴近实战','学生动手时间不足','安排随堂上机环节'),
-(9,'supervisor',5, 4,3,3,4,2, 62.50, '生命周期串讲完整，学生参与一般。',
+(9,'supervisor',5, '生命周期串讲完整，学生参与一般。',
    '脉络清晰','案例略旧','引入近两年项目案例'),
-(10,'supervisor',5, 5,4,4,4,3, 82.50, '需求访谈演练扎实，产出物明确。',
+(10,'supervisor',5, '需求访谈演练扎实，产出物明确。',
    '演练设计扎实','组间互评缺失','增加组间互评环节'),
-(11,'supervisor',5, 4,3,2,3,3, 52.50, '监督学习框架清晰，但等待时间偏短。',
+(11,'supervisor',5, '监督学习框架清晰，但等待时间偏短。',
    '知识框架清晰','提问等待时间不足','延长等待至 3-5 秒'),
-(12,'supervisor',5, 5,5,4,4,4, 90.00, '模型评估指标讲解透彻，案例丰富。',
+(12,'supervisor',5, '模型评估指标讲解透彻，案例丰富。',
    '指标讲解透彻','讲授时长偏多','压缩讲授增加练习'),
-(13,'supervisor',5, 4,3,3,3,2, 57.50, '指令系统讲解准确，节奏略快。',
+(13,'supervisor',5, '指令系统讲解准确，节奏略快。',
    '讲解准确','关键推导略快','放慢流水线推导'),
-(14,'supervisor',5, 5,4,4,4,4, 82.50, '存储层次结构清晰，举例恰当。',
+(14,'supervisor',5, '存储层次结构清晰，举例恰当。',
    '层次结构清晰','互动偏少','增加缓存命中问答');
 
--- 智能体评价：五维全覆盖（含 objective），用于修复雷达图缺角并验收双源融合
+-- 智能体评价：五维全覆盖（含 objective），本轮唯一的计分来源（计划 §6）
 INSERT INTO `evaluations`
   (`session_id`,`evaluator_type`,`evaluator_id`,`ai_model_version`,
    `objective_score`,`content_score`,`interaction_score`,`organization_score`,`frontier_score`,

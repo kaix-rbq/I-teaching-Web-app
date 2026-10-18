@@ -149,6 +149,10 @@ async function submitCreateSession(): Promise<void> {
     ElMessage.error('请选择授课日期')
     return
   }
+  if (createForm.classId === '') {
+    ElMessage.error('请选择班级')
+    return
+  }
   if (!createForm.period.trim()) {
     ElMessage.error('请填写节次')
     return
@@ -157,7 +161,7 @@ async function submitCreateSession(): Promise<void> {
   try {
     await createSessionApi({
       courseId: Number(courseId.value),
-      classId: createForm.classId === '' ? 0 : createForm.classId,
+      classId: createForm.classId,
       sessionDate: createForm.sessionDate,
       period: createForm.period.trim(),
       topic: createForm.topic.trim()
@@ -441,11 +445,10 @@ onMounted(async () => {
               class="course-detail__dialog-field"
             />
           </el-form-item>
-          <el-form-item label="班级">
+          <el-form-item label="班级" required>
             <el-select
               v-model="createForm.classId"
-              placeholder="不指定"
-              clearable
+              placeholder="请选择班级（必填）"
               class="course-detail__dialog-field"
             >
               <el-option

@@ -169,10 +169,41 @@ export interface SupervisorEvaluationPayload {
   suggestions?: string
 }
 
-/** 创建授课记录提交体（POST /sessions，仅督导） */
+/** 督导纯评语观察提交体（PUT /sessions/:id/supervisor-observation，B8 无五维分，至少填一项） */
+export interface SupervisorObservationPayload {
+  comment?: string
+  highlights?: string
+  improvements?: string
+  suggestions?: string
+}
+
+/** AI 评析任务状态（GET /ai-tasks/:id，D3） */
+export interface AiTask {
+  id: number
+  kind: string
+  refType: string
+  refId: number
+  status: 'pending' | 'running' | 'done' | 'failed' | string
+  attempts: number
+  errorMessage: string
+  createdAt: string
+  updatedAt: string
+}
+
+/** AI 观察详情（GET /sessions/:id/ai-observation，§4.2）；risks 仅督导可见（D8） */
+export interface AiObservation {
+  sessionId: number
+  taskId: number
+  status: string
+  errorMessage: string
+  observation: EvaluationDTO | null
+  risks: string[]
+}
+
+/** 创建授课记录提交体（POST /sessions，teacher 本人课程 / supervisor） */
 export interface SessionCreatePayload {
   courseId: number
-  /** 0 / 不传 = 未指定班级 */
+  /** 班级 id（必填；经听评课计划快捷建课 planId 非空时可省略） */
   classId?: number
   /** YYYY-MM-DD，不得晚于今天 */
   sessionDate: string

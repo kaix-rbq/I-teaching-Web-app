@@ -24,19 +24,37 @@ func NewSessionHandler(sessions service.SessionService, recordings ...service.Re
 	return h
 }
 
-// Create 处理 POST /api/v1/sessions（仅 supervisor，S6.1）。
+// Create 处理 POST /api/v1/sessions（teacher 本人课程 / supervisor 代录，S6.1 / B1）。
 func (h *SessionHandler) Create(c *gin.Context) {
 	var req dto.SessionCreateReq
 	if err := bindJSON(c, &req); err != nil {
 		response.Fail(c, err)
 		return
 	}
-	detail, err := h.sessions.Create(c.Request.Context(), req)
+	role, _ := middleware.Role(c)
+	userID, _ := middleware.UserID(c)
+	detail, err := h.sessions.Create(c.Request.Context(), role, middleware.DeptID(c), userID, req)
 	if err != nil {
 		response.Fail(c, err)
 		return
 	}
 	response.OK(c, detail)
+}
+
+// Delete 处理 DELETE /api/v1/sessions/:id（该课程任课教师本人 / supervisor，D6）。
+func (h *SessionHandler) Delete(c *gin.Context) {
+	id, err := pathID(c)
+	if err != nil {
+		response.Fail(c, err)
+		return
+	}
+	role, _ := middleware.Role(c)
+	userID, _ := middleware.UserID(c)
+	if err := h.sessions.Delete(c.Request.Context(), role, middleware.DeptID(c), userID, id); err != nil {
+		response.Fail(c, err)
+		return
+	}
+	response.OK(c, gin.H{})
 }
 
 // ListByCourse 处理 GET /api/v1/courses/:id/sessions（登录，数据裁剪，S6.2）。
@@ -121,6 +139,29 @@ func (h *SessionHandler) Submit(c *gin.Context) {
 	supervisorID, _ := middleware.UserID(c)
 
 	data, err := h.sessions.SubmitSupervisorEvaluation(c.Request.Context(), supervisorID, id, req)
+	if err != nil {
+		response.Fail(c, err)
+		return
+	}
+	response.OK(c, data)
+}
+
+// SubmitObservation 处理 PUT /api/v1/sessions/:id/supervisor-observation（仅 supervisor，B8）。
+// 督导纯评语观察：无五维分，至少填一项，幂等覆盖。
+func (h *SessionHandler) SubmitObservation(c *gin.Context) {
+	id, err := pathID(c)
+	if err != nil {
+		response.Fail(c, err)
+		return
+	}
+	var req dto.SupervisorObservationReq
+	if err := bindJSON(c, &req); err != nil {
+		response.Fail(c, err)
+		return
+	}
+	supervisorID, _ := middleware.UserID(c)
+
+	data, err := h.sessions.SubmitSupervisorObservation(c.Request.Context(), supervisorID, id, req)
 	if err != nil {
 		response.Fail(c, err)
 		return

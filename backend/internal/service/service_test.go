@@ -424,13 +424,16 @@ func TestSessionCreateRules(t *testing.T) {
 			getDetail: func(ctx context.Context, id uint64) (*repository.CourseRow, error) {
 				return &repository.CourseRow{ID: 1, Code: "SE3101", Name: "软件项目管理", TeacherID: 2, Semester: "2026-2027-1"}, nil
 			},
+			listClasses: func(ctx context.Context, courseID uint64) ([]model.ClassInfo, error) {
+				return []model.ClassInfo{{ID: 7, ClassName: "软工2201"}}, nil
+			},
 		}
 		return NewSessionService(sessions, &fakeEvalRepo{}, courses, &fakeUserRepo{}, evalCfg())
 	}
 
 	t.Run("日期晚于今天返回 40002", func(t *testing.T) {
 		svc := newSvc(&fakeSessionRepo{})
-		_, err := svc.Create(context.Background(), dto.SessionCreateReq{CourseID: 1, SessionDate: "2099-01-01", Period: "1-2 节"})
+		_, err := svc.Create(context.Background(), RoleSupervisor, 0, 9, dto.SessionCreateReq{CourseID: 1, SessionDate: "2099-01-01", Period: "1-2 节"})
 		require.Error(t, err)
 		assert.Equal(t, errcode.BizRule, errcode.From(err).Code)
 	})
@@ -442,9 +445,33 @@ func TestSessionCreateRules(t *testing.T) {
 			},
 		})
 		yesterday := time.Now().AddDate(0, 0, -1).Format("2006-01-02")
-		_, err := svc.Create(context.Background(), dto.SessionCreateReq{CourseID: 1, SessionDate: yesterday, Period: "3-4 节"})
+		_, err := svc.Create(context.Background(), RoleSupervisor, 0, 9, dto.SessionCreateReq{CourseID: 1, ClassID: 7, SessionDate: yesterday, Period: "3-4 节"})
 		require.Error(t, err)
 		assert.Equal(t, errcode.Conflict, errcode.From(err).Code)
+	})
+
+	t.Run("教师为他课建课返回 40302", func(t *testing.T) {
+		svc := newSvc(&fakeSessionRepo{})
+		yesterday := time.Now().AddDate(0, 0, -1).Format("2006-01-02")
+		_, err := svc.Create(context.Background(), RoleTeacher, 0, 99, dto.SessionCreateReq{CourseID: 1, SessionDate: yesterday, Period: "1-2 节"})
+		require.Error(t, err)
+		assert.Equal(t, errcode.ForbiddenData, errcode.From(err).Code)
+	})
+
+	t.Run("缺班级返回 40002", func(t *testing.T) {
+		svc := newSvc(&fakeSessionRepo{})
+		yesterday := time.Now().AddDate(0, 0, -1).Format("2006-01-02")
+		_, err := svc.Create(context.Background(), RoleSupervisor, 0, 9, dto.SessionCreateReq{CourseID: 1, SessionDate: yesterday, Period: "1-2 节"})
+		require.Error(t, err)
+		assert.Equal(t, errcode.BizRule, errcode.From(err).Code)
+	})
+
+	t.Run("班级错配返回 40002", func(t *testing.T) {
+		svc := newSvc(&fakeSessionRepo{})
+		yesterday := time.Now().AddDate(0, 0, -1).Format("2006-01-02")
+		_, err := svc.Create(context.Background(), RoleSupervisor, 0, 9, dto.SessionCreateReq{CourseID: 1, ClassID: 99, SessionDate: yesterday, Period: "1-2 节"})
+		require.Error(t, err)
+		assert.Equal(t, errcode.BizRule, errcode.From(err).Code)
 	})
 
 	t.Run("成功创建：teacher_id 随课程落库且初始状态 scheduled", func(t *testing.T) {
@@ -464,7 +491,7 @@ func TestSessionCreateRules(t *testing.T) {
 		}
 		svc := newSvc(sessions)
 		yesterday := time.Now().AddDate(0, 0, -1).Format("2006-01-02")
-		detail, err := svc.Create(context.Background(), dto.SessionCreateReq{CourseID: 1, SessionDate: yesterday, Period: "验收节次", Topic: "T"})
+		detail, err := svc.Create(context.Background(), RoleSupervisor, 0, 5, dto.SessionCreateReq{CourseID: 1, ClassID: 7, SessionDate: yesterday, Period: "验收节次", Topic: "T"})
 		require.NoError(t, err)
 		require.NotNil(t, created)
 		assert.Equal(t, uint64(2), created.TeacherID)
@@ -522,8 +549,8 @@ func TestTeacherSummarySampleUsesEvaluated(t *testing.T) {
 	}}
 	f := func(v float64) *float64 { return &v }
 	rows := []repository.SessionDimRow{
-		{SessionID: 1, TeacherID: 2, CourseID: 1, HasSupervisor: true,
-			SupObjective: f(4), SupContent: f(4), SupInteraction: f(4), SupOrganization: f(4), SupFrontier: f(4)},
+		{SessionID: 1, TeacherID: 2, CourseID: 1, HasAgent: true,
+			AiObjective: f(4), AiContent: f(4), AiInteraction: f(4), AiOrganization: f(4), AiFrontier: f(4)},
 		{SessionID: 2, TeacherID: 2, CourseID: 1},
 		{SessionID: 3, TeacherID: 2, CourseID: 1},
 	}
@@ -662,7 +689,7 @@ func TestTeacherEvaluationsTimeline(t *testing.T) {
 	assert.Equal(t, "2026-09-19", res.List[0].SessionDate)
 	assert.Equal(t, "软件项目管理", res.List[0].CourseName)
 
-	// 场次 2：双侧全 4 分 → 融合后 75.00；督导/智能体单侧分取落库总分。
+	// 场次 2：AI 侧维度全 4 分 → 综合分 = AI 单侧分 75.00；督导/智能体单侧分取落库总分。
 	require.NotNil(t, res.List[0].CompositeScore)
 	assert.Equal(t, 75.00, *res.List[0].CompositeScore)
 	require.NotNil(t, res.List[0].SupervisorScore)
@@ -675,9 +702,8 @@ func TestTeacherEvaluationsTimeline(t *testing.T) {
 	require.NotNil(t, res.List[0].AgentEvaluation)
 	assert.Equal(t, "qwen-audio-v1", res.List[0].AgentEvaluation.AIModelVersion)
 
-	// 场次 1：仅督导，智能体侧为空。
-	require.NotNil(t, res.List[1].CompositeScore)
-	assert.Equal(t, 75.00, *res.List[1].CompositeScore)
+	// 场次 1：仅督导评语、无 AI 评价 → 综合分为 null（计分只按 AI，计划 §6）。
+	assert.Nil(t, res.List[1].CompositeScore)
 	assert.Equal(t, 52.5, *res.List[1].SupervisorScore)
 	assert.Nil(t, res.List[1].AgentEvaluation)
 	assert.Empty(t, res.List[1].SupervisorEvaluations[0].Highlights)
@@ -696,6 +722,74 @@ func TestTeacherEvaluationsTimeline(t *testing.T) {
 		require.Error(t, aerr)
 		assert.Equal(t, errcode.ForbiddenData, errcode.From(aerr).Code)
 	})
+}
+
+// TestSupervisionSamplingDispatch 覆盖 R1.2 抽样规则：
+// 每满 5 条抽 1 条；有风险标签优先，否则取 AI 总分最低；pending 过滤与 reviewed 标记。
+func TestSupervisionSamplingDispatch(t *testing.T) {
+	f := func(v float64) *float64 { return &v }
+	mk := func(id, teacher uint64, date string, total float64, evidence string, supCnt int) repository.AgentSessionRow {
+		d, _ := time.Parse("2006-01-02", date)
+		row := repository.AgentSessionRow{
+			SessionID: id, TeacherID: teacher, TeacherName: "李明", CourseID: 1,
+			CourseCode: "SE3101", CourseName: "软件项目管理", SessionDate: d, Period: "3-4 节",
+			AITotal: f(total), SupervisorCnt: supCnt,
+		}
+		if evidence != "" {
+			row.Evidence = &evidence
+		}
+		return row
+	}
+	ctx := context.Background()
+	newSvc := func(rows []repository.AgentSessionRow) SupervisionTaskService {
+		return NewSupervisionTaskService(&fakeEvalRepo{
+			listAgentSessions: func(context.Context, string, string) ([]repository.AgentSessionRow, error) {
+				return rows, nil
+			},
+		}, evalCfg())
+	}
+
+	// 满 5 条、无风险 → 取 AI 总分最低（id=5, 50），且尚无督导观察 → pending。
+	rows := []repository.AgentSessionRow{
+		mk(1, 2, "2026-09-26", 75, "", 0),
+		mk(2, 2, "2026-09-24", 80, "", 0),
+		mk(3, 2, "2026-09-19", 70, "", 0),
+		mk(4, 2, "2026-09-17", 65, "", 0),
+		mk(5, 2, "2026-09-12", 50, "", 0),
+	}
+	res, err := newSvc(rows).Queue(ctx, dto.SupervisorTaskListQuery{})
+	require.NoError(t, err)
+	require.Len(t, res.List, 1)
+	assert.Equal(t, uint64(5), res.List[0].SessionID)
+	assert.Equal(t, "lowest", res.List[0].Reason)
+	assert.False(t, res.List[0].Reviewed)
+
+	// 有风险标签 → 优先取标签项（id=3）。
+	rowsRisk := append([]repository.AgentSessionRow{}, rows...)
+	ev := `{"riskTags":["学生参与度低"]}`
+	rowsRisk[2].Evidence = &ev
+	resRisk, err := newSvc(rowsRisk).Queue(ctx, dto.SupervisorTaskListQuery{})
+	require.NoError(t, err)
+	require.Len(t, resRisk.List, 1)
+	assert.Equal(t, uint64(3), resRisk.List[0].SessionID)
+	assert.Equal(t, "risk", resRisk.List[0].Reason)
+	assert.Equal(t, []string{"学生参与度低"}, resRisk.List[0].RiskTags)
+
+	// 已有督导观察 → reviewed=true，pending 过滤后为空。
+	rowsReviewed := append([]repository.AgentSessionRow{}, rows...)
+	rowsReviewed[4].SupervisorCnt = 1
+	resReviewed, err := newSvc(rowsReviewed).Queue(ctx, dto.SupervisorTaskListQuery{})
+	require.NoError(t, err)
+	require.Len(t, resReviewed.List, 1)
+	assert.True(t, resReviewed.List[0].Reviewed)
+	resPending, err := newSvc(rowsReviewed).Queue(ctx, dto.SupervisorTaskListQuery{Pending: true})
+	require.NoError(t, err)
+	assert.Empty(t, resPending.List)
+
+	// 不足 5 条 → 不产生样本。
+	short, err := newSvc(rows[:3]).Queue(ctx, dto.SupervisorTaskListQuery{})
+	require.NoError(t, err)
+	assert.Empty(t, short.List)
 }
 
 // TestDraftService 覆盖督导评估草稿：部分维度可保存、提交需五维齐全、提交成功后删除草稿。

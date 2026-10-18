@@ -102,7 +102,9 @@
 
   /* ===== 动效曲线 ——§4.6 ===== */
   --ease-out-soft: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --ease-emphasized: cubic-bezier(0.16, 1, 0.3, 1);
   --duration-fast: 200ms;
   --duration-mid: 400ms;
+  --duration-slow: 560ms;
   --duration-count: 600ms;
 }

@@ -1,0 +1,42 @@
+- generic [ref=f11e3]:
+  - complementary [ref=f11e4]:
+    - generic [ref=f11e5]:
+      - generic [ref=f11e6]: 爱
+      - generic [ref=f11e7]: 爱教学
+    - menubar [ref=f11e8]:
+      - menuitem [ref=f11e9] [cursor=pointer]
+      - menuitem [ref=f11e15] [cursor=pointer]
+      - menuitem [ref=f11e20] [cursor=pointer]
+      - menuitem [ref=f11e24] [cursor=pointer]
+      - menuitem [ref=f11e29] [cursor=pointer]
+    - button "收起菜单" [ref=f11e33] [cursor=pointer]
+  - generic [ref=f11e38]:
+    - banner [ref=f11e39]:
+      - navigation "面包屑" [ref=f11e40]:
+        - link "待改进清单" [ref=f11e42]
+      - generic [ref=f11e43]:
+        - button "站内信" [ref=f11e45] [cursor=pointer]
+        - button "载入演示数据" [ref=f11e51] [cursor=pointer]
+        - generic [ref=f11e53]: 学期口径
+        - generic [ref=f11e55] [cursor=pointer]:
+          - generic:
+            - combobox "学期选择" [ref=f11e57]
+            - generic [ref=f11e58]: 2026-2027-1
+        - button "陈 陈静 教学督导" [ref=f11e64] [cursor=pointer]:
+          - generic [ref=f11e65]: 陈
+          - generic [ref=f11e66]: 陈静
+          - generic [ref=f11e67]: 教学督导
+    - main [ref=f11e71]:
+      - generic [ref=f11e73]:
+        - generic [ref=f11e75]:
+          - heading "待改进清单" [level=1] [ref=f11e76]
+          - paragraph [ref=f11e77]: 教师自评完成后由督导确认关闭
+        - generic [ref=f11e78]:
+          - generic [ref=f11e81] [cursor=pointer]:
+            - generic:
+              - combobox [ref=f11e83]
+              - generic [ref=f11e84]: 全部状态
+          - generic [ref=f11e89]:
+            - generic [ref=f11e90]: 进行中 0 · 待确认 0 · 已关闭 0
+            - button "查询" [ref=f11e91] [cursor=pointer]
+            - button "重置" [ref=f11e93] [cursor=pointer]

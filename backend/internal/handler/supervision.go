@@ -42,3 +42,8 @@ func (h *SupervisionHandler) Plans(c *gin.Context) {
 	}
 	response.OK(c, data)
 }
+
+// CommentTags 处理 GET /api/v1/supervision/comment-tags（N2，常用语标签库）。
+func (h *SupervisionHandler) CommentTags(c *gin.Context) {
+	response.OK(c, h.supervision.CommentTags())
+}

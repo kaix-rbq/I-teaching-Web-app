@@ -5,6 +5,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
+	"aijiaoxue-api/internal/agent"
 	"aijiaoxue-api/internal/asr"
 	"aijiaoxue-api/internal/config"
 	"aijiaoxue-api/internal/dto"
@@ -21,7 +22,7 @@ import (
 //
 // 同时返回 recordingSvc：进程重启时需要由 main 驱动一次 RequeueStuck
 // （重新入队中断的转写任务）。路由层不承担生命周期副作用，故不在此处自行启动。
-func New(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) (*gin.Engine, service.RecordingService) {
+func New(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) (*gin.Engine, service.RecordingService, service.AiTaskService) {
 	dto.RegisterValidators()
 
 	userRepo := repository.NewUserRepository(db)
@@ -32,15 +33,26 @@ func New(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) (*gin.Engine, se
 	evaluationRepo := repository.NewEvaluationRepository(db)
 	recordingRepo := repository.NewRecordingRepository(db)
 	draftRepo := repository.NewDraftRepository(db)
+	aiTaskRepo := repository.NewAiTaskRepository(db)
+	improvementRepo := repository.NewImprovementRepository(db)
+	reflectionRepo := repository.NewReflectionRepository(db)
+	notificationRepo := repository.NewNotificationRepository(db)
+	demoRepo := repository.NewDemoRepository(db)
+	timetableRepo := repository.NewTimetableRepository(db)
 
 	authSvc := service.NewAuthService(userRepo, jwt)
 	courseSvc := service.NewCourseService(courseRepo, userRepo)
 	resourceSvc := service.NewResourceService(resourceRepo, courseRepo, cfg.Upload)
 	supervisionSvc := service.NewSupervisionService(supervisionRepo)
 	dashboardSvc := service.NewDashboardService(courseRepo, userRepo, resourceRepo, supervisionRepo, draftRepo, sessionRepo)
-	dictSvc := service.NewDictService(userRepo)
-	sessionSvc := service.NewSessionService(sessionRepo, evaluationRepo, courseRepo, userRepo, cfg.Evaluation)
-	teacherScoreSvc := service.NewTeacherScoreService(userRepo, courseRepo, evaluationRepo, cfg.Evaluation)
+	dictSvc := service.NewDictService(userRepo, courseRepo, timetableRepo)
+	notificationSvc := service.NewNotificationService(notificationRepo, sessionRepo)
+	sessionSvc := service.NewSessionServiceWithDelete(sessionRepo, evaluationRepo, courseRepo, userRepo, recordingRepo, improvementRepo, cfg.Evaluation, notificationSvc)
+	improvementSvc := service.NewImprovementService(improvementRepo)
+	reflectionSvc := service.NewReflectionService(reflectionRepo)
+	supervisionTaskSvc := service.NewSupervisionTaskService(evaluationRepo, cfg.Evaluation)
+	demoSvc := service.NewDemoService(demoRepo, cfg.Demo.Enabled)
+	teacherScoreSvc := service.NewTeacherScoreService(userRepo, courseRepo, evaluationRepo, cfg.Evaluation, improvementRepo)
 	// ⚠️ 不能写 Transcriber(asr.NewClient(...))：把 nil 的 *asr.Client 装进接口会得到
 	// 非 nil 接口（holds-nil-pointer），service 里的 `s.transcriber == nil` 判断会失效，
 	// 调用时直接空指针 panic。必须显式判空后再赋值。
@@ -48,12 +60,21 @@ func New(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) (*gin.Engine, se
 	if client := asr.NewClient(cfg.Transcription); client != nil {
 		transcriber = client
 	}
+	// 同理：agent.NewClient 未配置时返回 nil *Client，直接装进接口同样会 holds-nil-pointer。
+	var sessionAnalyzer agent.SessionAnalyzer
+	if client := agent.NewClient(cfg.Agent); client != nil {
+		sessionAnalyzer = client
+	}
+	aiTaskSvc := service.NewAiTaskService(
+		aiTaskRepo, sessionRepo, evaluationRepo, recordingRepo,
+		sessionAnalyzer, cfg.Agent, cfg.Evaluation,
+	)
 	recordingSvc := service.NewRecordingService(
 		recordingRepo, sessionRepo,
 		cfg.Upload, cfg.Transcription,
 		jwt, transcriber,
+		aiTaskSvc.EnqueueSessionEval,
 	)
-	draftSvc := service.NewDraftService(draftRepo, sessionSvc)
 
 	authH := handler.NewAuthHandler(authSvc)
 	courseH := handler.NewCourseHandler(courseSvc)
@@ -64,7 +85,12 @@ func New(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) (*gin.Engine, se
 	sessionH := handler.NewSessionHandler(sessionSvc, recordingSvc)
 	teacherScoreH := handler.NewTeacherScoreHandler(teacherScoreSvc)
 	recordingH := handler.NewRecordingHandler(recordingSvc)
-	draftH := handler.NewDraftHandler(draftSvc)
+	aiTaskH := handler.NewAiTaskHandler(aiTaskSvc)
+	improvementH := handler.NewImprovementHandler(improvementSvc)
+	reflectionH := handler.NewReflectionHandler(reflectionSvc)
+	notificationH := handler.NewNotificationHandler(notificationSvc)
+	supervisionTaskH := handler.NewSupervisionTaskHandler(supervisionTaskSvc)
+	demoH := handler.NewDemoHandler(demoSvc)
 
 	gin.SetMode(cfg.Server.Mode)
 	r := gin.New()
@@ -93,6 +119,8 @@ func New(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) (*gin.Engine, se
 	authed.GET("/resources/:id/download", resourceH.Download)
 	authed.GET("/departments", dictH.Departments)
 	authed.GET("/teachers", dictH.Teachers)
+	// B11 最小课表下拉：建课时课程/班级下拉数据源（维护见下方 director/supervisor 组）。
+	authed.GET("/timetable/mine", dictH.MyTimetable)
 
 	// Sprint 2.1：评价闭环（数据裁剪在 service 层，铁律见后端 AGENTS.md §3）。
 	authed.GET("/courses/:id/sessions", sessionH.ListByCourse)
@@ -103,6 +131,26 @@ func New(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) (*gin.Engine, se
 	authed.POST("/sessions/:id/transcript/retry", recordingH.Retry)
 	authed.GET("/teachers/:id/evaluation-summary", teacherScoreH.TeacherSummary)
 	authed.GET("/teachers/:id/evaluations", teacherScoreH.TeacherEvaluations)
+	authed.GET("/teachers/:id/report", teacherScoreH.Report)
+
+	// —— AI 观察（D3 / R0.2）：详情与入队；数据裁剪在 service 层（D8 教师侧风险脱敏）——
+	authed.GET("/sessions/:id/ai-observation", aiTaskH.Observation)
+	authed.POST("/sessions/:id/ai-observation/analyze", aiTaskH.Analyze)
+	authed.GET("/ai-tasks/:id", aiTaskH.TaskStatus)
+
+	// —— 提优闭环（2026-10-16 重构 N4/N5/B12）：清单 / 反思 / 站内信，角色与归属在 service 层判定 ——
+	authed.GET("/improvement-items", improvementH.List)
+	authed.POST("/improvement-items", improvementH.Create)
+	authed.PUT("/improvement-items/:id", improvementH.Update)
+	authed.PUT("/improvement-items/:id/complete", improvementH.Complete)
+	authed.PUT("/improvement-items/:id/close", improvementH.Close)
+	authed.GET("/teaching-reflections", reflectionH.List)
+	authed.POST("/teaching-reflections", reflectionH.Create)
+	authed.PUT("/teaching-reflections/:id", reflectionH.Update)
+	authed.GET("/notifications", notificationH.List)
+	// 🔴 注册顺序：静态段 /read-all 必须先于参数段 /:id/read。
+	authed.PUT("/notifications/read-all", notificationH.MarkAllRead)
+	authed.PUT("/notifications/:id/read", notificationH.MarkRead)
 
 	authed.Group("", middleware.RequireRoles(service.RoleDirector)).
 		POST("/courses", courseH.Create).
@@ -112,20 +160,33 @@ func New(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) (*gin.Engine, se
 		POST("/courses/:id/resources", resourceH.Upload).
 		DELETE("/resources/:id", resourceH.Delete)
 
+	// —— 授课与录音（B1/D6）：teacher 本人课程 / supervisor 代录；建课即触发后续 AI 评析 ——
+	authed.Group("", middleware.RequireRoles(service.RoleTeacher, service.RoleSupervisor)).
+		POST("/sessions", sessionH.Create).
+		DELETE("/sessions/:id", sessionH.Delete).
+		POST("/sessions/:id/recording", recordingH.Upload).
+		DELETE("/sessions/:id/recording", recordingH.Delete)
+
 	authed.Group("", middleware.RequireRoles(service.RoleSupervisor)).
 		GET("/supervision/coverage", supervisionH.Coverage).
 		GET("/supervision/plans", supervisionH.Plans).
-		POST("/sessions", sessionH.Create).
-		PUT("/sessions/:id/supervisor-evaluation", sessionH.Submit).
-		POST("/sessions/:id/recording", recordingH.Upload).
-		GET("/sessions/:id/draft", draftH.GetBySession).
-		PUT("/sessions/:id/draft", draftH.Save).
-		GET("/drafts", draftH.List).
-		DELETE("/drafts/:id", draftH.Delete).
-		POST("/drafts/:id/submit", draftH.Submit)
+		GET("/supervision/comment-tags", supervisionH.CommentTags).
+		GET("/supervision/ai-tasks", supervisionTaskH.Queue).
+		PUT("/sessions/:id/supervisor-observation", sessionH.SubmitObservation).
+		// 2026-10-16 重构 §4.5：五维评分与草稿箱整套停用，路由暂留并返回 50002。
+		PUT("/sessions/:id/supervisor-evaluation", handler.Deprecated("督导五维评分已废弃，请改用督导观察接口")).
+		POST("/ai-tasks/:id/retry", aiTaskH.Retry).
+		GET("/sessions/:id/draft", handler.Deprecated("评估草稿已停用")).
+		PUT("/sessions/:id/draft", handler.Deprecated("评估草稿已停用")).
+		GET("/drafts", handler.Deprecated("评估草稿已停用")).
+		DELETE("/drafts/:id", handler.Deprecated("评估草稿已停用")).
+		POST("/drafts/:id/submit", handler.Deprecated("评估草稿已停用"))
 
 	authed.Group("", middleware.RequireRoles(service.RoleDirector, service.RoleSupervisor)).
-		GET("/teacher-scores", teacherScoreH.List)
+		GET("/teacher-scores", teacherScoreH.List).
+		POST("/timetable", dictH.CreateTimetable).
+		DELETE("/timetable/:id", dictH.DeleteTimetable).
+		POST("/demo/seed", demoH.Seed)
 
-	return r, recordingSvc
+	return r, recordingSvc, aiTaskSvc
 }

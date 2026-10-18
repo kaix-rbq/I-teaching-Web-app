@@ -153,10 +153,72 @@ ol {
   animation: breathe 2s ease-in-out infinite;
 }
 
+/* 进场：淡入上浮（可配合 --stagger 延迟做列表级联） */
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.anim-rise {
+  animation: rise-in var(--duration-mid) var(--ease-emphasized) both;
+  animation-delay: var(--stagger, 0ms);
+}
+
+/* 条形生长：评分维度条 / 覆盖条统一使用 */
+@keyframes grow-x {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+.anim-grow-x {
+  transform-origin: left center;
+  animation: grow-x var(--duration-slow) var(--ease-emphasized) both;
+}
+
+/* 数字进场：只做轻微上浮，避免抖动 */
+@keyframes count-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.anim-count {
+  animation: count-in var(--duration-count) var(--ease-emphasized) both;
+}
+
+/* 红点脉冲：站内信未读 */
+@keyframes dot-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(229, 72, 77, 0.45);
+  }
+  70% {
+    box-shadow: 0 0 0 6px rgba(229, 72, 77, 0);
+  }
+}
+
 /* 降级：用户偏好减少动效时禁用装饰性动画 */
 @media (prefers-reduced-motion: reduce) {
   .anim-fade-slide,
-  .anim-breathe {
+  .anim-breathe,
+  .anim-rise,
+  .anim-grow-x,
+  .anim-count {
     animation: none;
   }
 }

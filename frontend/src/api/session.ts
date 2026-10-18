@@ -1,12 +1,14 @@
 import { request } from './http'
 import type { PageResult } from '@/types/api'
 import type {
+  AiObservation,
   EvaluationDTO,
   SessionCreatePayload,
   SessionDetail,
   SessionEvaluation,
   SessionListItem,
-  SupervisorEvaluationPayload
+  SupervisorEvaluationPayload,
+  SupervisorObservationPayload
 } from '@/types/evaluation'
 import type { RecordingDTO, TranscriptDTO } from '@/types/evaluation'
 
@@ -43,7 +45,7 @@ export function fetchSessionEvaluationApi(id: number | string): Promise<SessionE
   return request<SessionEvaluation>({ url: `/sessions/${id}/evaluation`, method: 'get' })
 }
 
-/** 提交/覆盖督导评分与评语（PUT 幂等，五维必填） */
+/** 提交/覆盖督导评分与评语（PUT 幂等，五维必填）——已废弃（返回 50002），保留以兼容旧调用 */
 export function submitSupervisorEvaluationApi(
   id: number | string,
   payload: SupervisorEvaluationPayload
@@ -53,6 +55,28 @@ export function submitSupervisorEvaluationApi(
     method: 'put',
     data: payload
   })
+}
+
+/** 提交/覆盖督导纯评语观察（PUT 幂等，B8 无五维分，至少填一项） */
+export function submitSupervisorObservationApi(
+  id: number | string,
+  payload: SupervisorObservationPayload
+): Promise<EvaluationDTO> {
+  return request<EvaluationDTO>({
+    url: `/sessions/${id}/supervisor-observation`,
+    method: 'put',
+    data: payload
+  })
+}
+
+/** AI 观察详情（GET /sessions/:id/ai-observation，D8 教师侧 risks 恒空） */
+export function fetchAiObservationApi(id: number | string): Promise<AiObservation> {
+  return request<AiObservation>({ url: `/sessions/${id}/ai-observation`, method: 'get' })
+}
+
+/** 入队 AI 评析（POST /sessions/:id/ai-observation/analyze，幂等） */
+export function analyzeSessionApi(id: number | string): Promise<{ taskId: number; status: string }> {
+  return request({ url: `/sessions/${id}/ai-observation/analyze`, method: 'post' })
 }
 
 export function uploadSessionRecordingApi(id: number | string, file: File, onProgress?: (percent: number) => void): Promise<RecordingDTO> {

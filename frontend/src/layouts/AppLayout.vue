@@ -1,9 +1,13 @@
 <script setup lang="ts">
-import { computed, markRaw, onMounted, ref, type Component as VueComponent } from 'vue'
+import { computed, markRaw, onMounted, ref, watch, type Component as VueComponent } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   ArrowDown,
+  Bell,
+  CircleCheck,
   Collection,
+  EditPen,
   Expand,
   Files,
   Fold,
@@ -18,6 +22,8 @@ import { useAuthStore } from '@/stores/auth'
 import { useDictStore } from '@/stores/dict'
 import { useSemester } from '@/composables/useSemester'
 import { SEMESTERS } from '@/constants'
+import { seedDemoApi } from '@/api/demo'
+import { fetchNotificationsApi } from '@/api/notification'
 
 interface MenuItem {
   index: string
@@ -41,16 +47,19 @@ const menuItems = computed<MenuItem[]>(() => {
     return [
       { index: 'profile-quality', label: '我的质量档案', icon: markRaw(Medal) },
       { index: 'course-list', label: '我的课程', icon: markRaw(Collection) },
+      { index: 'improvements', label: '改进清单', icon: markRaw(Files) },
+      { index: 'reflections', label: '教学反思', icon: markRaw(EditPen) },
       { index: 'profile', label: '个人中心', icon: markRaw(User) }
     ]
   }
 
-  // 督导端聚焦「听评课」核心任务：工作台、课程列表、草稿箱、个人中心四栏。
+  // 督导端聚焦「听评课」核心任务：工作台、课程列表、听评课管理、改进清单、个人中心。
   if (role === 'supervisor') {
     return [
       { index: 'dashboard', label: '工作台', icon: markRaw(Odometer) },
       { index: 'course-list', label: '课程列表', icon: markRaw(Collection) },
-      { index: 'draft-box', label: '草稿箱', icon: markRaw(Files) },
+      { index: 'supervision', label: '听评课管理', icon: markRaw(Files) },
+      { index: 'improvements', label: '改进清单', icon: markRaw(CircleCheck) },
       { index: 'profile', label: '个人中心', icon: markRaw(User) }
     ]
   }
@@ -91,6 +100,43 @@ const breadcrumbs = computed(() =>
 
 const avatarText = computed(() => auth.user?.name?.slice(0, 1) ?? '爱')
 
+// 演示模式按钮：仅 DEV 且督导/主任可见（B6/N7）。
+const demoLoading = ref(false)
+const showDemo = computed(() => import.meta.env.DEV && (auth.role === 'supervisor' || auth.role === 'director'))
+
+async function handleDemoSeed(): Promise<void> {
+  try {
+    await ElMessageBox.confirm('将清空并载入示例转写/清单等演示数据，仅本地开发库可用。是否继续？', '载入演示数据', {
+      type: 'warning',
+      confirmButtonText: '确认载入'
+    })
+  } catch {
+    return
+  }
+  demoLoading.value = true
+  try {
+    const res = await seedDemoApi()
+    ElMessage.success(`${res.message}：转写 ${res.transcripts} 条`)
+    window.location.reload()
+  } finally {
+    demoLoading.value = false
+  }
+}
+
+function goNotifications(): void {
+  void router.push({ name: 'notifications' })
+}
+
+const unread = ref(0)
+async function loadUnread(): Promise<void> {
+  try {
+    const page = await fetchNotificationsApi({ pageSize: 1 })
+    unread.value = page.unread ?? 0
+  } catch {
+    unread.value = 0
+  }
+}
+
 function handleSelect(index: string): void {
   if (index !== route.name) {
     void router.push({ name: index })
@@ -110,7 +156,16 @@ async function handleCommand(command: string): Promise<void> {
 
 onMounted(() => {
   void dict.load()
+  void loadUnread()
 })
+
+// 站内信未读数：路由切换后刷新（进入详情自动已读 → 红点收敛）。
+watch(
+  () => route.fullPath,
+  () => {
+    void loadUnread()
+  }
+)
 </script>
 
 <template>
@@ -149,6 +204,14 @@ onMounted(() => {
         </el-breadcrumb>
 
         <div class="app-layout__header-side">
+          <el-badge :value="unread" :hidden="unread === 0" :max="99">
+            <button class="app-layout__bell" type="button" aria-label="站内信" @click="goNotifications">
+              <el-icon><Bell /></el-icon>
+            </button>
+          </el-badge>
+          <el-button v-if="showDemo" size="small" plain :loading="demoLoading" @click="handleDemoSeed">
+            载入演示数据
+          </el-button>
           <span class="app-layout__semester-label">学期口径</span>
           <el-select
             class="app-layout__semester"
@@ -354,6 +417,34 @@ onMounted(() => {
 
   &__semester {
     width: 132px;
+  }
+
+  &__bell {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    font-size: 16px;
+    color: var(--color-text-secondary);
+    cursor: pointer;
+    background-color: var(--color-bg-page);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    transition: color var(--duration-fast) var(--ease-out-soft),
+      border-color var(--duration-fast) var(--ease-out-soft),
+      background-color var(--duration-fast) var(--ease-out-soft);
+
+    &:hover {
+      color: var(--color-primary);
+      background-color: var(--color-primary-bg);
+      border-color: var(--color-primary-hover);
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--color-primary);
+      outline-offset: 2px;
+    }
   }
 
   &__user {

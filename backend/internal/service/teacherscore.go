@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"sort"
+	"time"
 
 	"aijiaoxue-api/internal/config"
 	"aijiaoxue-api/internal/dto"
@@ -22,23 +23,31 @@ type TeacherScoreService interface {
 	TeacherSummary(ctx context.Context, role string, deptID, userID, teacherID uint64, semester string) (*dto.TeacherEvaluationSummary, error)
 	CourseSummary(ctx context.Context, role string, deptID, userID, courseID uint64, semester string) (*dto.CourseEvaluationSummary, error)
 	TeacherEvaluations(ctx context.Context, role string, deptID, userID, teacherID uint64, q dto.TeacherEvaluationTimelineQuery) (*dto.PageResult[dto.TeacherEvaluationTimelineItem], error)
+	// Report 返回教师报告数据（N9 一页纸：综合分 + 五维 + 最近 3 条督导评语 + 待改进清单）。
+	Report(ctx context.Context, role string, deptID, userID, teacherID uint64, semester string) (*dto.TeacherReportDTO, error)
 }
 
 type teacherScoreService struct {
-	users   repository.UserRepository
-	courses repository.CourseRepository
-	evals   repository.EvaluationRepository
-	cfg     config.EvaluationConfig
+	users        repository.UserRepository
+	courses      repository.CourseRepository
+	evals        repository.EvaluationRepository
+	improvements repository.ImprovementRepository
+	cfg          config.EvaluationConfig
 }
 
-// NewTeacherScoreService 构造教师评分聚合服务。
+// NewTeacherScoreService 构造教师评分聚合服务。improvements 可选（报告接口用）。
 func NewTeacherScoreService(
 	users repository.UserRepository,
 	courses repository.CourseRepository,
 	evals repository.EvaluationRepository,
 	cfg config.EvaluationConfig,
+	improvements ...repository.ImprovementRepository,
 ) TeacherScoreService {
-	return &teacherScoreService{users: users, courses: courses, evals: evals, cfg: cfg}
+	svc := &teacherScoreService{users: users, courses: courses, evals: evals, cfg: cfg}
+	if len(improvements) > 0 {
+		svc.improvements = improvements[0]
+	}
+	return svc
 }
 
 // List 返回教师评分列表（S6.4）：director 本室 / supervisor 全校或按教研室筛选。
@@ -313,7 +322,7 @@ func (s *teacherScoreService) TeacherEvaluations(
 			CourseCode:            row.CourseCode,
 			CourseName:            row.CourseName,
 			Status:                row.Status,
-			CompositeScore:        round2Ptr(scoring.SessionComposite(sessionScoreFromDim(row), weights, s.cfg.SupervisorWeight)),
+			CompositeScore:        round2Ptr(scoring.SessionComposite(sessionScoreFromDim(row), weights, 0)),
 			SupervisorEvaluations: []dto.EvaluationDTO{},
 		}
 		var supSum float64
@@ -342,19 +351,104 @@ func (s *teacherScoreService) TeacherEvaluations(
 	return dto.NewPageResult(items, int64(total), page, pageSize), nil
 }
 
-// sessionScoreFromDim 把一行场次维度均分映射为 scoring.SessionScore（双侧可缺）。
-// 聚合与「历次评价时间线」共用，保证同一场次的分数口径完全一致。
-func sessionScoreFromDim(row repository.SessionDimRow) scoring.SessionScore {
-	item := scoring.SessionScore{SessionID: row.SessionID, CourseID: row.CourseID}
-	if row.HasSupervisor {
-		item.Supervisor = &scoring.DimensionScores{
-			Objective:    row.SupObjective,
-			Content:      row.SupContent,
-			Interaction:  row.SupInteraction,
-			Organization: row.SupOrganization,
-			Frontier:     row.SupFrontier,
+// Report 返回教师报告数据（N9 / T2）：综合分 + 五维 + 最近 3 条督导评语 + 待改进清单。
+// 权限与教师面板一致（teacher 仅自己 / director 本室 / supervisor 全校）。
+func (s *teacherScoreService) Report(
+	ctx context.Context, role string, deptID, userID, teacherID uint64, semester string,
+) (*dto.TeacherReportDTO, error) {
+	sem, err := resolveSemester(semester)
+	if err != nil {
+		return nil, err
+	}
+	teacher, err := s.checkTeacherAccess(ctx, role, deptID, userID, teacherID)
+	if err != nil {
+		return nil, err
+	}
+
+	rows, err := s.evals.ListSessionDimRows(ctx, repository.SessionDimFilter{
+		TeacherID: teacherID, Semester: sem, FormulaVersion: s.cfg.FormulaVersion,
+	})
+	if err != nil {
+		return nil, errcode.Wrap(errcode.Internal, "查询教师报告失败", err)
+	}
+	summary := s.toScoreSummary(s.aggregate(rows))
+
+	// 最近 3 条督导评语：按课次倒序累计督导观察评语。
+	evaluated := make([]repository.SessionDimRow, 0, len(rows))
+	for _, row := range rows {
+		if row.HasSupervisor || row.HasAgent {
+			evaluated = append(evaluated, row)
 		}
 	}
+	sort.SliceStable(evaluated, func(i, j int) bool {
+		if !evaluated[i].SessionDate.Equal(evaluated[j].SessionDate) {
+			return evaluated[i].SessionDate.After(evaluated[j].SessionDate)
+		}
+		return evaluated[i].SessionID > evaluated[j].SessionID
+	})
+	ids := make([]uint64, 0, len(evaluated))
+	for _, row := range evaluated {
+		ids = append(ids, row.SessionID)
+	}
+	evalRows, err := s.evals.ListBySessionIDs(ctx, ids)
+	if err != nil {
+		return nil, errcode.Wrap(errcode.Internal, "查询督导评语失败", err)
+	}
+	bySession := make(map[uint64][]repository.EvaluationRow, len(ids))
+	for _, e := range evalRows {
+		bySession[e.SessionID] = append(bySession[e.SessionID], e)
+	}
+	comments := make([]dto.EvaluationDTO, 0, 3)
+	for _, id := range ids {
+		for _, e := range bySession[id] {
+			if e.EvaluatorType != model.EvaluatorSupervisor {
+				continue
+			}
+			comments = append(comments, toEvaluationDTO(e))
+			if len(comments) >= 3 {
+				break
+			}
+		}
+		if len(comments) >= 3 {
+			break
+		}
+	}
+
+	items := make([]dto.ImprovementItemDTO, 0)
+	if s.improvements != nil {
+		improvements, _, ierr := s.improvements.List(ctx, repository.ImprovementListFilter{
+			TeacherID: teacherID, Page: 1, PageSize: 20,
+		})
+		if ierr != nil {
+			return nil, errcode.Wrap(errcode.Internal, "查询待改进清单失败", ierr)
+		}
+		for _, it := range improvements {
+			items = append(items, toImprovementDTO(it))
+		}
+	}
+
+	deptName, _ := s.users.GetDepartmentName(ctx, teacher.DeptID())
+	return &dto.TeacherReportDTO{
+		TeacherID:        teacherID,
+		TeacherName:      teacher.Name,
+		JobNo:            teacher.JobNo,
+		Department:       deptName,
+		Semester:         sem,
+		Summary:          summary,
+		RecentComments:   comments,
+		ImprovementItems: items,
+		GeneratedAt:      time.Now().Format(time.RFC3339),
+	}, nil
+}
+
+// sessionScoreFromDim 把一行场次维度均分映射为 scoring.SessionScore。
+//
+// 🔴 2026-10-16 重构（计划 §6）：计分**只按 AI**，聚合层排除一切 supervisor 行。
+// 督导自本轮起只写评语（五维全 NULL，见 §3.3），其分数不进入任何聚合口径，
+// 故这里**只映射 agent 侧**；督导意见作为独立「督导观察」模块另行读取（ListBySession）。
+// 聚合与「历次评价时间线」共用本函数，保证同一场次的分数口径完全一致。
+func sessionScoreFromDim(row repository.SessionDimRow) scoring.SessionScore {
+	item := scoring.SessionScore{SessionID: row.SessionID, CourseID: row.CourseID}
 	if row.HasAgent {
 		item.Agent = &scoring.DimensionScores{
 			Objective:    row.AiObjective,
@@ -369,12 +463,15 @@ func sessionScoreFromDim(row repository.SessionDimRow) scoring.SessionScore {
 
 // aggregate 是全部聚合的唯一路径：仓储行 → scoring.SessionScore → Aggregate。
 // 任何新增的评分视图都必须经过它，禁止另写聚合公式。
+//
+// 🔴 2026-10-16 重构（计划 §6）：计分只按 AI，α（supervisorWeight）已废弃，
+// 故传 alpha=0；因 sessionScoreFromDim 只填 agent 侧，融合结果恒等于 AI 单侧分。
 func (s *teacherScoreService) aggregate(rows []repository.SessionDimRow) scoring.Summary {
 	items := make([]scoring.SessionScore, 0, len(rows))
 	for _, row := range rows {
 		items = append(items, sessionScoreFromDim(row))
 	}
-	return scoring.Aggregate(items, s.cfg.ScoringWeights(), s.cfg.SupervisorWeight)
+	return scoring.Aggregate(items, s.cfg.ScoringWeights(), 0)
 }
 
 // toScoreSummary 把纯函数结果映射为 DTO：分数保留两位小数，
@@ -393,12 +490,9 @@ func (s *teacherScoreService) toScoreSummary(sum scoring.Summary) dto.ScoreSumma
 		})
 	}
 
-	flags := sum.Flags
+	flags := normalizeScoreFlags(sum.Flags)
 	if sum.Sample.EvaluatedCount < s.cfg.MinSampleSize {
 		flags = append(flags, scoring.FlagSampleInsufficient)
-	}
-	if flags == nil {
-		flags = []string{}
 	}
 
 	return dto.ScoreSummary{
@@ -407,17 +501,33 @@ func (s *teacherScoreService) toScoreSummary(sum scoring.Summary) dto.ScoreSumma
 		AgentScore:      round2Ptr(sum.Agent),
 		Dimensions:      dims,
 		Sample: dto.SampleDTO{
-			SessionCount:     sum.Sample.SessionCount,
-			EvaluatedCount:   sum.Sample.EvaluatedCount,
-			SupervisorCount:  sum.Sample.SupervisorCount,
-			AgentCount:       sum.Sample.AgentCount,
-			AlignedCount:     sum.Sample.AlignedCount,
+			SessionCount:    sum.Sample.SessionCount,
+			EvaluatedCount:  sum.Sample.EvaluatedCount,
+			SupervisorCount: sum.Sample.SupervisorCount,
+			AgentCount:      sum.Sample.AgentCount,
+			// 单源口径（计划 §6）：督导不再计分，「双侧对齐」概念退化为「有 AI 计分数据的场次」。
+			AlignedCount:     sum.Sample.AgentCount,
 			SampleSufficient: sum.Sample.EvaluatedCount >= s.cfg.MinSampleSize,
 		},
 		Flags:          flags,
-		Weights:        dto.ScoreWeights{Supervisor: s.cfg.SupervisorWeight, Agent: s.cfg.AgentWeight},
+		Weights:        dto.ScoreWeights{Supervisor: 0, Agent: 1},
 		FormulaVersion: s.cfg.FormulaVersion,
 	}
+}
+
+// normalizeScoreFlags 收敛对外的口径标记。
+//
+// 🔴 2026-10-16 重构（计划 §6）：计分只按 AI，聚合层排除 supervisor 行，
+// 因此 scoring 侧产出的 sup_only / ai_only / disjoint 已失去意义（「只有 AI」是常态），
+// 对外一律不返回；只保留 no_data，随后由 sample_insufficient 补样本不足提示。
+func normalizeScoreFlags(flags []string) []string {
+	out := make([]string, 0, len(flags))
+	for _, f := range flags {
+		if f == scoring.FlagNoData {
+			out = append(out, f)
+		}
+	}
+	return out
 }
 
 // resolveSemester 解析学期参数：缺省取当前学期，未知学期返回 40001（§2.5.6）。

@@ -8,6 +8,8 @@
 > 🔴 **文档同步要求（强制）**：本手册是后端开发的事实源之一。任何改动若涉及**路由 / 接口字段、数据模型或表结构、错误码、权限与数据范围、计分口径、Sprint 范围**，
 > 必须在**同一个 PR** 内同步更新本文件，以及 `docs/Sprint2-3-教学评价与提优-开发计划.md` 中对应的契约章节。
 > **契约先行：先改文档，再改代码。只改代码不改文档，视为未完成。**
+>
+> ⚠️ **效力声明（2026-10-16 重构）**：本手册的技术栈、分层、目录纪律继续有效；但 §2.4（消息通知 Won't）、§8.8（授课仅督导建课、督导五维必填）、§8.9（录音上传/回放仅督导）、评分双源融合口径等条款已被 [`2026-10-16-教学提优重构开发计划.md`](./2026-10-16-教学提优重构开发计划.md) §3–§6 取代。重构 PR 必须同步更新 §8，冲突处以 10.16 计划为准。
 
 ---
 
@@ -240,11 +242,19 @@ evaluation:
     interaction: 0.20
     organization: 0.20
     frontier: 0.00
-  supervisorWeight: 0.5               # α：综合分中督导评分权重
-  agentWeight: 0.5                    # 1−α：综合分中智能体评分权重
+  supervisorWeight: 0.5               # ⚠️ 已废弃（2026-10-16 重构 §6）：督导不计分，聚合层不再使用
+  agentWeight: 0.5                    # ⚠️ 已废弃：计分只按 AI，综合分 = AI 单侧总分
   formulaVersion: "v1"
   minSampleSize: 3                    # 低于该值标记"样本不足"
 ```
+
+> 🔴 **计分口径（2026-10-16 重构 §6，破坏性，以本节为准）**：`composite = AI 单侧总分`，
+> 教师级/课程级 = 各场次 AI 综合分均值；**聚合层排除一切 supervisor 行**（督导只写评语、五维全 NULL，见 §8.8）。
+> `supervisorWeight` / `agentWeight` 已废弃但保留在配置结构中以兼容旧 `config.yaml`；
+> 维度权重（objective 0.30 / content 0.30 / interaction 0.20 / organization 0.20 / frontier 0）与启动校验**不变**。
+> 对外 `weights` 恒为 `{supervisor:0, agent:1}`；`flags` 收敛为 `no_data` + `sample_insufficient`
+> （`sup_only` / `ai_only` / `disjoint` 已失去意义，由 service 层过滤，不再返回）。
+> `sample.alignedCount` 单源口径下退化为「有 AI 计分数据的场次」（等于 `agentCount`）。
 
 - 环境变量优先级高于 yaml，键名前缀 `AIJIAOXUE_`（viper `AutomaticEnv` + `SetEnvKeyReplacer`）；
   **新增配置键必须在 `config.Load` 中 `SetDefault` 或 `BindEnv`**，否则 `AutomaticEnv` 发现的键不在 `AllKeys()` 中，`Unmarshal` 会静默跳过（`internal/config/config.go:207-213` 有注释说明）；
@@ -282,13 +292,15 @@ evaluation:
 - `message` 面向用户可读（中文），内部细节写日志不外泄；
 - 实现：`pkg/response.OK(c, data)` / `pkg/response.Fail(c, errcode.Params)`，handler 中**禁止手写 `c.JSON` 拼信封**。
 
-## 8. 接口契约（已注册路由共 36 条）
+## 8. 接口契约（已注册路由共 58 条）
 
-> 计数口径 = `backend/internal/router/router.go` 实际 `r.GET/POST/PUT/DELETE` 注册数，按鉴权分组：
+> 计数口径 = `backend/internal/router/router.go` 实际注册数，按鉴权分组：
 > 未挂 `Auth` 组 4（`GET /healthz` 根路径 + `GET /api/v1/healthz` + `POST /auth/login` + `GET /recordings/:id/stream`，
 > 最后一条自带 `AuthOrPlaybackTicket`）
-> \+ 登录 17 + director 2 + teacher 2 + supervisor 10 + director/supervisor 1。
-> 下文 §8.1–§8.7 为 Sprint 1 存量，§8.8 为 Sprint 2.1（14 条），§8.9 为 Sprint 2.2 阶段②（4 条）。
+> \+ 登录 32 + teacher/supervisor 4 + director 2 + teacher 2 + supervisor 12 + director/supervisor 2。
+> 下文 §8.1–§8.7 为 Sprint 1 存量，§8.8 为 Sprint 2.1（14 条），§8.9 为 Sprint 2.2 阶段②（4 条），
+> §8.10 为 AI 评析任务链（D3 / R0.2，4 条），§8.11 为提优闭环（N4/N5/B12，11 条），§8.12 为督导抽样队列（R1.2，1 条），
+> §8.13 为报告导出与演示模式（N9/B6，2 条）。
 
 前缀 `/api/v1`。**字段名与前端 `src/types/` 逐字对齐，本节是前后端联调的唯一事实源。**
 
@@ -374,6 +386,9 @@ type PendingSessionItem struct { // 手动新增/尚未评价的授课记录（s
 |-----------|------|------|
 | GET `/departments` | 登录 | 教研室列表 `[{id, name}]` |
 | GET `/teachers?departmentId=` | 登录 | 教师列表 `[{id, name}]`，按教研室过滤 |
+| GET `/timetable/mine?teacherId=&semester=` | 登录 | 最小课表下拉（B11）：teacher 只能看本人（传他人 id 按本人处理）；supervisor / director 可按 `teacherId` 过滤；`semester` 缺省当前学期 |
+| POST `/timetable` | director / supervisor | 手动新增课表：`{courseId*, classId*, teacherId(缺省取课程任课教师), semester(缺省当前学期)}`；班级须归属课程，否则 40002；重复 40901 |
+| DELETE `/timetable/:id` | director / supervisor | 删除课表条目（不影响已有授课记录） |
 
 > 注：此二接口为前端 AGENTS.md §10.2 的补充项（前端文档已同步更新）。学期选项由前端常量维护，不设接口。
 
@@ -503,22 +518,29 @@ type PlanItem struct {
 
 > 契约细节与示例响应见 [`Sprint2-3-教学评价与提优-开发计划.md`](./Sprint2-3-教学评价与提优-开发计划.md) §4.1 / §4.2。
 
+> 🔴 **2026-10-16 重构口径（§6）**：`evaluations` 聚合**只按 AI**；督导行改为「纯评语、五维全 NULL、`total_score` NULL」
+> （B8 督导不打分）。因此 `supervisorScores[]` 的各维度与 `totalScore` 恒为 `null`，`compositeScore`/`agentScore` 为 AI 单侧分，
+> `supervisorScore` 在聚合响应中恒为 `null`，`weights` 恒为 `{supervisor:0, agent:1}`。评分口径详见 §6 配置说明。
+
 | 方法 路径 | 权限 | 说明 |
 |-----------|------|------|
 | GET `/courses/:id/sessions?semester=&page=&pageSize=` | 登录（数据裁剪） | 课程历史授课记录，含每场双侧评分摘要 |
-| POST `/sessions` | supervisor | 创建授课记录（日期不得晚于今天，`uk_session` 唯一） |
+| POST `/sessions` | teacher（本人课程）/ supervisor（代录） | 创建授课记录（B1；`classId` 必填且须归属该课程，否则 40002，例外：经听评课计划快捷建课 `planId` 非空时可省略；日期不得晚于今天，`uk_session` 唯一；落 `created_by`） |
+| DELETE `/sessions/:id` | 该课程任课教师本人 / supervisor | 删课并级联清理录音文件/转写/评价/清单关联（D6，service 层） |
 | GET `/sessions/:id` | 登录（数据裁剪） | 单场次基本信息 |
 | GET `/sessions/:id/evaluation` | 登录（数据裁剪） | 当堂课评估页聚合：场次 + 督导评分 + 智能体参考 + 评语 |
-| PUT `/sessions/:id/supervisor-evaluation` | supervisor | 提交/覆盖督导评分（幂等）；**五维必填**，缺失 40002 |
+| PUT `/sessions/:id/supervisor-observation` | supervisor | 提交/覆盖**督导纯评语观察**（B8，幂等；无五维分，至少填一项，否则 40002） |
+| PUT `/sessions/:id/supervisor-evaluation` | supervisor | ⚠️ **已废弃**（2026-10-16 §4.5）：五维打分停用，返回 `50002`（HTTP 501） |
+| GET `/supervision/comment-tags` | supervisor | 常用语标签库（N2，纯静态，供评语点选） |
 | GET `/teacher-scores?departmentId=&semester=&page=&pageSize=` | director（本室）/ supervisor（全校） | 教师评分列表 |
 | GET `/teachers/:id/evaluation-summary?semester=` | director（本室）/ teacher（仅自己）/ supervisor | 教师级评分面板 |
 | GET `/teachers/:id/evaluations?semester=&page=&pageSize=` | director（本室）/ teacher（仅自己）/ supervisor | 教师历次评价时间线：按课次倒序，含督导结构化评语 + 智能体参考 + 场次综合分 |
 | GET `/courses/:id/evaluation-summary?semester=` | 登录（数据裁剪） | 课程级评分，与教师级共用同一聚合函数 |
-| GET `/sessions/:id/draft` | supervisor | 读取本人该场次草稿（无草稿返回 `null`） |
-| PUT `/sessions/:id/draft` | supervisor | 保存/覆盖本人草稿（**允许部分维度为空**） |
-| GET `/drafts?keyword=&page=&pageSize=` | supervisor | 本人草稿分页列表（按课程名查询） |
-| DELETE `/drafts/:id` | supervisor | 删除本人草稿（越权/不存在 40401） |
-| POST `/drafts/:id/submit` | supervisor | 草稿转正式评价：复用正式提交口径，**五维必填**；成功后删除草稿 |
+| GET `/sessions/:id/draft` | supervisor | ⚠️ **已废弃**（2026-10-16 §4.5）：返回 `50002` |
+| PUT `/sessions/:id/draft` | supervisor | ⚠️ **已废弃**：返回 `50002` |
+| GET `/drafts?keyword=&page=&pageSize=` | supervisor | ⚠️ **已废弃**：返回 `50002` |
+| DELETE `/drafts/:id` | supervisor | ⚠️ **已废弃**：返回 `50002` |
+| POST `/drafts/:id/submit` | supervisor | ⚠️ **已废弃**：返回 `50002` |
 
 ```go
 // 五维必填：objective/content/interaction/organization/frontier，均为 1-5 整数
@@ -637,10 +659,11 @@ type DraftDTO struct {
 
 | 方法 路径 | 权限 | 说明 |
 |-----------|------|------|
-| POST `/sessions/:id/recording` | supervisor | multipart 上传音频（`mp3/wav/m4a`，≤ `upload.maxSize`）；一节课一条主录音，重复上传 40901 |
+| POST `/sessions/:id/recording` | teacher（本人课程）/ supervisor | multipart 上传音频（`mp3/wav/m4a`，≤ `upload.maxSize`）；**覆盖语义**：已有录音则替换文件并重置转写为 `pending` |
+| DELETE `/sessions/:id/recording` | 上传者本人 / supervisor | 删录音：级联删审计+转写+文件+录音行（D6） |
 | GET `/sessions/:id/transcript` | 登录（数据裁剪） | 返回 `{recording, transcript}`；转写未完成时由 `transcript.status` 供前端轮询 |
 | POST `/sessions/:id/transcript/retry` | supervisor | 转写失败后重新入队（`status` 回到 `pending`） |
-| GET `/recordings/:id/stream` | supervisor | 音频流式播放，支持 Range；**额外允许 `?ticket=` 短时票据**（见下） |
+| GET `/recordings/:id/stream` | supervisor 全量 + **上传者本人**（B3） | 音频流式播放，支持 Range；**额外允许 `?ticket=` 短时票据**（见下） |
 
 ```go
 // RecordingDTO —— 阶段②新增 playbackUrl
@@ -684,6 +707,140 @@ type TranscriptSegment struct {
 - **进程重启恢复**：启动时 `RequeueStuck` 把遗留的 `pending/running` 转写重新入队（幂等）。
 - **脱敏强制**：写入 `transcripts.content` / `segments` 前必须过 `Scrubber`；
   当前实现为「称谓正则 + 可选词典」，学生名册建立后可替换为 NER 实现，调用点不变。
+
+### 8.10 AI 评析任务链（2026-10-16 重构 D3 / R0.2，已实现，4 条）
+
+> 与督导主流程完全解耦（RAG §1）：任何失败只落 `ai_tasks.status='failed'`，**不影响转写、评分与页面可用性**；
+> AI 引擎未配置时任务记 `failed`（`errorMessage="AI 评析引擎未配置"`），页面照常可用（熔断验收）。
+> AI 产出写入 `evaluations`（`evaluator_type='agent'`），是本轮**唯一计分来源**（§6）。
+
+| 方法 路径 | 权限 | 说明 |
+|-----------|------|------|
+| POST `/sessions/:id/ai-observation/analyze` | 登录（数据裁剪） | 入队 AI 评析（幂等：有未完成任务直接返回同一 `taskId`，不重复建） |
+| GET `/sessions/:id/ai-observation` | 登录（数据裁剪） | AI 观察详情：任务状态 + `observation`（agent 评价行）+ 风险标签 |
+| GET `/ai-tasks/:id` | 登录 | 任务状态查询（`pending/running/done/failed` + `errorMessage`） |
+| POST `/ai-tasks/:id/retry` | supervisor | 复位失败/已完成任务并重新执行 |
+
+```go
+type AiTaskDTO struct {
+    ID           uint64 `json:"id"`
+    Kind         string `json:"kind"`      // session_eval
+    RefType      string `json:"refType"`   // session
+    RefID        uint64 `json:"refId"`
+    Status       string `json:"status"`    // pending|running|done|failed
+    Attempts     int    `json:"attempts"`
+    ErrorMessage string `json:"errorMessage"`
+    CreatedAt    string `json:"createdAt"`
+    UpdatedAt    string `json:"updatedAt"`
+}
+type AiAnalyzeResp struct {
+    TaskID uint64 `json:"taskId"`
+    Status string `json:"status"`
+}
+type AiObservationDTO struct {
+    SessionID    uint64         `json:"sessionId"`
+    TaskID       uint64         `json:"taskId"`
+    Status       string         `json:"status"`       // 无任务时为空串
+    ErrorMessage string         `json:"errorMessage"`
+    Observation  *EvaluationDTO `json:"observation"`  // agent 评价行；未评价为 null
+    Risks        []string       `json:"risks"`        // 高风险标签，仅督导可见（D8）
+}
+```
+
+- **触发**：转写 `done` 后由 recording service 回调异步入队（`EnqueueSessionEval`），不经 HTTP；
+- **幂等**：`uk_ai_task(kind,ref_type,ref_id)` 保证同一场次至多一条任务；重新生成 = 复位 `status='pending'`；
+- **重启恢复**：进程启动时 `ResumeStuck` 把遗留的 `pending/running` 任务重排（幂等）；
+- 🔴 **D8 风险脱敏**：`evidence.riskTags` 仅督导可见；`teacher` 角色请求 `ai-observation` 时
+  `risks` 恒为空数组且 `observation.evidence.riskTags` 被清空——**高风险标签永不进教师端**；
+- **S1 输出契约与校验**（RAG §6.2）：维度分 ∈ {1..5,null}；每个非空维度≥1 条能在脱敏转写中定位的引用，
+  定位失败即丢弃引用，清空后该维置 `null` 并计入 `evidence.notObservable`（无证据不许给分）；
+- **配置**：`agent.*` 见 §6；API Key 只走环境变量 `AIJIAOXUE_AGENT_API_KEY`，日志只打掩码。
+
+### 8.11 提优闭环：清单 / 反思 / 站内信（2026-10-16 重构 N4/N5/B12，已实现，11 条）
+
+| 方法 路径 | 权限 | 说明 |
+|-----------|------|------|
+| GET `/improvement-items?teacherId=&status=&page=&pageSize=` | teacher（本人）/ supervisor（全部） | 待改进清单分页 |
+| POST `/improvement-items` | teacher | 创建改进项（标题 + 来源 + 关联场次） |
+| PUT `/improvement-items/:id` | teacher（本人） | 改标题 |
+| PUT `/improvement-items/:id/complete` | teacher（本人） | 教师自评完成：`open → done_self` |
+| PUT `/improvement-items/:id/close` | supervisor | 督导确认关闭：`done_self → closed`（未自评 40002） |
+| GET `/teaching-reflections?sessionId=` | teacher（本人）/ supervisor（须带 sessionId） | 教学反思列表（教师私有；督导关闭清单时可读关联反思） |
+| POST `/teaching-reflections` | teacher | 创建反思（内容/计划/下节行动 + 可选 sourceEvalId） |
+| PUT `/teaching-reflections/:id` | teacher（本人） | 修改反思 |
+| GET `/notifications?page=&pageSize=` | 登录 | 本人站内信（含 `unread` 未读数） |
+| PUT `/notifications/read-all` | 登录 | 全部已读（**注册顺序先于 `/:id/read`**） |
+| PUT `/notifications/:id/read` | 登录 | 单条已读（进入详情自动已读） |
+
+- **状态机**：`open → done_self`（教师自评）`→ closed`（督导确认）；**未确认关不掉**（40002）；不打回。
+- **站内信**：只推 `supervisor_comment`（督导提交观察时通知授课教师）与 `ai_issue`；红点收敛到工作台清单与督导任务队列两处。
+- **失败不影响主流程**：通知创建失败只记日志，不阻断观察提交。
+
+### 8.12 督导抽样任务队列（2026-10-16 重构 R1.2，已实现，1 条）
+
+| 方法 路径 | 权限 | 说明 |
+|-----------|------|------|
+| GET `/supervision/ai-tasks?semester=&pending=&page=&pageSize=` | supervisor | 抽样任务队列：待人工复评（被抽中且尚无督导观察）+ 可浏览全部历史；分页 + 学期切片 |
+
+```go
+type SupervisorTaskDTO struct {
+    SessionID         uint64   `json:"sessionId"`
+    CourseID          uint64   `json:"courseId"`
+    CourseCode        string   `json:"courseCode"`
+    CourseName        string   `json:"courseName"`
+    TeacherID         uint64   `json:"teacherId"`
+    TeacherName       string   `json:"teacherName"`
+    SessionDate       string   `json:"sessionDate"`
+    Period            string   `json:"period"`
+    Topic             string   `json:"topic"`
+    Batch             int      `json:"batch"`      // 第几批（第 n 个满 5 条）
+    AITotal           *float64 `json:"aiTotal"`
+    Reason            string   `json:"reason"`     // risk | lowest
+    RiskTags          []string `json:"riskTags"`
+    Reviewed          bool     `json:"reviewed"`   // 是否已有督导观察
+    SupervisorComment string   `json:"supervisorComment"`
+}
+```
+
+- **抽样规则（B2 / T1，不建计数器表）**：该教师 AI 终评**每满 5 条抽 1 条**；候选 = 该批最近 5 条；
+  **有高风险标签优先取标签项，否则取 AI 综合分最低 1 条**；
+- **批次划分**：第 k 批 = 时间上第 k 组 5 条（正序分块），保证历史样本稳定不漂移；
+- **待人工复评**：样本尚未有督导观察（`reviewed=false`）；已有观察即视为已复评（`pending=1` 过滤掉）；
+- **风险脱敏**：`riskTags` 来自 agent 行 `evidence.riskTags`，仅在本接口（supervisor 专属）暴露。
+
+### 8.13 报告导出与演示模式（2026-10-16 重构 N9/B6，已实现，2 条）
+
+| 方法 路径 | 权限 | 说明 |
+|-----------|------|------|
+| GET `/teachers/:id/report?semester=` | teacher（本人）/ director（本室）/ supervisor | 一页纸报告数据（N9/T2）：综合分 + 五维 + 最近 3 条督导评语 + 待改进清单；前端另做打印视图 |
+| POST `/demo/seed` | director / supervisor | 一键载入示例转写/清单等演示数据（B6/N7）；**仅本地/dev**（`demo.enabled` / `AIJIAOXUE_DEMO_ENABLED`），未开启返回 `40301`，调用前前端二次确认 |
+
+```go
+type TeacherReportDTO struct {
+    TeacherID        uint64               `json:"teacherId"`
+    TeacherName      string               `json:"teacherName"`
+    JobNo            string               `json:"jobNo"`
+    Department       string               `json:"department"`
+    Semester         string               `json:"semester"`
+    Summary          ScoreSummary         `json:"summary"`
+    RecentComments   []EvaluationDTO      `json:"recentComments"`   // 最近 3 条督导评语
+    ImprovementItems []ImprovementItemDTO `json:"improvementItems"`
+    GeneratedAt      string               `json:"generatedAt"`
+}
+type DemoSeedResp struct {
+    Recordings    int    `json:"recordings"`
+    Transcripts   int    `json:"transcripts"`
+    Improvements  int    `json:"improvements"`
+    Reflections   int    `json:"reflections"`
+    Notifications int    `json:"notifications"`
+    Message       string `json:"message"`
+}
+```
+
+- 🔴 **演示模式仅本地/dev**：`demo.enabled=false` 时 `POST /demo/seed` 返回 `40301`（不泄露是否存在）；
+  开启后会在**单事务**内清空 `transcripts` / `recordings` / `recording_playback_logs` / 清单 / 反思 / 站内信并写回演示数据；
+  **不触碰用户、课程、评价**（AI 报告沿用种子 agent 行）。
+- **报告口径**：与教师面板同源（单一 `scoring.Aggregate`），前端打印视图只展示、不重算。
 
 ## 9. 中间件规范（`internal/middleware/`）
 
@@ -851,6 +1008,13 @@ HTTP 请求
 | V4 | `4_transcripts_content_default` | `transcripts.content` 补 `DEFAULT ('')`，避开 `STRICT_TRANS_TABLES` 下的 1364 |
 | V5 | `5_evaluation_drafts` | `evaluation_drafts`（督导草稿箱，`uk_draft` 一人一场次一份） |
 | V6 | `6_transcripts_engine_width` | `transcripts.engine` / `engine_version` 放宽到 `VARCHAR(64)`（真实模型名 34 字符触发 1406，见 §16） |
+| V7 | `7_evaluations_ai_model_version_width` | `evaluations.ai_model_version` 放宽到 `VARCHAR(64)` |
+| V8 | `8_ai_tasks_and_reports` | `ai_tasks` + `teacher_ai_reports`（D3，与 RAG 方案 §4.1 一致；知识库表顺延 V13+） |
+| V9 | `9_teaching_reflections` | `teaching_reflections`（N5 教学反思，教师私有） |
+| V10 | `10_improvement_items` | `improvement_items`（N4 简化版待改进清单，三态 open→done_self→closed） |
+| V11 | `11_user_notifications` | `user_notifications`（B12 站内信，仅 supervisor_comment / ai_issue） |
+| V12 | `12_course_timetable_and_created_by` | `course_timetable`（B11 最小课表）+ `teaching_sessions.created_by`（建课人） |
+| V13+ | `knowledge_documents` / `knowledge_chunks` | RAG 知识库表，**顺延本轮不建**（见 10.16 计划 §3.2） |
 
 - 🔴 **迁移文件命名**：`<版本>_<名称>.up.sql` / `.down.sql`（如 `2_teaching_sessions_and_evaluations.up.sql`）。
   Flyway 风格 `V2__xxx.up.sql` **不被 golang-migrate 识别**，会让 `migrate up` 报 `first .: file does not exist`——禁止使用；

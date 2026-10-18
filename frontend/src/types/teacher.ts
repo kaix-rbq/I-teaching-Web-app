@@ -23,6 +23,30 @@ export interface TeacherScoreItem extends ScoreSummary { teacherId: number; teac
 export interface TeacherSummary extends ScoreSummary { teacherId: number; teacherName: string; semester: string; courses: Array<ScoreSummary & { courseId: number; courseCode: string; courseName: string }> }
 export interface TeacherTimelineItem { sessionId: number; sessionDate: string; period: string; topic: string; courseId: number; courseCode: string; courseName: string; status: string; compositeScore: number | null; supervisorScore: number | null; agentScore: number | null; supervisorEvaluations: EvaluationDTO[]; agentEvaluation: EvaluationDTO | null }
 
+/** 报告内待改进清单行（N9 一页纸） */
+export interface ReportImprovementItem {
+  id: number
+  title: string
+  source: string
+  status: string
+  doneNote: string
+  closedByName: string
+  createdAt: string
+}
+
+/** GET /teachers/:id/report 响应（N9 一页纸报告） */
+export interface TeacherReport {
+  teacherId: number
+  teacherName: string
+  jobNo: string
+  department: string
+  semester: string
+  summary: ScoreSummary
+  recentComments: EvaluationDTO[]
+  improvementItems: ReportImprovementItem[]
+  generatedAt: string
+}
+
 /** 趋势序列中的单个数据点；value 为 null 表示该课次无评价（折线断开，不补 0） */
 export interface ScoreTrendPoint {
   /** 横轴标签，如 "第 1 次课" */

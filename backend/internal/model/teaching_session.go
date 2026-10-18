@@ -9,6 +9,7 @@ type TeachingSession struct {
 	CourseID    uint64    `gorm:"column:course_id"`
 	ClassID     uint64    `gorm:"column:class_id"`
 	TeacherID   uint64    `gorm:"column:teacher_id"`
+	CreatedBy   uint64    `gorm:"column:created_by"` // 建课人 users.id；0=历史数据
 	SessionDate time.Time `gorm:"column:session_date"`
 	Period      string    `gorm:"column:period"`
 	Topic       string    `gorm:"column:topic"`

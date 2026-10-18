@@ -73,6 +73,7 @@ type SessionRepository interface {
 	ListByCourse(ctx context.Context, p SessionListParams) ([]SessionListRow, int64, error)
 	ListPending(ctx context.Context, limit int) ([]PendingSessionRow, error)
 	UpdateStatus(ctx context.Context, id uint64, status string) error
+	Delete(ctx context.Context, id uint64) error
 	PlanExists(ctx context.Context, planID uint64) (bool, error)
 }
 
@@ -95,6 +96,11 @@ func (r *sessionRepository) GetByID(ctx context.Context, id uint64) (*model.Teac
 		return nil, err
 	}
 	return &s, nil
+}
+
+// Delete 物理删除授课记录（级联子表由 service 在同一事务内先删）。
+func (r *sessionRepository) Delete(ctx context.Context, id uint64) error {
+	return r.db.WithContext(ctx).Delete(&model.TeachingSession{}, id).Error
 }
 
 func (r *sessionRepository) GetDetail(ctx context.Context, id uint64) (*SessionDetailRow, error) {

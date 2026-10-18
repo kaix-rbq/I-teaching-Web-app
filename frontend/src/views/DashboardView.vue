@@ -8,13 +8,16 @@ import ScoreHeatmap from '@/components/evaluation/ScoreHeatmap.vue'
 import EvaluationQueue from '@/components/supervision/EvaluationQueue.vue'
 import { fetchDashboardApi } from '@/api/dashboard'
 import { fetchTeacherScoresApi } from '@/api/teacher'
+import { fetchSamplingTasksApi } from '@/api/supervision'
 import { createSessionApi } from '@/api/session'
-import { fetchCoursesApi } from '@/api/course'
+import { fetchCoursesApi, fetchCourseDetailApi } from '@/api/course'
+import { fetchMyTimetableApi } from '@/api/dict'
+import type { TimetableItem } from '@/types/dict'
 import { useAuthStore } from '@/stores/auth'
 import { useDictStore } from '@/stores/dict'
 import { useSemester } from '@/composables/useSemester'
 import { EVALUATION_DIMENSIONS, getRoleMeta } from '@/constants'
-import type { DashboardData, SupervisionPlan } from '@/types/supervision'
+import type { DashboardData, SamplingTask, SupervisionPlan } from '@/types/supervision'
 import type { Course } from '@/types/course'
 import type { TeacherScoreItem } from '@/types/teacher'
 
@@ -39,15 +42,20 @@ const createVisible = ref(false)
 const createSubmitting = ref(false)
 const courses = ref<Course[]>([])
 const coursesLoading = ref(false)
+/* B11 课表下拉：选定教师后按课表收敛课程/班级；课表为空时回退到课程库 */
+const timetable = ref<TimetableItem[]>([])
+const timetableLoading = ref(false)
 const createForm = reactive<{
   teacherId: number | ''
   courseId: number | ''
+  classId: number | ''
   sessionDate: string
   period: string
   topic: string
 }>({
   teacherId: '',
   courseId: '',
+  classId: '',
   sessionDate: '',
   period: '',
   topic: ''
@@ -56,17 +64,81 @@ const createForm = reactive<{
 /** 选定授课教师后，课程下拉只呈现该教师的课程（授课教师由课程决定，保证一致） */
 const filteredCourses = computed(() => {
   if (createForm.teacherId === '') return courses.value
+  if (timetable.value.length) {
+    const seen = new Map<number, { id: number; name: string; code: string }>()
+    for (const row of timetable.value) {
+      if (!seen.has(row.courseId)) {
+        seen.set(row.courseId, { id: row.courseId, name: row.courseName, code: row.courseCode })
+      }
+    }
+    return [...seen.values()]
+  }
   return courses.value.filter((course) => course.teacherId === createForm.teacherId)
 })
 
+/** 选定课程后，班级下拉只呈现该课在课表中的班级（后端建课要求 classId 必填） */
+const courseClasses = ref<Array<{ id: number; className: string }>>([])
+const courseClassesLoading = ref(false)
+const classOptions = computed(() => {
+  if (createForm.courseId === '') return []
+  const fromTimetable = timetable.value
+    .filter((row) => row.courseId === createForm.courseId)
+    .map((row) => ({ id: row.classId, name: row.className }))
+  /* 课表未维护该课时回退到课程开课班级，保证对话框不被卡死 */
+  if (fromTimetable.length) return fromTimetable
+  return courseClasses.value.map((c) => ({ id: c.id, name: c.className }))
+})
+
+async function loadCourseClasses(courseId: number | ''): Promise<void> {
+  courseClasses.value = []
+  if (courseId === '') return
+  courseClassesLoading.value = true
+  try {
+    const detail = await fetchCourseDetailApi(courseId)
+    courseClasses.value = (detail.classes ?? []).map((c) => ({ id: c.id, className: c.className }))
+  } catch {
+    courseClasses.value = []
+  } finally {
+    courseClassesLoading.value = false
+  }
+}
+
+async function loadTimetable(teacherId: number | ''): Promise<void> {
+  timetable.value = []
+  if (teacherId === '') return
+  timetableLoading.value = true
+  try {
+    timetable.value = await fetchMyTimetableApi({ teacherId }) ?? []
+  } catch {
+    timetable.value = []
+  } finally {
+    timetableLoading.value = false
+  }
+}
+
 watch(
   () => createForm.teacherId,
-  () => {
+  (teacherId) => {
     if (
       createForm.courseId !== '' &&
       !filteredCourses.value.some((course) => course.id === createForm.courseId)
     ) {
       createForm.courseId = ''
+    }
+    createForm.classId = ''
+    void loadTimetable(teacherId)
+  }
+)
+
+watch(
+  () => createForm.courseId,
+  (courseId) => {
+    createForm.classId = ''
+    /* 课表无该课班级时回退拉取课程开课班级 */
+    if (!timetable.value.some((row) => row.courseId === courseId)) {
+      void loadCourseClasses(courseId)
+    } else {
+      courseClasses.value = []
     }
   }
 )
@@ -199,9 +271,11 @@ async function ensureCourses(): Promise<void> {
 async function openCreateSession(): Promise<void> {
   createForm.teacherId = ''
   createForm.courseId = ''
+  createForm.classId = ''
   createForm.sessionDate = ''
   createForm.period = ''
   createForm.topic = ''
+  timetable.value = []
   createVisible.value = true
   await Promise.all([dict.load(), ensureCourses()])
 }
@@ -213,6 +287,10 @@ function disabledFuture(date: Date): boolean {
 async function submitCreateSession(): Promise<void> {
   if (createForm.courseId === '') {
     ElMessage.error('请选择课程')
+    return
+  }
+  if (createForm.classId === '') {
+    ElMessage.error('请选择班级')
     return
   }
   if (!createForm.sessionDate) {
@@ -227,6 +305,7 @@ async function submitCreateSession(): Promise<void> {
   try {
     await createSessionApi({
       courseId: createForm.courseId,
+      classId: createForm.classId,
       sessionDate: createForm.sessionDate,
       period: createForm.period.trim(),
       topic: createForm.topic.trim()
@@ -241,17 +320,31 @@ async function submitCreateSession(): Promise<void> {
   }
 }
 
-function goDraftBox(): void {
-  void router.push({ name: 'draft-box' })
+/* 督导：抽样任务队列（B2/T1，R1.2）——每满 5 条 AI 终评抽 1 条待人工复评 */
+const sampling = ref<SamplingTask[]>([])
+const samplingLoading = ref(false)
+
+async function loadSampling(): Promise<void> {
+  if (auth.role !== 'supervisor') return
+  samplingLoading.value = true
+  try {
+    const page = await fetchSamplingTasksApi({ semester: semester.value, pending: true, pageSize: 8 })
+    sampling.value = page.list ?? []
+  } catch {
+    sampling.value = []
+  } finally {
+    samplingLoading.value = false
+  }
 }
 
-function goDraftEdit(sessionId: number): void {
-  void router.push({ name: 'session-evaluation', params: { id: sessionId }, query: { draft: '1' } })
+function goSamplingEvaluate(task: SamplingTask): void {
+  void router.push({ name: 'session-evaluation', params: { id: task.sessionId } })
 }
 
 function reloadQuality(): void {
   void loadData()
   if (auth.hasRole('director')) void loadDirectorScores()
+  if (auth.role === 'supervisor') void loadSampling()
 }
 
 watch(semester, reloadQuality)
@@ -383,30 +476,38 @@ onMounted(reloadQuality)
           <aside class="dashboard__side">
             <section class="dashboard__panel">
               <div class="dashboard__panel-head">
-                <h2 class="dashboard__panel-title">草稿箱</h2>
-                <el-button link type="primary" @click="goDraftBox">更多&gt;&gt;</el-button>
+                <h2 class="dashboard__panel-title">抽样复评队列</h2>
+                <span class="dashboard__panel-sub">每 5 条 AI 终评抽 1 条</span>
               </div>
-              <ul v-if="(data?.recentDrafts ?? []).length" class="dashboard__drafts">
+              <el-skeleton v-if="samplingLoading" :rows="3" animated />
+              <ul v-else-if="sampling.length" class="dashboard__sampling">
                 <li
-                  v-for="draft in data?.recentDrafts ?? []"
-                  :key="draft.id"
-                  class="dashboard__draft"
-                  @click="goDraftEdit(draft.sessionId)"
+                  v-for="(task, index) in sampling"
+                  :key="task.sessionId"
+                  class="dashboard__sample anim-rise"
+                  :style="{ '--stagger': `${Math.min(index, 6) * 50}ms` }"
+                  @click="goSamplingEvaluate(task)"
                 >
-                  <div class="dashboard__draft-head">
-                    <span class="dashboard__draft-course">{{ draft.courseName }}</span>
-                    <el-tag size="small" effect="plain" round>草稿</el-tag>
+                  <div class="dashboard__sample-head">
+                    <span class="dashboard__sample-course">{{ task.courseName }}</span>
+                    <el-tag
+                      size="small"
+                      :type="task.reason === 'risk' ? 'danger' : 'info'"
+                      effect="light"
+                      round
+                    >
+                      {{ task.reason === 'risk' ? '高风险' : 'AI 最低分' }}
+                    </el-tag>
                   </div>
-                  <p class="dashboard__draft-meta">
-                    {{ draft.sessionDate }} · {{ draft.period || '—' }}
+                  <p class="dashboard__sample-meta">
+                    {{ task.teacherName }} · {{ task.sessionDate }} · 第 {{ task.batch }} 批
+                  </p>
+                  <p v-if="task.riskTags.length" class="dashboard__sample-risks">
+                    {{ task.riskTags.join('、') }}
                   </p>
                 </li>
               </ul>
-              <EmptyState v-else description="暂无草稿">
-                <template #action>
-                  <el-button link type="primary" @click="goDraftBox">前往草稿箱</el-button>
-                </template>
-              </EmptyState>
+              <EmptyState v-else description="暂无待复评样本" />
             </section>
           </aside>
         </div>
@@ -492,6 +593,23 @@ onMounted(reloadQuality)
               :key="course.id"
               :label="`${course.name}（${course.code}）`"
               :value="course.id"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="班级" required>
+          <el-select
+            v-model="createForm.classId"
+            placeholder="请选择班级"
+            filterable
+            :loading="timetableLoading || courseClassesLoading"
+            :disabled="createForm.courseId === ''"
+            class="dashboard__dialog-field"
+          >
+            <el-option
+              v-for="cls in classOptions"
+              :key="cls.id"
+              :label="cls.name"
+              :value="cls.id"
             />
           </el-select>
         </el-form-item>
@@ -693,7 +811,7 @@ onMounted(reloadQuality)
     }
   }
 
-  &__drafts {
+  &__sampling {
     display: flex;
     flex-direction: column;
     gap: var(--spacing-2);
@@ -702,15 +820,20 @@ onMounted(reloadQuality)
     list-style: none;
   }
 
-  &__draft {
+  &__sample {
     padding: var(--spacing-3);
     cursor: pointer;
     background-color: var(--color-bg-page);
+    border: 1px solid transparent;
     border-radius: var(--radius-md);
-    transition: box-shadow var(--duration-fast) ease;
+    transition: box-shadow var(--duration-fast) var(--ease-out-soft),
+      border-color var(--duration-fast) var(--ease-out-soft),
+      transform var(--duration-fast) var(--ease-out-soft);
 
     &:hover {
+      border-color: var(--color-primary-hover);
       box-shadow: var(--shadow-card-hover);
+      transform: translateY(-1px);
     }
 
     &-head {
@@ -733,6 +856,12 @@ onMounted(reloadQuality)
       margin-top: 2px;
       font-size: var(--font-size-xs);
       color: var(--color-text-tertiary);
+    }
+
+    &-risks {
+      margin-top: var(--spacing-1);
+      font-size: var(--font-size-xs);
+      color: var(--color-error);
     }
   }
 }

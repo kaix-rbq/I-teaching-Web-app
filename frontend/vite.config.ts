@@ -42,6 +42,10 @@ export default defineConfig(({ mode }) => {
       outDir: 'dist',
       sourcemap: false,
       chunkSizeWarningLimit: 1500
+    },
+    test: {
+      // Playwright 端到端用例归 playwright.config.ts 管，不进 Vitest。
+      exclude: ['tests/**', 'node_modules/**', 'dist/**']
     }
   }
 })

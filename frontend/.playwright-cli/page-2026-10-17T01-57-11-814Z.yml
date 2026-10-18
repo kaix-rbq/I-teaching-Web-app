@@ -1,0 +1,74 @@
+- generic [ref=f8e3]:
+  - complementary [ref=f8e4]:
+    - generic [ref=f8e5]:
+      - generic [ref=f8e6]: 爱
+      - generic [ref=f8e7]: 爱教学
+    - menubar [ref=f8e8]:
+      - menuitem [ref=f8e9] [cursor=pointer]
+      - menuitem [ref=f8e15] [cursor=pointer]
+      - menuitem [ref=f8e20] [cursor=pointer]
+      - menuitem [ref=f8e24] [cursor=pointer]
+      - menuitem [ref=f8e29] [cursor=pointer]
+    - button "收起菜单" [ref=f8e33] [cursor=pointer]
+  - generic [ref=f8e38]:
+    - banner [ref=f8e39]:
+      - navigation "面包屑" [ref=f8e40]:
+        - link "工作台" [ref=f8e42]
+      - generic [ref=f8e43]:
+        - button "站内信" [ref=f8e45] [cursor=pointer]
+        - button "载入演示数据" [ref=f8e51] [cursor=pointer]
+        - generic [ref=f8e53]: 学期口径
+        - generic [ref=f8e55] [cursor=pointer]:
+          - generic:
+            - combobox "学期选择" [ref=f8e57]
+            - generic [ref=f8e58]: 2026-2027-1
+        - button "陈 陈静 教学督导" [ref=f8e64] [cursor=pointer]:
+          - generic [ref=f8e65]: 陈
+          - generic [ref=f8e66]: 陈静
+          - generic [ref=f8e67]: 教学督导
+    - main [ref=f8e71]:
+      - generic [ref=f8e73]:
+        - generic [ref=f8e74]:
+          - generic [ref=f8e75]:
+            - heading "早上好，陈静" [level=1] [ref=f8e76]
+            - paragraph [ref=f8e77]: 教学督导 · 工作台（2026-2027-1）
+          - paragraph [ref=f8e78]: 评分仅用于教学支持与改进，不作为考核依据
+        - generic [ref=f8e79]:
+          - generic [ref=f8e80]:
+            - generic [ref=f8e81]:
+              - heading "待评课队列" [level=2] [ref=f8e82]
+              - generic [ref=f8e83]:
+                - generic [ref=f8e84]: 今日 / 本周 / 本月 / 未评 · 已评估记录请到「课程列表」查看
+                - button "课程列表" [ref=f8e85] [cursor=pointer]
+                - button "新增授课记录" [ref=f8e87] [cursor=pointer]
+            - generic [ref=f8e89]:
+              - generic [ref=f8e90]:
+                - button "今日" [ref=f8e91] [cursor=pointer]
+                - button "本周" [ref=f8e92] [cursor=pointer]
+                - button "本月" [ref=f8e93] [cursor=pointer]
+                - button "未评" [ref=f8e94] [cursor=pointer]
+                - generic [ref=f8e95]: 待评 2 条
+              - list [ref=f8e96]:
+                - listitem [ref=f8e97]:
+                  - generic [ref=f8e98]: 10-17
+                  - generic "操作系统" [ref=f8e99]
+                  - generic [ref=f8e100]: 张华
+                  - generic [ref=f8e101]: 待评估
+                  - button "去评估" [ref=f8e104] [cursor=pointer]
+                - listitem [ref=f8e106]:
+                  - generic [ref=f8e107]: 10-17
+                  - generic "软件工程导论" [ref=f8e108]
+                  - generic [ref=f8e109]: 李明
+                  - generic [ref=f8e110]: 待评估
+                  - button "去评估" [ref=f8e113] [cursor=pointer]
+          - complementary [ref=f8e115]:
+            - generic [ref=f8e116]:
+              - generic [ref=f8e117]:
+                - heading "抽样复评队列" [level=2] [ref=f8e118]
+                - generic [ref=f8e119]: 每 5 条 AI 终评抽 1 条
+              - paragraph [ref=f8e123]: 暂无待复评样本
+        - generic [ref=f8e124]:
+          - generic [ref=f8e125]:
+            - heading "待评估授课记录" [level=2] [ref=f8e126]
+            - generic [ref=f8e127]: 手动新增或尚未评价的授课记录 · 点击「去评估」进入
+          - paragraph [ref=f8e131]: 暂无待评估授课记录

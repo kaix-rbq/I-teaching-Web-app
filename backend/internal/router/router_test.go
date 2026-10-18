@@ -46,7 +46,7 @@ func testConfig() *config.Config {
 // 该 bug 单测（只挂单个中间件的 gin 引擎）无法发现，必须测真实路由表。
 func TestStreamRouteUsesTicketAuth(t *testing.T) {
 	mgr := jwtutil.New("router-test-secret", time.Hour)
-	engine, _ := New(newOfflineDB(t), testConfig(), mgr)
+	engine, _, _ := New(newOfflineDB(t), testConfig(), mgr)
 
 	ticket, err := mgr.SignPlayback(5, "supervisor", 0, 1, time.Hour, time.Now())
 	require.NoError(t, err)

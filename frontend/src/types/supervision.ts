@@ -42,6 +42,25 @@ export interface DashboardStat {
   tone?: 'primary' | 'success' | 'warning' | 'info' | 'supervisor'
 }
 
+/** 督导抽样任务（GET /supervision/ai-tasks，B2/T1） */
+export interface SamplingTask {
+  sessionId: number
+  courseId: number
+  courseCode: string
+  courseName: string
+  teacherId: number
+  teacherName: string
+  sessionDate: string
+  period: string
+  topic: string
+  batch: number
+  aiTotal: number | null
+  reason: 'risk' | 'lowest' | string
+  riskTags: string[]
+  reviewed: boolean
+  supervisorComment: string
+}
+
 /**
  * 工作台视图模型。
  * 后端 GET /dashboard 按角色返回三种 DTO，由 api/dashboard.ts 收敛成同一形状，
