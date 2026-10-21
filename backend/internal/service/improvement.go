@@ -18,13 +18,13 @@ type Notifier interface {
 	NotifyAIIssue(ctx context.Context, sessionID uint64, title string)
 }
 
-// ImprovementService 负责待改进清单与关闭链（N4：教师自评 → 督导确认）。
+// ImprovementService 负责待改进清单（教师自评完成即关闭）。
 type ImprovementService interface {
 	List(ctx context.Context, role string, userID uint64, q dto.ImprovementListQuery) (*dto.PageResult[dto.ImprovementItemDTO], error)
 	Create(ctx context.Context, role string, userID uint64, req dto.ImprovementCreateReq) (*dto.ImprovementItemDTO, error)
 	Update(ctx context.Context, role string, userID, id uint64, req dto.ImprovementUpdateReq) (*dto.ImprovementItemDTO, error)
 	Complete(ctx context.Context, role string, userID, id uint64, req dto.ImprovementCompleteReq) (*dto.ImprovementItemDTO, error)
-	Close(ctx context.Context, role string, userID, id uint64, req dto.ImprovementCloseReq) (*dto.ImprovementItemDTO, error)
+	Delete(ctx context.Context, role string, userID, id uint64) error
 }
 
 type improvementService struct {
@@ -97,42 +97,31 @@ func (s *improvementService) Complete(ctx context.Context, role string, userID, 
 	if err != nil {
 		return nil, err
 	}
-	if it.Status != model.ImprovementStatusOpen {
+	if it.Status != model.ImprovementStatusOpen && it.Status != model.ImprovementStatusDoneSelf {
 		return nil, errcode.New(errcode.BizRule, "当前状态不可提交自评完成")
 	}
+	// 2026-10-20 简化：教师自评完成直接关闭，不再等待督导确认。
 	if err := s.repo.UpdateStatus(ctx, id, map[string]any{
-		"status": model.ImprovementStatusDoneSelf, "done_note": req.DoneNote,
+		"status": model.ImprovementStatusClosed, "done_note": req.DoneNote,
+		"closed_by": userID, "closed_at": time.Now(),
 	}); err != nil {
 		return nil, errcode.Wrap(errcode.Internal, "提交自评失败", err)
 	}
 	return s.reload(ctx, id, RoleTeacher, userID)
 }
 
-func (s *improvementService) Close(ctx context.Context, role string, userID, id uint64, req dto.ImprovementCloseReq) (*dto.ImprovementItemDTO, error) {
-	if role != RoleSupervisor {
-		return nil, errcode.New(errcode.ForbiddenRole, "仅督导可确认关闭改进项")
+// Delete 删除本人改进项（仅创建教师本人）。
+func (s *improvementService) Delete(ctx context.Context, role string, userID, id uint64) error {
+	if role != RoleTeacher {
+		return errcode.New(errcode.ForbiddenRole, "仅教师可删除改进项")
 	}
-	it, err := s.repo.GetByID(ctx, id)
-	if err != nil {
-		if repository.IsNotFound(err) {
-			return nil, errcode.New(errcode.NotFound, "改进项不存在")
-		}
-		return nil, errcode.Wrap(errcode.Internal, "查询改进项失败", err)
+	if _, err := s.ensureOwn(ctx, id, userID); err != nil {
+		return err
 	}
-	// 关闭链：先教师自评完成，督导方可确认关闭（未确认关不掉）。
-	if it.Status != model.ImprovementStatusDoneSelf {
-		return nil, errcode.New(errcode.BizRule, "教师尚未完成自评，暂不可关闭")
+	if err := s.repo.Delete(ctx, id); err != nil {
+		return errcode.Wrap(errcode.Internal, "删除改进项失败", err)
 	}
-	fields := map[string]any{
-		"status": model.ImprovementStatusClosed, "closed_by": userID, "closed_at": time.Now(),
-	}
-	if req.Note != "" {
-		fields["done_note"] = req.Note
-	}
-	if err := s.repo.UpdateStatus(ctx, id, fields); err != nil {
-		return nil, errcode.Wrap(errcode.Internal, "关闭改进项失败", err)
-	}
-	return s.reload(ctx, id, RoleSupervisor, userID)
+	return nil
 }
 
 // ensureOwn 校验改进项属于该教师（越权 40302），不存在 40401。

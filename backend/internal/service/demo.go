@@ -90,9 +90,10 @@ func buildDemoData() repository.DemoData {
 	}
 
 	// 提优闭环示例（教师 2 = 李明）。
+	teacherTwo := uint64(2)
 	data.ImprovementItems = []model.ImprovementItem{
 		{TeacherID: 2, SessionID: 1, Title: "提问后延长等待时间至 3-5 秒", Source: model.ImprovementSourceAI, Status: model.ImprovementStatusOpen},
-		{TeacherID: 2, SessionID: 3, Title: "为小组讨论设置明确时限", Source: model.ImprovementSourceSupervisor, Status: model.ImprovementStatusDoneSelf, DoneNote: "已在课堂中试行"},
+		{TeacherID: 2, SessionID: 3, Title: "为小组讨论设置明确时限", Source: model.ImprovementSourceSupervisor, Status: model.ImprovementStatusClosed, DoneNote: "已在课堂中试行", ClosedBy: &teacherTwo},
 	}
 	data.Reflections = []model.TeachingReflection{
 		{TeacherID: 2, SessionID: 1, Content: "本次课互动偏少，提问后立即给出了答案。", Plan: "下节课延长等待时间，并点名邀请学生表达。", NextAction: "准备 2 个开放性问题"},

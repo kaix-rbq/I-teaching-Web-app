@@ -15,8 +15,10 @@ const props = withDefaults(
   defineProps<{
     teachers: TeacherScoreItem[]
     loading?: boolean
+    /** 驾驶舱决策视图：仅异常行保留色阶，其余行降为背景信息 */
+    highlightAbnormal?: boolean
   }>(),
-  { loading: false }
+  { loading: false, highlightAbnormal: false }
 )
 
 const emit = defineEmits<{
@@ -56,18 +58,26 @@ function cellStyle(score: number | null | undefined): Record<string, string> {
 }
 
 function dimensionScore(teacher: TeacherScoreItem, key: string): number | null {
-  return teacher.dimensions.find((item) => item.key === key)?.score ?? null
+  const dimension = teacher.dimensions.find((item) => item.key === key)
+  return dimension?.agentScore ?? dimension?.score ?? null
+}
+
+/** 异常 = 综合分低于 75 或样本不足；无分数同样需要被看见 */
+function isAbnormal(teacher: TeacherScoreItem): boolean {
+  const score = teacher.agentScore ?? teacher.compositeScore ?? null
+  return score === null || score < 75 || !teacher.sample.sampleSufficient
 }
 
 function observationScore(teacher: TeacherScoreItem): number | null {
   const key = observation.value?.key
   if (!key) return null
-  return teacher.dimensions.find((item) => item.key === key)?.score ?? null
+  const dimension = teacher.dimensions.find((item) => item.key === key)
+  return dimension?.agentScore ?? dimension?.score ?? null
 }
 
 const sortedTeachers = computed(() => [...props.teachers].sort((a, b) => {
-  const av = a.compositeScore
-  const bv = b.compositeScore
+  const av = a.agentScore ?? a.compositeScore
+  const bv = b.agentScore ?? b.compositeScore
   if (av === null) return 1
   if (bv === null) return -1
   return bv - av
@@ -91,20 +101,20 @@ const sortedTeachers = computed(() => [...props.teachers].sort((a, b) => {
             :key="dim.key"
             class="score-heatmap__cell score-heatmap__cell--dim"
             role="columnheader"
-            :title="`${dim.name} · 权重 ${dim.weight}%`"
+            :title="`${dim.name}，权重 ${Math.round(dim.weight * 100)}%`"
           >
-            {{ dim.shortName }}<i class="score-heatmap__weight">{{ dim.weight }}%</i>
+            {{ dim.shortName }}<i class="score-heatmap__weight">{{ Math.round(dim.weight * 100) }}%</i>
           </span>
           <span
             v-if="observation"
             class="score-heatmap__cell score-heatmap__cell--dim score-heatmap__cell--obs"
             role="columnheader"
-            :title="`${observation.name} · 观测项不计分`"
+            :title="`${observation.name}，观测项不计分`"
           >
             {{ observation.shortName }}<i class="score-heatmap__weight">观测</i>
           </span>
           <span class="score-heatmap__cell score-heatmap__cell--total" role="columnheader">
-            综合分
+            AI 分
           </span>
         </div>
 
@@ -113,6 +123,7 @@ const sortedTeachers = computed(() => [...props.teachers].sort((a, b) => {
           :key="teacher.teacherId"
           type="button"
           class="score-heatmap__row"
+          :class="{ 'score-heatmap__row--muted': highlightAbnormal && !isAbnormal(teacher) }"
           role="row"
           @click="emit('select', teacher.teacherId)"
         >
@@ -126,7 +137,7 @@ const sortedTeachers = computed(() => [...props.teachers].sort((a, b) => {
             role="cell"
             :style="cellStyle(dimensionScore(teacher, dim.key))"
           >
-            {{ dimensionScore(teacher, dim.key)?.toFixed(0) ?? '—' }}
+            {{ dimensionScore(teacher, dim.key)?.toFixed(2) ?? '—' }}
           </span>
           <span
             v-if="observation"
@@ -134,19 +145,20 @@ const sortedTeachers = computed(() => [...props.teachers].sort((a, b) => {
             role="cell"
             :style="cellStyle(observationScore(teacher))"
           >
-            {{ observationScore(teacher)?.toFixed(0) ?? '—' }}
+            {{ observationScore(teacher)?.toFixed(2) ?? '—' }}
           </span>
           <span class="score-heatmap__cell score-heatmap__cell--total" role="cell">
             <QualityBadge
-              :score="teacher.compositeScore"
-              :level="teacher.compositeScore === null ? '暂无' : undefined"
+              :score="teacher.agentScore ?? teacher.compositeScore"
+              :level="(teacher.agentScore ?? teacher.compositeScore) === null ? '暂无' : undefined"
             />
           </span>
         </button>
       </div>
 
       <p class="score-heatmap__legend">
-        色阶由红至绿对应「需干预 → 优秀」；灰格为暂无评价。点击行查看教师画像。
+        <template v-if="highlightAbnormal">只看需要关注的教师；其余行已降为背景信息。点击任意一行查看画像。</template>
+        <template v-else>色阶由红至绿对应「需干预 → 优秀」；灰格为暂无评价。点击行查看教师画像。</template>
       </p>
     </template>
 
@@ -186,6 +198,16 @@ const sortedTeachers = computed(() => [...props.teachers].sort((a, b) => {
   &__row:not(&__head):hover {
     .score-heatmap__cell {
       box-shadow: inset 0 0 0 1.5px var(--color-primary);
+    }
+  }
+
+  &__row--muted {
+    opacity: 0.52;
+    transition: opacity var(--duration-fast) var(--ease-out-soft);
+
+    &:hover,
+    &:focus-visible {
+      opacity: 1;
     }
   }
 

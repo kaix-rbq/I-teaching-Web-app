@@ -7,9 +7,12 @@ withDefaults(
   defineProps<{
     items: EvaluationDTO[]
     loading?: boolean
+    /** 只读视角：只显示评语文字，隐藏督导总分与五维数字分。 */
+    textOnly?: boolean
   }>(),
   {
-    loading: false
+    loading: false,
+    textOnly: false
   }
 )
 
@@ -45,12 +48,12 @@ function totalText(score: number | null): string {
             <el-tag size="small" effect="light" type="primary" round>督导</el-tag>
             <span class="comment-panel__time">{{ formatDateTime(evaluation.updatedAt) }}</span>
           </div>
-          <span class="comment-panel__total tabular-nums">
+          <span v-if="!textOnly" class="comment-panel__total tabular-nums">
             {{ totalText(evaluation.totalScore) }}
           </span>
         </div>
 
-        <div class="comment-panel__scores">
+        <div v-if="!textOnly" class="comment-panel__scores">
           <div
             v-for="dimension in EVALUATION_DIMENSIONS"
             :key="dimension.key"

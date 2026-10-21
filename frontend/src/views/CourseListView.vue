@@ -38,7 +38,7 @@ const pageTitle = computed(() => {
 
 const pageSubtitle = computed(() =>
   auth.role === 'supervisor'
-    ? '本人负责评估的课程 · 点击课程进入综合评分与授课记录评估'
+    ? '本人负责评估的课程，点击进入评分与授课记录'
     : '查看课程简介与开课情况'
 )
 

@@ -82,6 +82,28 @@ func (h *DictHandler) CreateTimetable(c *gin.Context) {
 	response.OK(c, data)
 }
 
+// UpdateTimetableRemark 处理 PATCH /api/v1/timetable/:id/remark（仅本人教师）。
+func (h *DictHandler) UpdateTimetableRemark(c *gin.Context) {
+	id, err := pathID(c)
+	if err != nil {
+		response.Fail(c, err)
+		return
+	}
+	var req dto.TimetableRemarkReq
+	if err := bindJSON(c, &req); err != nil {
+		response.Fail(c, err)
+		return
+	}
+	role, _ := middleware.Role(c)
+	uid, _ := middleware.UserID(c)
+	data, err := h.dict.UpdateTimetableRemark(c.Request.Context(), role, uid, id, req)
+	if err != nil {
+		response.Fail(c, err)
+		return
+	}
+	response.OK(c, data)
+}
+
 // DeleteTimetable 处理 DELETE /api/v1/timetable/:id。
 func (h *DictHandler) DeleteTimetable(c *gin.Context) {
 	id, err := pathID(c)

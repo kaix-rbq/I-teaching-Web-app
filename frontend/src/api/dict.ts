@@ -18,7 +18,12 @@ export async function fetchDictApi(): Promise<DictData> {
   }
 }
 
-/** 最小课表下拉（B11）：teacher 查本人，supervisor 可带 teacherId。 */
+/** 课表（B11 建课下拉 / V13 周课表）。teacher 查本人，supervisor 可带 teacherId。 */
 export function fetchMyTimetableApi(params: { teacherId?: number; semester?: string } = {}): Promise<TimetableItem[]> {
   return request<TimetableItem[]>({ url: '/timetable/mine', method: 'get', params })
+}
+
+/** 仅本人教师可改课表备注（PATCH /timetable/:id/remark）。 */
+export function updateTimetableRemarkApi(id: number, remark: string): Promise<TimetableItem> {
+  return request<TimetableItem>({ url: `/timetable/${id}/remark`, method: 'patch', data: { remark } })
 }

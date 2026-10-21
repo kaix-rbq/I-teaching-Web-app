@@ -31,6 +31,7 @@ type ImprovementRepository interface {
 	List(ctx context.Context, f ImprovementListFilter) ([]ImprovementItemRow, int64, error)
 	UpdateTitle(ctx context.Context, id uint64, title string) error
 	UpdateStatus(ctx context.Context, id uint64, fields map[string]any) error
+	Delete(ctx context.Context, id uint64) error
 	// DeleteBySession 删除某场次关联的改进项（删课级联用）。
 	DeleteBySession(ctx context.Context, sessionID uint64) error
 }
@@ -100,6 +101,11 @@ func (r *improvementRepository) UpdateTitle(ctx context.Context, id uint64, titl
 
 func (r *improvementRepository) UpdateStatus(ctx context.Context, id uint64, fields map[string]any) error {
 	return r.db.WithContext(ctx).Model(&model.ImprovementItem{}).Where("id = ?", id).Updates(fields).Error
+}
+
+// Delete 删除本人改进项（归属由 service 层校验）。
+func (r *improvementRepository) Delete(ctx context.Context, id uint64) error {
+	return r.db.WithContext(ctx).Where("id = ?", id).Delete(&model.ImprovementItem{}).Error
 }
 
 // DeleteBySession 删除某场次关联的改进项（删课级联用）。

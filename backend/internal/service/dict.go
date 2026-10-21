@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strings"
 
 	"aijiaoxue-api/internal/dto"
 	"aijiaoxue-api/internal/model"
@@ -16,8 +17,10 @@ type DictService interface {
 	// MyTimetable 返回课表下拉行（B11）：teacher 只能看本人，supervisor / director
 	// 可按 teacherID 过滤；semester 为空时默认当前学期。
 	MyTimetable(ctx context.Context, role string, deptID, userID, teacherID uint64, semester string) ([]dto.TimetableItem, error)
-	// CreateTimetableEntry / DeleteTimetableEntry 由 director / supervisor 手动维护课表。
+	// CreateTimetableEntry / UpdateTimetableRemark / DeleteTimetableEntry 由
+	// director / supervisor 维护课表；备注仅本人教师可改。
 	CreateTimetableEntry(ctx context.Context, req dto.TimetableCreateReq) (*dto.TimetableItem, error)
+	UpdateTimetableRemark(ctx context.Context, role string, userID, id uint64, req dto.TimetableRemarkReq) (*dto.TimetableItem, error)
 	DeleteTimetableEntry(ctx context.Context, id uint64) error
 }
 
@@ -76,13 +79,32 @@ func (s *dictService) MyTimetable(ctx context.Context, role string, _, userID, t
 			ID: r.ID, CourseID: r.CourseID, CourseCode: r.CourseCode, CourseName: r.CourseName,
 			ClassID: r.ClassID, ClassName: r.ClassName, TeacherID: r.TeacherID,
 			TeacherName: r.TeacherName, Semester: r.Semester,
+			Weekday: r.Weekday, PeriodStart: r.PeriodStart, PeriodEnd: r.PeriodEnd,
+			Classroom: r.Classroom, Remark: r.Remark,
 		})
 	}
 	return out, nil
 }
 
 // CreateTimetableEntry 手动新增一条课表（B11）：校验课程存在、班级归属该课程、教师存在。
+// V13：weekday/period 新字段可空；旧调用方不传时按 0（未排课）写入，保持原有唯一性语义。
 func (s *dictService) CreateTimetableEntry(ctx context.Context, req dto.TimetableCreateReq) (*dto.TimetableItem, error) {
+	weekday := optionalInt(req.Weekday)
+	periodStart := optionalInt(req.PeriodStart)
+	periodEnd := optionalInt(req.PeriodEnd)
+	if weekday != 0 && (weekday < model.WeekdayMin || weekday > model.WeekdayMax) {
+		return nil, errcode.New(errcode.Params, "weekday 需在 1-7 之间")
+	}
+	if periodStart != 0 && (periodStart < model.PeriodMin || periodStart > model.PeriodMax) {
+		return nil, errcode.New(errcode.Params, "periodStart 需在 1-11 之间")
+	}
+	if periodEnd != 0 && (periodEnd < model.PeriodMin || periodEnd > model.PeriodMax) {
+		return nil, errcode.New(errcode.Params, "periodEnd 需在 1-11 之间")
+	}
+	if periodStart != 0 && periodEnd != 0 && periodEnd < periodStart {
+		return nil, errcode.New(errcode.BizRule, "结束节次不能早于起始节次")
+	}
+
 	course, err := s.courses.GetDetail(ctx, req.CourseID)
 	if err != nil {
 		if repository.IsNotFound(err) {
@@ -123,14 +145,18 @@ func (s *dictService) CreateTimetableEntry(ctx context.Context, req dto.Timetabl
 	if semester == "" {
 		semester = CurrentSemester
 	}
-	dup, err := s.tables.ExistsDuplicate(ctx, req.CourseID, req.ClassID, teacherID, semester)
+	dup, err := s.tables.ExistsDuplicate(ctx, req.CourseID, req.ClassID, teacherID, semester, weekday, periodStart)
 	if err != nil {
 		return nil, errcode.Wrap(errcode.Internal, "校验课表唯一性失败", err)
 	}
 	if dup {
 		return nil, errcode.New(errcode.Conflict, "该课表条目已存在")
 	}
-	t := &model.CourseTimetable{CourseID: req.CourseID, ClassID: req.ClassID, TeacherID: teacherID, Semester: semester}
+	t := &model.CourseTimetable{
+		CourseID: req.CourseID, ClassID: req.ClassID, TeacherID: teacherID, Semester: semester,
+		Weekday: weekday, PeriodStart: periodStart, PeriodEnd: periodEnd,
+		Classroom: strings.TrimSpace(req.Classroom), Remark: strings.TrimSpace(req.Remark),
+	}
 	if err := s.tables.Create(ctx, t); err != nil {
 		if repository.IsDuplicate(err) {
 			return nil, errcode.New(errcode.Conflict, "该课表条目已存在")
@@ -142,11 +168,48 @@ func (s *dictService) CreateTimetableEntry(ctx context.Context, req dto.Timetabl
 		return nil, err
 	}
 	for _, it := range items {
-		if it.CourseID == req.CourseID && it.ClassID == req.ClassID {
+		if it.ID == t.ID {
 			return &it, nil
 		}
 	}
 	return nil, errcode.Wrap(errcode.Internal, "回读课表失败", errcode.New(errcode.Internal, "课表写入后未找到"))
+}
+
+// UpdateTimetableRemark 仅允许本人教师修改自己课表条目的备注。
+func (s *dictService) UpdateTimetableRemark(ctx context.Context, role string, userID, id uint64, req dto.TimetableRemarkReq) (*dto.TimetableItem, error) {
+	if role != RoleTeacher {
+		return nil, errcode.New(errcode.ForbiddenRole, "仅教师可修改课表备注")
+	}
+	entry, err := s.tables.GetByID(ctx, id)
+	if err != nil {
+		if repository.IsNotFound(err) {
+			return nil, errcode.New(errcode.NotFound, "课表条目不存在")
+		}
+		return nil, errcode.Wrap(errcode.Internal, "查询课表失败", err)
+	}
+	if entry.TeacherID != userID {
+		return nil, errcode.New(errcode.ForbiddenData, "无权修改他人的课表备注")
+	}
+	if _, err := s.tables.UpdateRemark(ctx, id, userID, strings.TrimSpace(req.Remark)); err != nil {
+		return nil, errcode.Wrap(errcode.Internal, "修改课表备注失败", err)
+	}
+	items, err := s.MyTimetable(ctx, RoleTeacher, 0, userID, 0, entry.Semester)
+	if err != nil {
+		return nil, err
+	}
+	for _, it := range items {
+		if it.ID == id {
+			return &it, nil
+		}
+	}
+	return nil, errcode.New(errcode.NotFound, "课表条目不存在")
+}
+
+func optionalInt(v *int) int {
+	if v == nil {
+		return 0
+	}
+	return *v
 }
 
 // DeleteTimetableEntry 删除一条课表（不影响已有授课记录）。

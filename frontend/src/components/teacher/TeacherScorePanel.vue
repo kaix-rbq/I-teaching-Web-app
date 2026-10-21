@@ -1,20 +1,20 @@
 <script setup lang="ts">
-import { computed } from 'vue'
-import QualityCompass from '@/components/evaluation/QualityCompass.vue'
+import AiScoreHero from '@/components/evaluation/AiScoreHero.vue'
 import ScoreDimensionsCard from '@/components/evaluation/ScoreDimensionsCard.vue'
 import EvaluationTimeline from '@/components/evaluation/EvaluationTimeline.vue'
 import QualityBadge from '@/components/common/QualityBadge.vue'
-import { EVALUATION_DIMENSIONS, flagText } from '@/constants'
+import { EVALUATION_DIMENSIONS } from '@/constants'
 import { scoreTone, scoreToneColor } from '@/utils/format'
 import type { DimensionKey } from '@/types/evaluation'
 import type { TeacherSummary, TeacherTimelineItem } from '@/types/teacher'
 
 /**
  * 教师画像详情主体（docs/frontend_AGENTS.md §7.9）。
- * 三卡横排（罗盘 | 双源雷达 | 样本口径）→ 按课程明细 → 评价流时间线。
- * 铁律：缺失分渲染 — 不补 0；样本与 flags 必露；AI 评价以 AI 语法显形。
+ * 纵向四段叙事：AI 评价总览 → 五维评分 → 按课程明细 → 历次评价流。
+ * 分数一律取 AI 评价（agentScore）；AI 未评时回退后端综合分，缺失分渲染 — 不补 0。
+ * 样本与 flags 在总览横带内露出，不再单列卡片。
  */
-const props = withDefaults(
+withDefaults(
   defineProps<{
     summary: TeacherSummary | null
     timeline: TeacherTimelineItem[]
@@ -29,8 +29,6 @@ const props = withDefaults(
 
 const emit = defineEmits<{ (e: 'select-course', courseId: number): void }>()
 
-const flags = computed(() => props.summary?.flags ?? [])
-
 /** 数字一致性铁律：直接展示后端值，不做前端四舍五入 */
 function formatScore(score: number | null | undefined): string {
   return score === null || score === undefined ? '—' : score.toFixed(2)
@@ -40,8 +38,15 @@ function toCourse(row: unknown): TeacherSummary['courses'][number] {
   return row as TeacherSummary['courses'][number]
 }
 
+/** 课程综合分取 AI 分（AI 未评时回退后端综合分，保持与总览一致的口径） */
+function courseComposite(course: unknown): number | null {
+  const row = toCourse(course)
+  return row.agentScore ?? row.compositeScore ?? null
+}
+
 function courseDimensionScore(course: unknown, key: DimensionKey): number | null {
-  return toCourse(course).dimensions.find((dimension) => dimension.key === key)?.score ?? null
+  const dimension = toCourse(course).dimensions.find((item) => item.key === key)
+  return dimension?.agentScore ?? dimension?.score ?? null
 }
 
 function handleCourseClick(row: unknown): void {
@@ -52,80 +57,34 @@ function handleCourseClick(row: unknown): void {
 <template>
   <el-skeleton v-if="loading" :rows="10" animated />
 
-  <template v-else-if="summary">
-    <!-- 三卡横排：双源罗盘 | 五维雷达（双源叠加）| 样本与口径 -->
-    <section class="teacher-panel__top">
-      <div class="teacher-panel__card">
-        <h2 class="teacher-panel__card-title">综合分 · 双源罗盘</h2>
-        <QualityCompass :summary="summary" size="lg" />
-      </div>
+  <div v-else-if="summary" class="teacher-panel">
+    <!-- ① 总览：AI 评价综合分 + 样本口径（含 flags 警示） -->
+    <AiScoreHero :summary="summary" :semester="summary.semester" />
 
-      <div class="teacher-panel__card">
-        <ScoreDimensionsCard :summary="summary" />
-      </div>
-
-      <div class="teacher-panel__card">
-        <h2 class="teacher-panel__card-title">样本与口径</h2>
-        <dl class="teacher-panel__facts">
-          <div>
-            <dt>已评场次</dt>
-            <dd class="tabular-nums">
-              {{ summary.sample.evaluatedCount }} / {{ summary.sample.sessionCount }}
-            </dd>
-          </div>
-          <div>
-            <dt>评价来源</dt>
-            <dd class="tabular-nums">督导 {{ summary.sample.supervisorCount }} · AI {{ summary.sample.agentCount }}</dd>
-          </div>
-          <div>
-            <dt>双源对齐</dt>
-            <dd class="tabular-nums">{{ summary.sample.alignedCount }} 场</dd>
-          </div>
-          <div>
-            <dt>融合权重</dt>
-            <dd>
-              督导 {{ Math.round(summary.weights.supervisor * 100) }}% / 智能体
-              {{ Math.round(summary.weights.agent * 100) }}%
-            </dd>
-          </div>
-          <div>
-            <dt>口径版本</dt>
-            <dd>{{ summary.formulaVersion || '—' }}</dd>
-          </div>
-        </dl>
-        <div v-if="flags.length" class="teacher-panel__flags">
-          <el-alert
-            v-for="flag in flags"
-            :key="flag"
-            :title="flagText(flag)"
-            type="warning"
-            :closable="false"
-            show-icon
-          />
-        </div>
-        <p v-else class="teacher-panel__caliber-ok">样本与口径无异常提示</p>
-      </div>
+    <!-- ② 五维评分：AI 单源雷达 + 维度读数 -->
+    <section class="teacher-panel__section">
+      <ScoreDimensionsCard :summary="summary" />
     </section>
 
-    <!-- 按课程明细 -->
-    <section class="teacher-panel__block">
-      <h2 class="teacher-panel__title">按课程明细</h2>
+    <!-- ③ 按课程明细 -->
+    <section class="teacher-panel__section">
+      <h2 class="teacher-panel__section-title">按课程明细</h2>
       <el-table :data="summary.courses" row-key="courseId" stripe @row-click="handleCourseClick">
         <el-table-column prop="courseCode" label="课程编码" width="130" />
         <el-table-column prop="courseName" label="课程名称" min-width="180" />
         <el-table-column label="综合分" width="180" align="right">
           <template #default="{ row }">
-            <template v-if="row.compositeScore === null">
+            <template v-if="courseComposite(row) === null">
               <span class="teacher-panel__muted">暂无评价</span>
             </template>
             <template v-else>
               <span
                 class="teacher-panel__composite score-num"
-                :style="{ color: scoreToneColor(scoreTone(row.compositeScore)) }"
+                :style="{ color: scoreToneColor(scoreTone(courseComposite(row))) }"
               >
-                {{ formatScore(row.compositeScore) }}
+                {{ formatScore(courseComposite(row)) }}
               </span>
-              <QualityBadge class="teacher-panel__badge" :score="row.compositeScore" />
+              <QualityBadge class="teacher-panel__badge" :score="courseComposite(row)" />
             </template>
           </template>
         </el-table-column>
@@ -151,89 +110,29 @@ function handleCourseClick(row: unknown): void {
       </el-table>
     </section>
 
-    <!-- 历次评价：竖线评价流 -->
-    <section class="teacher-panel__block">
-      <h2 class="teacher-panel__title">历次评价</h2>
+    <!-- ④ 历次评价：竖线评价流 -->
+    <section class="teacher-panel__section">
+      <h2 class="teacher-panel__section-title">历次评价</h2>
       <EvaluationTimeline :items="timeline" :loading="timelineLoading" />
     </section>
-  </template>
+  </div>
 </template>
 
 <style scoped lang="scss">
 .teacher-panel {
-  &__top {
-    display: grid;
-    grid-template-columns: minmax(260px, 1fr) minmax(320px, 1.5fr) minmax(260px, 1fr);
-    gap: var(--spacing-4);
-    margin-bottom: var(--spacing-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-4);
 
-    @media (max-width: 1280px) {
-      grid-template-columns: 1fr 1fr;
-    }
-
-    @media (max-width: 960px) {
-      grid-template-columns: 1fr;
-    }
-  }
-
-  &__card {
-    display: flex;
-    flex-direction: column;
-    padding: var(--spacing-5);
-    background-color: var(--color-bg-card);
-    border: 1px solid var(--color-divider);
-    border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-card);
-  }
-
-  &__card-title {
-    margin-bottom: var(--spacing-3);
-    padding-bottom: var(--spacing-2);
-    font-size: var(--font-size-base);
-    color: var(--color-text-primary);
-    border-bottom: 1px solid var(--color-divider);
-  }
-
-  &__facts {
-    display: flex;
-    flex-direction: column;
-    gap: var(--spacing-3);
-
-    dt {
-      font-size: var(--font-size-xs);
-      color: var(--color-text-tertiary);
-    }
-
-    dd {
-      font-size: var(--font-size-sm);
-      font-weight: 500;
-      color: var(--color-text-primary);
-    }
-  }
-
-  &__flags {
-    display: flex;
-    flex-direction: column;
-    gap: var(--spacing-2);
-    margin-top: var(--spacing-4);
-  }
-
-  &__caliber-ok {
-    margin-top: var(--spacing-4);
-    font-size: var(--font-size-xs);
-    color: var(--color-text-tertiary);
-  }
-
-  &__block {
+  &__section {
     padding: var(--spacing-6);
-    margin-bottom: var(--spacing-4);
     background-color: var(--color-bg-card);
     border: 1px solid var(--color-divider);
     border-radius: var(--radius-lg);
     box-shadow: var(--shadow-card);
   }
 
-  &__title {
+  &__section-title {
     margin-bottom: var(--spacing-4);
     font-size: var(--font-size-xl);
     color: var(--color-text-primary);

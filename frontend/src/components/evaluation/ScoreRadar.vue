@@ -4,11 +4,9 @@ import { computed } from 'vue'
 export interface RadarItem {
   key: string
   name: string
-  /** 原始分（默认 1-5）；null = 该评分源无法评价此维度 */
+  /** 原始分（默认 1-5）；null = 该维度无可展示分数，该轴断开不补 0 */
   score: number | null
-  /** 双源叠加模式：督导分（null = 督导未评此维度，该轴断开不补 0） */
-  supervisorScore?: number | null
-  /** 双源叠加模式：AI 分（null = 智能体未评此维度） */
+  /** 画像链路：AI 分（null = 智能体未评此维度）；携带时图例以「AI」显形 */
   agentScore?: number | null
   /** 观测项：仅作亮点，不计入加权 */
   isObservation?: boolean
@@ -20,10 +18,13 @@ const props = withDefaults(
     /** 分值上限，评分表单为 5 */
     max?: number
     loading?: boolean
+    /** 图形语义色：画像链路为 AI（紫），评分表单为主色（蓝） */
+    tone?: 'primary' | 'ai'
   }>(),
   {
     max: 5,
-    loading: false
+    loading: false,
+    tone: 'primary'
   }
 )
 
@@ -58,11 +59,6 @@ function ringPoints(radius: number): string {
     .join(' ')
 }
 
-/** 双源叠加模式：任一维度携带 supervisor/agent 分即开启（教师画像/质量档案） */
-const dualMode = computed(() =>
-  props.items.some((item) => item.supervisorScore !== undefined || item.agentScore !== undefined)
-)
-
 interface Vertex {
   item: RadarItem
   value: { x: number; y: number } | null
@@ -75,9 +71,9 @@ function ratioOf(value: number | null | undefined): number | null {
   return Math.max(0, Math.min(1, value / props.max))
 }
 
-function verticesFor(pick: (item: RadarItem) => number | null | undefined): Vertex[] {
-  return axes.value.map((axis) => {
-    const ratio = ratioOf(pick(axis.item))
+const vertices = computed<Vertex[]>(() =>
+  axes.value.map((axis) => {
+    const ratio = ratioOf(axis.item.score)
     return {
       item: axis.item,
       value: ratio === null ? null : pointAt(axis.angle, RADIUS * ratio),
@@ -85,36 +81,26 @@ function verticesFor(pick: (item: RadarItem) => number | null | undefined): Vert
       outer: pointAt(axis.angle, RADIUS)
     }
   })
-}
+)
 
-const vertices = computed(() => verticesFor((item) => item.score))
-const supervisorVertices = computed(() => verticesFor((item) => item.supervisorScore ?? null))
-const agentVertices = computed(() => verticesFor((item) => item.agentScore ?? null))
-
-function polygonOf(list: Vertex[]): { points: string; canFill: boolean } {
-  const filled = list.filter((vertex) => vertex.value !== null)
+const polygon = computed(() => {
+  const filled = vertices.value.filter((vertex) => vertex.value !== null)
   return {
-    points: filled.map((vertex) => `${vertex.value!.x.toFixed(1)},${vertex.value!.y.toFixed(1)}`).join(' '),
+    points: filled
+      .map((vertex) => `${vertex.value!.x.toFixed(1)},${vertex.value!.y.toFixed(1)}`)
+      .join(' '),
     canFill: filled.length >= 3
   }
-}
-
-const polygon = computed(() => polygonOf(vertices.value))
-const supervisorPolygon = computed(() => polygonOf(supervisorVertices.value))
-const agentPolygon = computed(() => polygonOf(agentVertices.value))
-
-const hasScore = computed(() => {
-  if (dualMode.value) {
-    return [...supervisorVertices.value, ...agentVertices.value].some(
-      (vertex) => vertex.value !== null
-    )
-  }
-  return vertices.value.some((vertex) => vertex.value !== null)
 })
+
+const hasScore = computed(() => vertices.value.some((vertex) => vertex.value !== null))
+
+/** 仅画像链路（tone=ai）展示「AI」图例；评分表单 / 课程提优图不显示图例 */
+const hasAgentLegend = computed(() => props.tone === 'ai')
 </script>
 
 <template>
-  <div class="score-radar">
+  <div class="score-radar" :class="{ 'score-radar--ai': tone === 'ai' }">
     <el-skeleton v-if="loading" :rows="5" animated />
 
     <div v-else-if="!hasScore" class="score-radar__empty">
@@ -122,7 +108,7 @@ const hasScore = computed(() => {
     </div>
 
     <template v-else>
-      <svg v-if="!dualMode" class="score-radar__svg" :viewBox="`0 0 ${SIZE} ${SIZE}`">
+      <svg class="score-radar__svg" :viewBox="`0 0 ${SIZE} ${SIZE}`">
         <polygon
           v-for="(radius, index) in rings"
           :key="index"
@@ -173,84 +159,10 @@ const hasScore = computed(() => {
         </text>
       </svg>
 
-      <!-- 双源叠加：督导 = 靛蓝实线，AI = 亮紫虚线（AI 视觉语言 §4.2.2） -->
-      <svg v-else class="score-radar__svg" :viewBox="`0 0 ${SIZE} ${SIZE}`">
-        <polygon
-          v-for="(radius, index) in rings"
-          :key="index"
-          :points="ringPoints(radius)"
-          class="score-radar__ring"
-        />
-        <line
-          v-for="vertex in supervisorVertices"
-          :key="`axis-${vertex.item.key}`"
-          :x1="CENTER"
-          :y1="CENTER"
-          :x2="vertex.outer.x"
-          :y2="vertex.outer.y"
-          class="score-radar__axis"
-        />
-        <polygon
-          v-if="agentPolygon.canFill"
-          :points="agentPolygon.points"
-          class="score-radar__area score-radar__area--ai"
-        />
-        <polygon
-          v-if="supervisorPolygon.canFill"
-          :points="supervisorPolygon.points"
-          class="score-radar__area"
-        />
-        <template v-for="vertex in agentVertices" :key="`ai-dot-${vertex.item.key}`">
-          <circle
-            v-if="vertex.value"
-            :cx="vertex.value.x"
-            :cy="vertex.value.y"
-            :r="vertex.item.isObservation ? 3.5 : 2.5"
-            class="score-radar__dot score-radar__dot--ai"
-          />
-        </template>
-        <template v-for="vertex in supervisorVertices" :key="`dot-${vertex.item.key}`">
-          <circle
-            v-if="vertex.value"
-            :cx="vertex.value.x"
-            :cy="vertex.value.y"
-            :r="vertex.item.isObservation ? 4 : 3"
-            class="score-radar__dot"
-            :class="{ 'score-radar__dot--observation': vertex.item.isObservation }"
-          />
-        </template>
-        <text
-          v-for="vertex in supervisorVertices"
-          :key="`label-${vertex.item.key}`"
-          :x="vertex.label.x"
-          :y="vertex.label.y"
-          class="score-radar__label"
-          text-anchor="middle"
-          dominant-baseline="middle"
-        >
-          {{ vertex.item.name }}
-        </text>
-        <text
-          v-for="vertex in vertices"
-          :key="`value-${vertex.item.key}`"
-          :x="vertex.label.x"
-          :y="vertex.label.y + 13"
-          class="score-radar__value tabular-nums"
-          text-anchor="middle"
-          dominant-baseline="middle"
-        >
-          {{ vertex.item.score === null ? '—' : vertex.item.score }}
-        </text>
-      </svg>
-
-      <div v-if="dualMode" class="score-radar__legend">
+      <div v-if="hasAgentLegend" class="score-radar__legend">
         <span class="score-radar__legend-item">
-          <i class="score-radar__swatch score-radar__swatch--human" />督导
+          <i class="score-radar__swatch" />AI 评价
         </span>
-        <span class="score-radar__legend-item">
-          <i class="score-radar__swatch score-radar__swatch--ai" />AI
-        </span>
-        <span class="score-radar__legend-hint">中心数值为双源融合分</span>
       </div>
     </template>
   </div>
@@ -258,11 +170,17 @@ const hasScore = computed(() => {
 
 <style scoped lang="scss">
 .score-radar {
+  --radar-ink: var(--color-primary);
+
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   min-height: 220px;
+
+  &--ai {
+    --radar-ink: var(--color-ai-bright);
+  }
 
   &__svg {
     width: 100%;
@@ -282,24 +200,14 @@ const hasScore = computed(() => {
   }
 
   &__area {
-    fill: color-mix(in srgb, var(--color-primary) 18%, transparent);
-    stroke: var(--color-primary);
+    fill: color-mix(in srgb, var(--radar-ink) 16%, transparent);
+    stroke: var(--radar-ink);
     stroke-width: 2;
     stroke-linejoin: round;
-
-    &--ai {
-      fill: color-mix(in srgb, var(--color-ai-bright) 12%, transparent);
-      stroke: var(--color-ai-bright);
-      stroke-dasharray: 4 3;
-    }
   }
 
   &__dot {
-    fill: var(--color-primary);
-
-    &--ai {
-      fill: var(--color-ai-bright);
-    }
+    fill: var(--radar-ink);
 
     &--observation {
       fill: var(--color-warning);
@@ -332,21 +240,13 @@ const hasScore = computed(() => {
       align-items: center;
       gap: 6px;
     }
-
-    &-hint {
-      color: var(--color-text-tertiary);
-    }
   }
 
   &__swatch {
     display: inline-block;
     width: 18px;
     height: 0;
-    border-top: 2px solid var(--color-primary);
-
-    &--ai {
-      border-top: 2px dashed var(--color-ai-bright);
-    }
+    border-top: 2px solid var(--radar-ink);
   }
 
   &__empty {

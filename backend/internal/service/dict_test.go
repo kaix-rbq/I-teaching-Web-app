@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 
 	"aijiaoxue-api/internal/dto"
 	"aijiaoxue-api/internal/model"
@@ -38,8 +39,33 @@ func (f *fakeTimetableRepo) Create(ctx context.Context, t *model.CourseTimetable
 		ID: t.ID, CourseID: t.CourseID, CourseCode: "SE3101", CourseName: "软件项目管理",
 		ClassID: t.ClassID, ClassName: "软工2201", TeacherID: t.TeacherID,
 		TeacherName: "李明", Semester: t.Semester,
+		Weekday: t.Weekday, PeriodStart: t.PeriodStart, PeriodEnd: t.PeriodEnd,
+		Classroom: t.Classroom, Remark: t.Remark,
 	})
 	return nil
+}
+
+func (f *fakeTimetableRepo) GetByID(ctx context.Context, id uint64) (*model.CourseTimetable, error) {
+	for _, r := range f.rows {
+		if r.ID == id {
+			return &model.CourseTimetable{
+				ID: r.ID, CourseID: r.CourseID, ClassID: r.ClassID, TeacherID: r.TeacherID,
+				Semester: r.Semester, Weekday: r.Weekday, PeriodStart: r.PeriodStart,
+				PeriodEnd: r.PeriodEnd, Classroom: r.Classroom, Remark: r.Remark,
+			}, nil
+		}
+	}
+	return nil, gorm.ErrRecordNotFound
+}
+
+func (f *fakeTimetableRepo) UpdateRemark(ctx context.Context, id, teacherID uint64, remark string) (int64, error) {
+	for i, r := range f.rows {
+		if r.ID == id && r.TeacherID == teacherID {
+			f.rows[i].Remark = remark
+			return 1, nil
+		}
+	}
+	return 0, nil
 }
 
 func (f *fakeTimetableRepo) Delete(ctx context.Context, id uint64) error {
@@ -52,9 +78,10 @@ func (f *fakeTimetableRepo) Delete(ctx context.Context, id uint64) error {
 	return nil
 }
 
-func (f *fakeTimetableRepo) ExistsDuplicate(ctx context.Context, courseID, classID, teacherID uint64, semester string) (bool, error) {
+func (f *fakeTimetableRepo) ExistsDuplicate(ctx context.Context, courseID, classID, teacherID uint64, semester string, weekday, periodStart int) (bool, error) {
 	for _, r := range f.rows {
-		if r.CourseID == courseID && r.ClassID == classID && r.TeacherID == teacherID && r.Semester == semester {
+		if r.CourseID == courseID && r.ClassID == classID && r.TeacherID == teacherID &&
+			r.Semester == semester && r.Weekday == weekday && r.PeriodStart == periodStart {
 			return true, nil
 		}
 	}
