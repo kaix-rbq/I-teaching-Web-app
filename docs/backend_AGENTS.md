@@ -292,15 +292,13 @@ evaluation:
 - `message` 面向用户可读（中文），内部细节写日志不外泄；
 - 实现：`pkg/response.OK(c, data)` / `pkg/response.Fail(c, errcode.Params)`，handler 中**禁止手写 `c.JSON` 拼信封**。
 
-## 8. 接口契约（已注册路由共 58 条）
+## 8. 接口契约（已注册路由共 70 条）
 
-> 计数口径 = `backend/internal/router/router.go` 实际注册数，按鉴权分组：
-> 未挂 `Auth` 组 4（`GET /healthz` 根路径 + `GET /api/v1/healthz` + `POST /auth/login` + `GET /recordings/:id/stream`，
-> 最后一条自带 `AuthOrPlaybackTicket`）
-> \+ 登录 32 + teacher/supervisor 4 + director 2 + teacher 2 + supervisor 12 + director/supervisor 2。
+> 计数口径 = `backend/internal/router/router.go` 实际注册数。
 > 下文 §8.1–§8.7 为 Sprint 1 存量，§8.8 为 Sprint 2.1（14 条），§8.9 为 Sprint 2.2 阶段②（4 条），
-> §8.10 为 AI 评析任务链（D3 / R0.2，4 条），§8.11 为提优闭环（N4/N5/B12，11 条），§8.12 为督导抽样队列（R1.2，1 条），
-> §8.13 为报告导出与演示模式（N9/B6，2 条）。
+> §8.10 为 AI 评析任务链（D3 / R0.2，4 条），§8.11 为提优闭环（教师自评关闭版，11 条），
+> §8.12 为督导抽样队列（R1.2，1 条），§8.13 为报告导出与演示模式（N9/B6，2 条），
+> §8.14 为主任事务与课堂问题登记（2026-10-20，8 条）。
 
 前缀 `/api/v1`。**字段名与前端 `src/types/` 逐字对齐，本节是前后端联调的唯一事实源。**
 
@@ -387,10 +385,47 @@ type PendingSessionItem struct { // 手动新增/尚未评价的授课记录（s
 | GET `/departments` | 登录 | 教研室列表 `[{id, name}]` |
 | GET `/teachers?departmentId=` | 登录 | 教师列表 `[{id, name}]`，按教研室过滤 |
 | GET `/timetable/mine?teacherId=&semester=` | 登录 | 最小课表下拉（B11）：teacher 只能看本人（传他人 id 按本人处理）；supervisor / director 可按 `teacherId` 过滤；`semester` 缺省当前学期 |
-| POST `/timetable` | director / supervisor | 手动新增课表：`{courseId*, classId*, teacherId(缺省取课程任课教师), semester(缺省当前学期)}`；班级须归属课程，否则 40002；重复 40901 |
+| POST `/timetable` | director / supervisor | 手动新增课表：`{courseId*, classId*, teacherId(缺省取课程任课教师), semester(缺省当前学期), weekday?, periodStart?, periodEnd?, classroom?, remark?}`；班级须归属课程，否则 40002；重复 40901 |
+| PATCH `/timetable/:id/remark` | teacher（本人课表） | 仅修改本人课表条目的备注：`{remark}`（≤255） |
 | DELETE `/timetable/:id` | director / supervisor | 删除课表条目（不影响已有授课记录） |
 
 > 注：此二接口为前端 AGENTS.md §10.2 的补充项（前端文档已同步更新）。学期选项由前端常量维护，不设接口。
+
+```go
+// TimetableItem —— V13 扩展后同时服务于建课下拉与教师工作台周课表。
+// weekday：1=周一 … 7=周日；0=历史数据未排课（前端不渲染进网格）。
+// periodStart/periodEnd：1-11 节；0=未指定。classroom/remark：空串=未填写。
+type TimetableItem struct {
+    ID          uint64 `json:"id"`
+    CourseID    uint64 `json:"courseId"`
+    CourseCode  string `json:"courseCode"`
+    CourseName  string `json:"courseName"`
+    ClassID     uint64 `json:"classId"`
+    ClassName   string `json:"className"`
+    TeacherID   uint64 `json:"teacherId"`
+    TeacherName string `json:"teacherName"`
+    Semester    string `json:"semester"`
+    Weekday     int    `json:"weekday"`
+    PeriodStart int    `json:"periodStart"`
+    PeriodEnd   int    `json:"periodEnd"`
+    Classroom   string `json:"classroom"`
+    Remark      string `json:"remark"`
+}
+type TimetableCreateReq struct { // 新字段全部可选，旧调用方无需改动
+    CourseID    uint64 `json:"courseId" binding:"required"`
+    ClassID     uint64 `json:"classId" binding:"required"`
+    TeacherID   uint64 `json:"teacherId"`
+    Semester    string `json:"semester" binding:"max=16"`
+    Weekday     *int   `json:"weekday" binding:"omitempty,min=1,max=7"`
+    PeriodStart *int   `json:"periodStart" binding:"omitempty,min=1,max=11"`
+    PeriodEnd   *int   `json:"periodEnd" binding:"omitempty,min=1,max=11"`
+    Classroom   string `json:"classroom" binding:"max=64"`
+    Remark      string `json:"remark" binding:"max=255"`
+}
+type TimetableRemarkReq struct {
+    Remark string `json:"remark" binding:"max=255"`
+}
+```
 
 ### 8.4 课程 courses
 
@@ -763,8 +798,8 @@ type AiObservationDTO struct {
 | GET `/improvement-items?teacherId=&status=&page=&pageSize=` | teacher（本人）/ supervisor（全部） | 待改进清单分页 |
 | POST `/improvement-items` | teacher | 创建改进项（标题 + 来源 + 关联场次） |
 | PUT `/improvement-items/:id` | teacher（本人） | 改标题 |
-| PUT `/improvement-items/:id/complete` | teacher（本人） | 教师自评完成：`open → done_self` |
-| PUT `/improvement-items/:id/close` | supervisor | 督导确认关闭：`done_self → closed`（未自评 40002） |
+| PUT `/improvement-items/:id/complete` | teacher（本人） | 教师自评完成，直接 `open → closed`（`closed_by=本人`） |
+| DELETE `/improvement-items/:id` | teacher（本人） | 删除本人改进项 |
 | GET `/teaching-reflections?sessionId=` | teacher（本人）/ supervisor（须带 sessionId） | 教学反思列表（教师私有；督导关闭清单时可读关联反思） |
 | POST `/teaching-reflections` | teacher | 创建反思（内容/计划/下节行动 + 可选 sourceEvalId） |
 | PUT `/teaching-reflections/:id` | teacher（本人） | 修改反思 |
@@ -772,7 +807,9 @@ type AiObservationDTO struct {
 | PUT `/notifications/read-all` | 登录 | 全部已读（**注册顺序先于 `/:id/read`**） |
 | PUT `/notifications/:id/read` | 登录 | 单条已读（进入详情自动已读） |
 
-- **状态机**：`open → done_self`（教师自评）`→ closed`（督导确认）；**未确认关不掉**（40002）；不打回。
+- **状态机（2026-10-20 简化）**：`open → closed`（教师自评完成即关闭，`closed_by` 记本人）；
+  原 `done_self` 与督导确认关闭流程已下线；历史 `done_self` 行仍可由教师完成时落到 `closed`。
+- **删除**：仅创建教师本人可删除（service 层校验，越权 40302）。
 - **站内信**：只推 `supervisor_comment`（督导提交观察时通知授课教师）与 `ai_issue`；红点收敛到工作台清单与督导任务队列两处。
 - **失败不影响主流程**：通知创建失败只记日志，不阻断观察提交。
 
@@ -841,6 +878,78 @@ type DemoSeedResp struct {
   开启后会在**单事务**内清空 `transcripts` / `recordings` / `recording_playback_logs` / 清单 / 反思 / 站内信并写回演示数据；
   **不触碰用户、课程、评价**（AI 报告沿用种子 agent 行）。
 - **报告口径**：与教师面板同源（单一 `scoring.Aggregate`），前端打印视图只展示、不重算。
+
+### 8.14 主任事务与课堂问题登记（2026-10-20，已实现，8 条）
+
+> 权限铁律：`schedule_events` 仅 owner 本人可见可改；课堂问题登记教师只能看/确认本人，督导与主任可看全部并处理。
+> 数据范围在 service 层裁剪，前端隐藏不作为防护。
+
+| 方法 路径 | 权限 | 说明 |
+|-----------|------|------|
+| GET `/schedule-events?from=&to=` | director | 本人事务列表；`from/to` 为 `YYYY-MM-DD`，缺省当前周一至周日 |
+| POST `/schedule-events` | director | 新增事务；时间 06:00-24:00、30 分钟颗粒、`end > start`；与本人已有事务重叠返回 409（消息含冲突事务名与时段） |
+| PATCH `/schedule-events/:id` | director（本人） | 仅修改 `remark` |
+| DELETE `/schedule-events/:id` | director（本人） | 删除本人事务 |
+| GET `/classroom-issues` | teacher（本人）/ supervisor / director（全部） | 课堂问题登记列表 |
+| POST `/classroom-issues` | teacher | 登记课堂问题：`{issueType, content}` |
+| POST `/classroom-issues/:id/handle` | supervisor / director | 处理问题：`{handleNote}` 必填 → `status=handled` |
+| POST `/classroom-issues/:id/confirm` | teacher（本人） | 教师确认：`{resolved:true}` 硬删除；`false` 回退 `status=open` 并保留 `handleNote` 供再处理 |
+
+```go
+type ScheduleEventDTO struct {
+    ID          uint64 `json:"id"`
+    OwnerUserID uint64 `json:"ownerUserId"`
+    EventDate   string `json:"eventDate"`   // YYYY-MM-DD
+    StartTime   string `json:"startTime"`   // HH:MM
+    EndTime     string `json:"endTime"`     // HH:MM（24:00 合法）
+    EventType   string `json:"eventType"`   // meeting | open_class | lecture | other
+    TypeText    string `json:"typeText"`    // 「其他」的自填名称
+    Remark      string `json:"remark"`
+    CreatedAt   string `json:"createdAt"`
+    UpdatedAt   string `json:"updatedAt"`
+}
+type ScheduleEventCreateReq struct {
+    EventDate string `json:"eventDate" binding:"required"`
+    StartTime string `json:"startTime" binding:"required"`
+    EndTime   string `json:"endTime" binding:"required"`
+    EventType string `json:"eventType" binding:"required,oneof=meeting open_class lecture other"`
+    TypeText  string `json:"typeText" binding:"max=32"`
+    Remark    string `json:"remark" binding:"max=255"`
+}
+type ScheduleEventRemarkReq struct {
+    Remark string `json:"remark" binding:"max=255"`
+}
+
+type ClassroomIssueDTO struct {
+    ID          uint64 `json:"id"`
+    TeacherID   uint64 `json:"teacherId"`
+    TeacherName string `json:"teacherName"`
+    IssueType   string `json:"issueType"` // equipment | absence | progress | material | other
+    Content     string `json:"content"`
+    Status      string `json:"status"`    // open | handled
+    HandleNote  string `json:"handleNote"`
+    HandlerID   uint64 `json:"handlerId"`
+    HandlerName string `json:"handlerName"`
+    HandledAt   string `json:"handledAt"`
+    CreatedAt   string `json:"createdAt"`
+}
+type ClassroomIssueCreateReq struct {
+    IssueType string `json:"issueType" binding:"required,oneof=equipment absence progress material other"`
+    Content   string `json:"content" binding:"required,max=2000"`
+}
+type ClassroomIssueHandleReq struct {
+    HandleNote string `json:"handleNote" binding:"required,max=1000"`
+}
+type ClassroomIssueConfirmReq struct {
+    Resolved bool `json:"resolved"`
+}
+```
+
+- **事务时间校验**：分钟必须是 `00/30`，`startTime >= "06:00"`、`endTime <= "24:00"`，
+  `end > start`；重叠判断为同 owner、同日期 `start < existing.end AND end > existing.start`。
+- **课堂问题流转**：`open → handled`（督导/主任处理）`→` 教师确认；
+  确认解决即硬删除，未解决回到 `open`（保留 `handleNote`，督导可再次处理）。
+- **状态简化**：教师端仅展示「进行中 / 待教师确认」；处理后的条目必须由教师确认才会消失。
 
 ## 9. 中间件规范（`internal/middleware/`）
 
@@ -998,7 +1107,7 @@ HTTP 请求
 - **事实源分工**：`database/schema.sql` 只管 Sprint 1 存量表；**Sprint 2 起的新表以 `migrations/` 下的迁移脚本为唯一事实源**，二者不重复维护；
 - **迁移策略**：从 Sprint 2 起引入 `golang-migrate`（`cmd/migrate` + `migrations/` embed）。GORM **不使用 AutoMigrate**（避免双源漂移）；
   新增表 = 新建迁移脚本 + 更新 `internal/model` + 在 PR 说明列明变更。初始化流程见 `scripts/init_db.sh`：`schema.sql → migrate up → seed.sql → cmd/seed`；
-- **迁移清单（V1–V6，逐个对应 `backend/migrations/` 下同名文件）**：
+- **迁移清单（V1–V15，逐个对应 `backend/migrations/` 下同名文件）**：
 
 | 版本 | 文件（`.up/down.sql`） | 内容 |
 |------|------------------------|------|
@@ -1011,10 +1120,13 @@ HTTP 请求
 | V7 | `7_evaluations_ai_model_version_width` | `evaluations.ai_model_version` 放宽到 `VARCHAR(64)` |
 | V8 | `8_ai_tasks_and_reports` | `ai_tasks` + `teacher_ai_reports`（D3，与 RAG 方案 §4.1 一致；知识库表顺延 V13+） |
 | V9 | `9_teaching_reflections` | `teaching_reflections`（N5 教学反思，教师私有） |
-| V10 | `10_improvement_items` | `improvement_items`（N4 简化版待改进清单，三态 open→done_self→closed） |
+| V10 | `10_improvement_items` | `improvement_items`（N4 待改进清单；2026-10-20 起教师自评完成直接关闭） |
 | V11 | `11_user_notifications` | `user_notifications`（B12 站内信，仅 supervisor_comment / ai_issue） |
 | V12 | `12_course_timetable_and_created_by` | `course_timetable`（B11 最小课表）+ `teaching_sessions.created_by`（建课人） |
-| V13+ | `knowledge_documents` / `knowledge_chunks` | RAG 知识库表，**顺延本轮不建**（见 10.16 计划 §3.2） |
+| V13 | `13_timetable_week_grid` | 课表扩展 `weekday / period_start / period_end / classroom / remark` + 周网格唯一键 |
+| V14 | `14_schedule_events` | `schedule_events`（主任事务：会议 / 公开课 / 讲座 / 其他） |
+| V15 | `15_classroom_issues` | `classroom_issues`（课堂问题登记与处理闭环） |
+| V16+ | `knowledge_documents` / `knowledge_chunks` | RAG 知识库表，**顺延后续排期**（见 10.16 计划 §3.2） |
 
 - 🔴 **迁移文件命名**：`<版本>_<名称>.up.sql` / `.down.sql`（如 `2_teaching_sessions_and_evaluations.up.sql`）。
   Flyway 风格 `V2__xxx.up.sql` **不被 golang-migrate 识别**，会让 `migrate up` 报 `first .: file does not exist`——禁止使用；

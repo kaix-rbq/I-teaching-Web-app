@@ -97,26 +97,20 @@ func (h *ImprovementHandler) Complete(c *gin.Context) {
 	response.OK(c, data)
 }
 
-// Close 处理 PUT /api/v1/improvement-items/:id/close（督导确认关闭）。
-func (h *ImprovementHandler) Close(c *gin.Context) {
+// Delete 处理 DELETE /api/v1/improvement-items/:id（仅创建教师本人）。
+func (h *ImprovementHandler) Delete(c *gin.Context) {
 	id, err := pathID(c)
 	if err != nil {
 		response.Fail(c, err)
 		return
 	}
-	var req dto.ImprovementCloseReq
-	if err := bindJSON(c, &req); err != nil {
-		response.Fail(c, err)
-		return
-	}
 	role, _ := middleware.Role(c)
 	userID, _ := middleware.UserID(c)
-	data, err := h.svc.Close(c.Request.Context(), role, userID, id, req)
-	if err != nil {
+	if err := h.svc.Delete(c.Request.Context(), role, userID, id); err != nil {
 		response.Fail(c, err)
 		return
 	}
-	response.OK(c, data)
+	response.OK(c, gin.H{"id": id})
 }
 
 // ReflectionHandler 处理教学反思（N5）。

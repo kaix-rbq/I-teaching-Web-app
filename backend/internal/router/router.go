@@ -39,6 +39,8 @@ func New(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) (*gin.Engine, se
 	notificationRepo := repository.NewNotificationRepository(db)
 	demoRepo := repository.NewDemoRepository(db)
 	timetableRepo := repository.NewTimetableRepository(db)
+	scheduleEventRepo := repository.NewScheduleEventRepository(db)
+	classroomIssueRepo := repository.NewClassroomIssueRepository(db)
 
 	authSvc := service.NewAuthService(userRepo, jwt)
 	courseSvc := service.NewCourseService(courseRepo, userRepo)
@@ -52,6 +54,8 @@ func New(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) (*gin.Engine, se
 	reflectionSvc := service.NewReflectionService(reflectionRepo)
 	supervisionTaskSvc := service.NewSupervisionTaskService(evaluationRepo, cfg.Evaluation)
 	demoSvc := service.NewDemoService(demoRepo, cfg.Demo.Enabled)
+	scheduleEventSvc := service.NewScheduleEventService(scheduleEventRepo)
+	classroomIssueSvc := service.NewClassroomIssueService(classroomIssueRepo)
 	teacherScoreSvc := service.NewTeacherScoreService(userRepo, courseRepo, evaluationRepo, cfg.Evaluation, improvementRepo)
 	// ⚠️ 不能写 Transcriber(asr.NewClient(...))：把 nil 的 *asr.Client 装进接口会得到
 	// 非 nil 接口（holds-nil-pointer），service 里的 `s.transcriber == nil` 判断会失效，
@@ -91,6 +95,8 @@ func New(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) (*gin.Engine, se
 	notificationH := handler.NewNotificationHandler(notificationSvc)
 	supervisionTaskH := handler.NewSupervisionTaskHandler(supervisionTaskSvc)
 	demoH := handler.NewDemoHandler(demoSvc)
+	scheduleEventH := handler.NewScheduleEventHandler(scheduleEventSvc)
+	classroomIssueH := handler.NewClassroomIssueHandler(classroomIssueSvc)
 
 	gin.SetMode(cfg.Server.Mode)
 	r := gin.New()
@@ -143,22 +149,32 @@ func New(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) (*gin.Engine, se
 	authed.POST("/improvement-items", improvementH.Create)
 	authed.PUT("/improvement-items/:id", improvementH.Update)
 	authed.PUT("/improvement-items/:id/complete", improvementH.Complete)
-	authed.PUT("/improvement-items/:id/close", improvementH.Close)
+	authed.DELETE("/improvement-items/:id", improvementH.Delete)
 	authed.GET("/teaching-reflections", reflectionH.List)
 	authed.POST("/teaching-reflections", reflectionH.Create)
 	authed.PUT("/teaching-reflections/:id", reflectionH.Update)
 	authed.GET("/notifications", notificationH.List)
+	// 课堂问题：教师看/确认本人，督导与主任看全部并处理（service 层裁剪）。
+	authed.GET("/classroom-issues", classroomIssueH.List)
 	// 🔴 注册顺序：静态段 /read-all 必须先于参数段 /:id/read。
 	authed.PUT("/notifications/read-all", notificationH.MarkAllRead)
 	authed.PUT("/notifications/:id/read", notificationH.MarkRead)
 
 	authed.Group("", middleware.RequireRoles(service.RoleDirector)).
 		POST("/courses", courseH.Create).
-		PUT("/courses/:id", courseH.Update)
+		PUT("/courses/:id", courseH.Update).
+		// 主任事务管理（周视图）：仅本人，service 层再次校验 owner。
+		GET("/schedule-events", scheduleEventH.List).
+		POST("/schedule-events", scheduleEventH.Create).
+		PATCH("/schedule-events/:id", scheduleEventH.Update).
+		DELETE("/schedule-events/:id", scheduleEventH.Delete)
 
 	authed.Group("", middleware.RequireRoles(service.RoleTeacher)).
 		POST("/courses/:id/resources", resourceH.Upload).
-		DELETE("/resources/:id", resourceH.Delete)
+		DELETE("/resources/:id", resourceH.Delete).
+		PATCH("/timetable/:id/remark", dictH.UpdateTimetableRemark).
+		POST("/classroom-issues", classroomIssueH.Create).
+		POST("/classroom-issues/:id/confirm", classroomIssueH.Confirm)
 
 	// —— 授课与录音（B1/D6）：teacher 本人课程 / supervisor 代录；建课即触发后续 AI 评析 ——
 	authed.Group("", middleware.RequireRoles(service.RoleTeacher, service.RoleSupervisor)).
@@ -186,6 +202,7 @@ func New(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) (*gin.Engine, se
 		GET("/teacher-scores", teacherScoreH.List).
 		POST("/timetable", dictH.CreateTimetable).
 		DELETE("/timetable/:id", dictH.DeleteTimetable).
+		POST("/classroom-issues/:id/handle", classroomIssueH.Handle).
 		POST("/demo/seed", demoH.Seed)
 
 	return r, recordingSvc, aiTaskSvc

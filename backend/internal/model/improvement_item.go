@@ -2,8 +2,9 @@ package model
 
 import "time"
 
-// ImprovementItem 对应 improvement_items 表：待改进清单（N4 简化版）。
-// 状态机 open → done_self → closed；不支持打回，打回即退回 open 并留言。
+// ImprovementItem 对应 improvement_items 表：待改进清单。
+// 2026-10-20 简化：教师自评完成直接 closed，不再经过 done_self / 督导确认。
+// done_self 仅用于兼容历史数据。
 type ImprovementItem struct {
 	ID        uint64     `gorm:"column:id;primaryKey"`
 	TeacherID uint64     `gorm:"column:teacher_id"`

@@ -1,6 +1,6 @@
 package dto
 
-// ImprovementItemDTO 是待改进清单行（N4 简化版：标题+来源+完成说明+三态）。
+// ImprovementItemDTO 是待改进清单行（教师自评完成即关闭）。
 type ImprovementItemDTO struct {
 	ID           uint64 `json:"id"`
 	TeacherID    uint64 `json:"teacherId"`
@@ -8,7 +8,7 @@ type ImprovementItemDTO struct {
 	SessionID    uint64 `json:"sessionId"`
 	Title        string `json:"title"`
 	Source       string `json:"source"`   // ai / supervisor / self
-	Status       string `json:"status"`   // open / done_self / closed
+	Status       string `json:"status"`   // open / closed（历史数据可能为 done_self）
 	DoneNote     string `json:"doneNote"` // 完成说明（教师自评）
 	ClosedBy     uint64 `json:"closedBy"`
 	ClosedByName string `json:"closedByName"`
@@ -29,14 +29,9 @@ type ImprovementUpdateReq struct {
 	Title string `json:"title" binding:"required,max=255"`
 }
 
-// ImprovementCompleteReq 是 PUT /improvement-items/:id/complete 的请求体（教师自评完成）。
+// ImprovementCompleteReq 是 PUT /improvement-items/:id/complete 的请求体（教师自评完成，直接关闭）。
 type ImprovementCompleteReq struct {
 	DoneNote string `json:"doneNote" binding:"max=1000"`
-}
-
-// ImprovementCloseReq 是 PUT /improvement-items/:id/close 的请求体（督导确认关闭，可留言）。
-type ImprovementCloseReq struct {
-	Note string `json:"note" binding:"max=1000"`
 }
 
 // ImprovementListQuery 是 GET /improvement-items 的查询参数。
