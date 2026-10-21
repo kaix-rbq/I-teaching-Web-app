@@ -5,11 +5,9 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   ArrowDown,
   Bell,
-  CircleCheck,
   Collection,
   EditPen,
   Expand,
-  Files,
   Fold,
   Medal,
   Odometer,
@@ -42,24 +40,22 @@ const collapsed = ref(false)
 const menuItems = computed<MenuItem[]>(() => {
   const role = auth.user?.role
 
-  // 教师端无「质量驾驶舱」，以「我的质量档案」为首页。
+  // 教师端以「教师工作台」为首页，档案页只承载质量数据。
   if (role === 'teacher') {
     return [
+      { index: 'teacher-workbench', label: '工作台', icon: markRaw(Odometer) },
       { index: 'profile-quality', label: '我的质量档案', icon: markRaw(Medal) },
       { index: 'course-list', label: '我的课程', icon: markRaw(Collection) },
-      { index: 'improvements', label: '改进清单', icon: markRaw(Files) },
       { index: 'reflections', label: '教学反思', icon: markRaw(EditPen) },
       { index: 'profile', label: '个人中心', icon: markRaw(User) }
     ]
   }
 
-  // 督导端聚焦「听评课」核心任务：工作台、课程列表、听评课管理、改进清单、个人中心。
+  // 督导端聚焦「听评课」核心任务：工作台、课程列表、个人中心。
   if (role === 'supervisor') {
     return [
       { index: 'dashboard', label: '工作台', icon: markRaw(Odometer) },
       { index: 'course-list', label: '课程列表', icon: markRaw(Collection) },
-      { index: 'supervision', label: '听评课管理', icon: markRaw(Files) },
-      { index: 'improvements', label: '改进清单', icon: markRaw(CircleCheck) },
       { index: 'profile', label: '个人中心', icon: markRaw(User) }
     ]
   }
@@ -75,7 +71,13 @@ const menuItems = computed<MenuItem[]>(() => {
 const activeMenu = computed(() => {
   const name = String(route.name ?? '')
   if (name === 'session-evaluation') {
-    return auth.role === 'supervisor' ? 'dashboard' : 'course-list'
+    return auth.role === 'supervisor' ? 'dashboard' : 'teacher-workbench'
+  }
+  if (name === 'profile-quality') {
+    return 'profile-quality'
+  }
+  if (name === 'teacher-workbench') {
+    return 'teacher-workbench'
   }
   if (
     name === 'course-detail' ||

@@ -28,6 +28,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '工作台' }
       },
       {
+        path: 'workbench',
+        name: 'teacher-workbench',
+        component: () => import('@/views/WorkbenchView.vue'),
+        meta: { title: '教师工作台', roles: ['teacher'] }
+      },
+      {
         path: 'courses',
         name: 'course-list',
         component: () => import('@/views/CourseListView.vue'),
@@ -82,12 +88,6 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '教师评分面板', roles: ['director', 'supervisor'] }
       },
       {
-        path: 'supervision',
-        name: 'supervision',
-        component: () => import('@/views/SupervisionView.vue'),
-        meta: { title: '听评课管理', roles: ['supervisor'] }
-      },
-      {
         path: 'me/quality',
         name: 'profile-quality',
         component: () => import('@/views/ProfileQualityView.vue'),
@@ -98,12 +98,6 @@ const routes: RouteRecordRaw[] = [
         name: 'teacher-report',
         component: () => import('@/views/TeacherReportView.vue'),
         meta: { title: '质量报告', roles: ['director', 'supervisor', 'teacher'] }
-      },
-      {
-        path: 'improvements',
-        name: 'improvements',
-        component: () => import('@/views/ImprovementListView.vue'),
-        meta: { title: '待改进清单', roles: ['teacher', 'supervisor'] }
       },
       {
         path: 'reflections',

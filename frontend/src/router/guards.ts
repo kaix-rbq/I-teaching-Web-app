@@ -18,9 +18,9 @@ export function setupGuards(router: Router): void {
       return { name: defaultRouteName(auth.role) }
     }
 
-    // 教师端无「质量驾驶舱」：直接落到「我的质量档案」，避免信息重复。
+    // 教师端无「质量驾驶舱」：登录后落到教师工作台，避免与档案页信息重复。
     if (auth.hasRole('teacher') && to.name === 'dashboard') {
-      return { name: 'profile-quality' }
+      return { name: 'teacher-workbench' }
     }
 
     const roles = to.meta.roles

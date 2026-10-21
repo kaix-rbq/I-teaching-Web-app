@@ -15,7 +15,7 @@ export interface DictData {
   teachers: TeacherOption[]
 }
 
-/** 最小课表下拉行（B11）：GET /timetable/mine，建课时课程/班级下拉数据源。 */
+/** 课表行（GET /timetable/mine）：B11 建课下拉 + 教师工作台周课表。 */
 export interface TimetableItem {
   id: number
   courseId: number
@@ -26,4 +26,11 @@ export interface TimetableItem {
   teacherId: number
   teacherName: string
   semester: string
+  /** 1=周一 … 7=周日；0=历史数据未排课 */
+  weekday: number
+  /** 1-11 节；0=未指定 */
+  periodStart: number
+  periodEnd: number
+  classroom: string
+  remark: string
 }
