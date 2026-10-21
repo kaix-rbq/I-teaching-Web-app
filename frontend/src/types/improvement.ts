@@ -1,4 +1,4 @@
-/** 待改进清单（N4 简化版：标题 + 来源 + 完成说明 + 三态） */
+/** 待改进清单（教师自评完成即关闭；done_self 仅兼容历史数据） */
 export type ImprovementStatus = 'open' | 'done_self' | 'closed'
 
 export interface ImprovementItem {

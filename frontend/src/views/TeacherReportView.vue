@@ -117,7 +117,7 @@ function print(): void {
         <ul v-else class="report__items">
           <li v-for="it in report.improvementItems" :key="it.id" class="report__item">
             <span class="report__item-status" :data-status="it.status">
-              {{ it.status === 'closed' ? '已关闭' : it.status === 'done_self' ? '待督导确认' : '进行中' }}
+              {{ it.status === 'closed' ? '已完成' : '进行中' }}
             </span>
             <span class="report__item-title">{{ it.title }}</span>
             <span v-if="it.doneNote" class="report__item-note">{{ it.doneNote }}</span>

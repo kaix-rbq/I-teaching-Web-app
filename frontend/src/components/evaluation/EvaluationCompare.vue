@@ -15,11 +15,14 @@ const props = withDefaults(
     supervisor?: EvaluationDTO | null
     agent?: EvaluationDTO | null
     loading?: boolean
+    /** 主任/教师只读视角：隐藏督导列与一切督导分数（2026-10-20 Task E）。 */
+    hideSupervisor?: boolean
   }>(),
   {
     supervisor: null,
     agent: null,
-    loading: false
+    loading: false,
+    hideSupervisor: false
   }
 )
 
@@ -84,7 +87,8 @@ const citedChunks = computed(() => props.agent?.evidence?.citedChunks ?? [])
         <div class="evaluation-compare__placeholder-head">
           <AiBadge text="AI 参考" />
         </div>
-        <p>智能体评价将在阶段②接入，届时此处展示与督导评分的分维度对比，并标注置信度与依据。</p>
+        <p v-if="hideSupervisor">本节暂无 AI 评价，评分与建议将在课堂转写完成后生成。</p>
+        <p v-else>智能体评价将在阶段②接入，届时此处展示与督导评分的分维度对比，并标注置信度与依据。</p>
       </div>
     </template>
 
@@ -114,9 +118,10 @@ const citedChunks = computed(() => props.agent?.evidence?.citedChunks ?? [])
             v-for="dimension in EVALUATION_DIMENSIONS"
             :key="dimension.key"
             class="evaluation-compare__row"
+            :class="{ 'evaluation-compare__row--ai-only': hideSupervisor }"
           >
             <span class="evaluation-compare__name">{{ dimension.shortName }}</span>
-            <span class="evaluation-compare__cell">
+            <span v-if="!hideSupervisor" class="evaluation-compare__cell">
               <em>督导</em>
               <strong class="tabular-nums">{{ scoreOf(supervisor, dimension.key) }}</strong>
             </span>
@@ -168,11 +173,11 @@ const citedChunks = computed(() => props.agent?.evidence?.citedChunks ?? [])
           type="info"
           :closable="false"
           show-icon
-          title="本次评价未附带转写引用，建议结合督导评分判断"
+          :title="hideSupervisor ? '本次评价未附带转写引用，建议结合督导评语判断' : '本次评价未附带转写引用，建议结合督导评分判断'"
         />
 
         <p class="evaluation-compare__ethics">
-          AI 评分仅作参考，最终以督导评分为准；低置信分不参与对照结论。
+          {{ hideSupervisor ? 'AI 评分基于课堂转写生成，仅用于教学改进参考。' : 'AI 评分仅作参考，最终以督导评分为准；低置信分不参与对照结论。' }}
         </p>
       </div>
     </template>
@@ -262,6 +267,10 @@ const citedChunks = computed(() => props.agent?.evidence?.citedChunks ?? [])
     &:last-child {
       padding-bottom: 0;
       border-bottom: none;
+    }
+
+    &--ai-only {
+      grid-template-columns: 1fr auto;
     }
   }
 

@@ -38,7 +38,6 @@ const activeEvaluation = ref<EvaluationDTO | null>(null)
 
 const sessionId = computed(() => String(route.params.id ?? ''))
 const isSupervisor = computed(() => auth.role === 'supervisor')
-const readonly = computed(() => !isSupervisor.value)
 
 function emptyForm(): EvaluationFormModel {
   return {
@@ -81,9 +80,16 @@ const ownEvaluation = computed<EvaluationDTO | null>(() => {
   )
 })
 
-/** 只读角色展示所选中/最新一次评价；督导展示自己的已提交评价 */
+/** 只读角色展示 AI 评价；督导展示自己的已提交评价 */
 const displayedEvaluation = computed<EvaluationDTO | null>(() =>
   isSupervisor.value ? ownEvaluation.value : activeEvaluation.value
+)
+
+const agentScore = computed(() => data.value?.agentScore ?? null)
+
+/** 只读态的上方面板只展示 AI 评价；督导态展示自己的督导评价（督导只写评语）。 */
+const panelEvaluation = computed<EvaluationDTO | null>(() =>
+  isSupervisor.value ? displayedEvaluation.value : agentScore.value
 )
 
 const metaItems = computed(() => {
@@ -104,7 +110,7 @@ const radarItems = computed(() =>
   EVALUATION_DIMENSIONS.map((dimension) => {
     const score = isSupervisor.value
       ? form.value[dimension.key]
-      : displayedEvaluation.value?.[dimension.key] ?? null
+      : panelEvaluation.value?.[dimension.key] ?? null
     return {
       key: dimension.key,
       name: dimension.shortName,
@@ -118,7 +124,7 @@ const dimensionRows = computed(() =>
   EVALUATION_DIMENSIONS.map((dimension) => {
     const score = isSupervisor.value
       ? form.value[dimension.key]
-      : displayedEvaluation.value?.[dimension.key] ?? null
+      : panelEvaluation.value?.[dimension.key] ?? null
     return {
       ...dimension,
       score,
@@ -128,17 +134,32 @@ const dimensionRows = computed(() =>
   })
 )
 
-const displayTotal = computed(() =>
-  displayedEvaluation.value?.totalScore ?? null
-)
+const displayTotal = computed(() => panelEvaluation.value?.totalScore ?? null)
 
-/* 总分色阶着色（totalScore 为 1-5 制，×20 映射到 0-100 色阶域） */
+/* 督导总分是 1-5 制，×20 映射到 0-100 色阶域；AI 总分已是 0-100 */
 const totalToneColor = computed(() =>
-  scoreToneColor(scoreTone(displayTotal.value === null ? null : displayTotal.value * 20))
+  scoreToneColor(
+    scoreTone(
+      displayTotal.value === null
+        ? null
+        : isSupervisor.value
+          ? displayTotal.value * 20
+          : displayTotal.value
+    )
+  )
 )
 
 const supervisorCount = computed(() => data.value?.supervisorScores.length ?? 0)
-const agentScore = computed(() => data.value?.agentScore ?? null)
+
+/** AI 评分标准：维度与权重直接取自前端同一份常量，不另编口径。 */
+const aiStandardDims = computed(() =>
+  EVALUATION_DIMENSIONS.map((dimension) => ({
+    key: dimension.key,
+    name: dimension.name,
+    weight: dimension.weight,
+    isObservation: dimension.isObservation
+  }))
+)
 
 /**
  * 智能体对本次课的文字评价。
@@ -155,8 +176,10 @@ const agentTextItems = computed(() => {
     { label: '改进建议', value: agent.suggestions }
   ].filter((item) => Boolean(item.value && item.value.trim()))
 })
-const formulaVersion = computed(
-  () => displayedEvaluation.value?.formulaVersion ?? data.value?.supervisorScores[0]?.formulaVersion ?? 'v1'
+const formulaVersion = computed(() =>
+  isSupervisor.value
+    ? displayedEvaluation.value?.formulaVersion ?? 'v1'
+    : agentScore.value?.formulaVersion ?? 'v1'
 )
 const media = ref<Awaited<ReturnType<typeof fetchSessionTranscriptApi>>>({ recording: null, transcript: null })
 const mediaLoading = ref(false)
@@ -307,7 +330,6 @@ onUnmounted(() => { if (pollTimer) clearTimeout(pollTimer) })
             </el-tag>
           </div>
         </template>
-        <template #subtitle>当堂课质量评估 · {{ isSupervisor ? '可评分' : '只读' }}</template>
       </PageHeader>
 
       <!-- 场次信息 -->
@@ -318,148 +340,180 @@ onUnmounted(() => { if (pollTimer) clearTimeout(pollTimer) })
         </div>
       </div>
 
-      <!-- 评分数据面板：直观可视 + 信息全面 -->
-      <section class="session-evaluation__panel">
-        <header class="session-evaluation__panel-head">
-          <h2 class="session-evaluation__panel-title">评分数据面板</h2>
-          <span class="session-evaluation__panel-sub">
-            {{ isSupervisor ? '实时反映当前评分' : '当前展示所选评价' }}
-          </span>
-        </header>
-
-        <div class="session-evaluation__panel-body">
-          <div class="session-evaluation__viz">
-            <ScoreRadar :items="radarItems" :max="5" />
-          </div>
-
-          <div class="session-evaluation__bars">
-            <div
-              v-for="row in dimensionRows"
-              :key="row.key"
-              class="session-evaluation__bar"
-            >
-              <div class="session-evaluation__bar-head">
-                <span class="session-evaluation__bar-name">
-                  {{ row.name }}
-                  <el-tag
-                    v-if="row.isObservation"
-                    type="warning"
-                    size="small"
-                    effect="light"
-                    round
-                  >
-                    观测项
-                  </el-tag>
-                  <el-tag v-else type="info" size="small" effect="plain" round>
-                    {{ Math.round(row.weight * 100) }}%
-                  </el-tag>
-                </span>
-                <span class="session-evaluation__bar-value tabular-nums">
-                  {{ row.score === null ? '—' : row.score }}
-                  <em v-if="row.level">{{ row.level }}</em>
-                </span>
-              </div>
-              <div class="session-evaluation__bar-track">
-                <div
-                  class="session-evaluation__bar-fill"
-                  :class="{ 'session-evaluation__bar-fill--observation': row.isObservation }"
-                  :style="{ width: `${row.ratio}%` }"
-                />
-              </div>
+      <!-- 非督导只读：AI 评分标准 + 督导纯文字评语（不含任何督导数字分） -->
+      <template v-if="!isSupervisor">
+        <section class="session-evaluation__panel session-evaluation__ai-standard">
+          <header class="session-evaluation__panel-head">
+            <h2 class="session-evaluation__panel-title">AI 评分标准</h2>
+            <div class="session-evaluation__panel-tags">
+              <AiBadge text="AI 评价" />
+              <span class="session-evaluation__muted">口径 {{ formulaVersion }}</span>
             </div>
-            <p class="session-evaluation__bar-note">
-              「前沿与交叉学科」为观测项，仅作亮点展示，不计入加权总分；基础课不因无前沿内容扣分。
-            </p>
-          </div>
+          </header>
 
-          <div class="session-evaluation__summary">
-            <div class="session-evaluation__total">
-              <span class="session-evaluation__total-label">
-                {{ isSupervisor ? '我的督导总分' : '督导总分' }}
+          <p class="session-evaluation__ai-intro">
+            AI 仅依据已脱敏的课堂转写，对目标与内容、内容深度、学生互动、课堂组织四项加权计分；
+            「前沿与交叉学科」为观测项，不计入总分。评分只用于教学改进，不作为考核依据。
+          </p>
+
+          <ul class="session-evaluation__weights" aria-label="AI 评分维度与权重">
+            <li v-for="dim in aiStandardDims" :key="dim.key" class="session-evaluation__weight">
+              <span class="session-evaluation__weight-name">{{ dim.name }}</span>
+              <span class="session-evaluation__weight-value tabular-nums">
+                {{ dim.isObservation ? '观测项' : `${Math.round(dim.weight * 100)}%` }}
               </span>
-              <span
-                class="session-evaluation__total-value score-num"
-                :style="{ color: displayTotal === null ? undefined : totalToneColor }"
+            </li>
+          </ul>
+
+          <EvaluationCompare :agent="agentScore" hide-supervisor />
+        </section>
+
+        <section class="session-evaluation__card session-evaluation__readonly-comments">
+          <h2 class="session-evaluation__card-title">督导评语</h2>
+          <CommentPanel :items="data.supervisorScores" :loading="false" text-only />
+        </section>
+
+        <section class="session-evaluation__card session-evaluation__readonly-media">
+          <h2 class="session-evaluation__card-title">课堂转写</h2>
+          <p v-if="media.recording" class="session-evaluation__muted">
+            课堂录音已收录（{{ media.recording.originalName }}）；回放仅教学督导可见，
+            你可以查看下方脱敏转写回顾授课内容。
+          </p>
+          <TranscriptViewer :transcript="media.transcript" :loading="mediaLoading" @retry="retryTranscript" />
+        </section>
+      </template>
+
+      <!-- 督导：写评语（流程不变） -->
+      <template v-else>
+        <section class="session-evaluation__panel">
+          <header class="session-evaluation__panel-head">
+            <h2 class="session-evaluation__panel-title">写下本节观察</h2>
+          </header>
+
+          <div class="session-evaluation__panel-body">
+            <div class="session-evaluation__viz">
+              <ScoreRadar :items="radarItems" :max="5" />
+            </div>
+
+            <div class="session-evaluation__bars">
+              <div
+                v-for="row in dimensionRows"
+                :key="row.key"
+                class="session-evaluation__bar"
               >
-                {{ displayTotal === null ? (isSupervisor ? '待提交' : '暂无') : displayTotal.toFixed(2) }}
-              </span>
+                <div class="session-evaluation__bar-head">
+                  <span class="session-evaluation__bar-name">
+                    {{ row.name }}
+                    <el-tag
+                      v-if="row.isObservation"
+                      type="warning"
+                      size="small"
+                      effect="light"
+                      round
+                    >
+                      观测项
+                    </el-tag>
+                    <el-tag v-else type="info" size="small" effect="plain" round>
+                      {{ Math.round(row.weight * 100) }}%
+                    </el-tag>
+                  </span>
+                  <span class="session-evaluation__bar-value tabular-nums">
+                    {{ row.score === null ? '—' : row.score }}
+                    <em v-if="row.level">{{ row.level }}</em>
+                  </span>
+                </div>
+                <div class="session-evaluation__bar-track">
+                  <div
+                    class="session-evaluation__bar-fill"
+                    :class="{ 'session-evaluation__bar-fill--observation': row.isObservation }"
+                    :style="{ width: `${row.ratio}%` }"
+                  />
+                </div>
+              </div>
+              <p class="session-evaluation__bar-note">
+                「前沿与交叉学科」为观测项，仅作亮点展示，不计入加权总分；基础课不因无前沿内容扣分。
+              </p>
             </div>
-            <dl class="session-evaluation__facts">
-              <div>
-                <dt>已评督导</dt>
-                <dd class="tabular-nums">{{ supervisorCount }} 人</dd>
+
+            <div class="session-evaluation__summary">
+              <div class="session-evaluation__total">
+                <span class="session-evaluation__total-label">我的督导总分</span>
+                <span
+                  class="session-evaluation__total-value score-num"
+                  :style="{ color: displayTotal === null ? undefined : totalToneColor }"
+                >
+                  {{ displayTotal === null ? '待提交' : displayTotal.toFixed(2) }}
+                </span>
               </div>
-              <div>
-                <dt>智能体参考</dt>
-                <dd>
-                  <AiBadge v-if="agentScore" text="AI 参考" />
-                  <span v-else class="session-evaluation__muted">阶段②接入</span>
-                </dd>
-              </div>
-              <div>
-                <dt>口径版本</dt>
-                <dd>{{ formulaVersion }}</dd>
-              </div>
-            </dl>
+              <dl class="session-evaluation__facts">
+                <div>
+                  <dt>已评督导</dt>
+                  <dd class="tabular-nums">{{ supervisorCount }} 人</dd>
+                </div>
+                <div>
+                  <dt>智能体参考</dt>
+                  <dd>
+                    <AiBadge v-if="agentScore" text="AI 参考" />
+                    <span v-else class="session-evaluation__muted">暂无 AI 评价</span>
+                  </dd>
+                </div>
+                <div>
+                  <dt>口径版本</dt>
+                  <dd>{{ formulaVersion }}</dd>
+                </div>
+              </dl>
+            </div>
           </div>
-        </div>
-      </section>
+        </section>
 
-      <div class="session-evaluation__grid">
-        <div class="session-evaluation__main">
-          <section class="session-evaluation__card">
-            <h2 class="session-evaluation__card-title">{{ isSupervisor ? '督导观察' : '督导评分' }}</h2>
-            <EvaluationForm
-              v-model="form"
-              :readonly="readonly"
-              :submitting="submitting"
-              :comment-only="isSupervisor"
-              @submit="handleSubmit"
-            />
-          </section>
-        </div>
+        <div class="session-evaluation__grid">
+          <div class="session-evaluation__main">
+            <section class="session-evaluation__card">
+              <h2 class="session-evaluation__card-title">督导观察</h2>
+              <EvaluationForm
+                v-model="form"
+                :readonly="false"
+                :submitting="submitting"
+                comment-only
+                @submit="handleSubmit"
+              />
+            </section>
+          </div>
 
-        <aside class="session-evaluation__side">
-          <section class="session-evaluation__card">
-            <h2 class="session-evaluation__card-title">督导评语</h2>
-            <CommentPanel
-              :items="data.supervisorScores"
-              :loading="false"
-              @select="handleSelectEvaluation"
-            />
-          </section>
+          <aside class="session-evaluation__side">
+            <section class="session-evaluation__card">
+              <h2 class="session-evaluation__card-title">督导评语</h2>
+              <CommentPanel
+                :items="data.supervisorScores"
+                :loading="false"
+                @select="handleSelectEvaluation"
+              />
+            </section>
 
-          <section class="session-evaluation__card">
-            <h2 class="session-evaluation__card-title">智能体参考</h2>
-            <EvaluationCompare :supervisor="displayedEvaluation" :agent="agentScore" />
-            <dl v-if="agentTextItems.length" class="session-evaluation__agent-text">
-              <div v-for="item in agentTextItems" :key="item.label">
-                <dt>{{ item.label }}</dt>
-                <dd>{{ item.value }}</dd>
-              </div>
-            </dl>
-          </section>
+            <section class="session-evaluation__card">
+              <h2 class="session-evaluation__card-title">智能体参考</h2>
+              <EvaluationCompare :supervisor="displayedEvaluation" :agent="agentScore" />
+              <dl v-if="agentTextItems.length" class="session-evaluation__agent-text">
+                <div v-for="item in agentTextItems" :key="item.label">
+                  <dt>{{ item.label }}</dt>
+                  <dd>{{ item.value }}</dd>
+                </div>
+              </dl>
+            </section>
 
-          <section class="session-evaluation__card">
-            <h2 class="session-evaluation__card-title">
-              {{ isSupervisor ? '课堂录音与转写' : '课堂转写' }}
-            </h2>
-            <template v-if="isSupervisor">
+            <section class="session-evaluation__card">
+              <h2 class="session-evaluation__card-title">课堂录音与转写</h2>
               <el-upload :show-file-list="false" accept=".mp3,.wav,.m4a" :before-upload="handleRecording">
                 <el-button type="primary" plain>上传课堂录音</el-button>
               </el-upload>
               <el-progress v-if="uploadProgress > 0 && uploadProgress < 100" :percentage="uploadProgress" />
               <AudioPlayer v-if="media.recording" :src="recordingURL" :name="media.recording.originalName" />
               <BrowserRecorder />
-            </template>
-            <p v-else-if="media.recording" class="session-evaluation__muted">
-              课堂录音已收录（{{ media.recording.originalName }}）；回放仅教学督导可见，
-              你可以查看下方脱敏转写回顾授课内容。
-            </p>
-            <TranscriptViewer :transcript="media.transcript" :loading="mediaLoading" @retry="retryTranscript" />
-          </section>
-        </aside>
-      </div>
+              <TranscriptViewer :transcript="media.transcript" :loading="mediaLoading" @retry="retryTranscript" />
+            </section>
+          </aside>
+        </div>
+      </template>
     </template>
   </div>
 </template>
@@ -727,6 +781,56 @@ onUnmounted(() => { if (pollTimer) clearTimeout(pollTimer) })
     margin-bottom: var(--spacing-4);
     font-size: var(--font-size-xl);
     color: var(--color-text-primary);
+  }
+
+  &__ai-standard {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-4);
+  }
+
+  &__panel-tags {
+    display: flex;
+    gap: var(--spacing-2);
+    align-items: center;
+  }
+
+  &__ai-intro {
+    max-width: 76ch;
+    font-size: var(--font-size-sm);
+    line-height: 1.8;
+    color: var(--color-text-secondary);
+  }
+
+  &__weights {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--spacing-2);
+  }
+
+  &__weight {
+    display: inline-flex;
+    gap: var(--spacing-2);
+    align-items: baseline;
+    padding: 4px 10px;
+    font-size: var(--font-size-xs);
+    background-color: var(--color-bg-page);
+    border: 1px solid var(--color-divider);
+    border-radius: 999px;
+  }
+
+  &__weight-name {
+    color: var(--color-text-secondary);
+  }
+
+  &__weight-value {
+    font-weight: 600;
+    color: var(--color-ai-deep);
+  }
+
+  &__readonly-comments,
+  &__readonly-media {
+    margin-top: var(--spacing-4);
   }
 
   &__placeholder {

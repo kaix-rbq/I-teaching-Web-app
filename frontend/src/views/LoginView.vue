@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, reactive, ref } from 'vue'
+import { reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import type { FormInstance, FormRules } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
@@ -24,21 +24,6 @@ const rules: FormRules<typeof form> = {
 }
 
 const showDemo = import.meta.env.DEV
-
-/* 质量叙事：品牌区字幕轮播（功能本体即说明书） */
-const NARRATIONS = ['督导锚点评分 · 评价有依据', '录音转写参考 · 过程可回看', '督导 × AI 双源融合综合分', 'AI 提优建议 · 让改进有落点']
-const narrationIndex = ref(0)
-let narrationTimer: ReturnType<typeof setInterval> | undefined
-
-onMounted(() => {
-  narrationTimer = setInterval(() => {
-    narrationIndex.value = (narrationIndex.value + 1) % NARRATIONS.length
-  }, 2600)
-})
-
-onUnmounted(() => {
-  if (narrationTimer) clearInterval(narrationTimer)
-})
 
 async function redirectAfterLogin(): Promise<void> {
   const redirect = route.query.redirect
@@ -127,14 +112,6 @@ async function handleDemoLogin(role: Role): Promise<void> {
             <text x="20" y="72">{{ EVALUATION_DIMENSIONS[4].shortName }}</text>
           </g>
         </svg>
-
-        <div class="login__narration" aria-live="polite">
-          <transition name="narration" mode="out-in">
-            <span :key="narrationIndex" class="login__narration-item">
-              {{ NARRATIONS[narrationIndex] }}
-            </span>
-          </transition>
-        </div>
       </div>
     </section>
 
@@ -284,20 +261,6 @@ async function handleDemoLogin(role: Role): Promise<void> {
     }
   }
 
-  &__narration {
-    height: 24px;
-    margin-top: var(--spacing-5);
-    overflow: hidden;
-    text-align: center;
-
-    &-item {
-      display: inline-block;
-      font-size: var(--font-size-base);
-      letter-spacing: 1px;
-      color: rgb(220 231 245 / 88%);
-    }
-  }
-
   &__form-side {
     display: flex;
     flex: 0 0 40%;
@@ -346,7 +309,7 @@ async function handleDemoLogin(role: Role): Promise<void> {
   }
 }
 
-/* 品牌雷达呼吸 + 字幕切换（reduced-motion 下降级） */
+/* 品牌雷达呼吸（reduced-motion 下降级） */
 @keyframes login-radar-breathe {
   0%,
   100% {
@@ -360,24 +323,9 @@ async function handleDemoLogin(role: Role): Promise<void> {
   }
 }
 
-.narration-enter-active,
-.narration-leave-active {
-  transition: opacity 0.36s var(--ease-out-soft);
-}
-
-.narration-enter-from,
-.narration-leave-to {
-  opacity: 0;
-}
-
 @media (prefers-reduced-motion: reduce) {
   .login__radar-shape {
     animation: none;
-  }
-
-  .narration-enter-active,
-  .narration-leave-active {
-    transition: none;
   }
 }
 </style>

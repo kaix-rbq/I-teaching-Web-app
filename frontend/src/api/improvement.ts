@@ -23,7 +23,7 @@ export function updateImprovementApi(id: number, title: string): Promise<Improve
   return request<ImprovementItem>({ url: `/improvement-items/${id}`, method: 'put', data: { title } })
 }
 
-/** 教师自评完成：open → done_self */
+/** 教师自评完成：直接 open → closed（不再经过人工确认）。 */
 export function completeImprovementApi(id: number, doneNote: string): Promise<ImprovementItem> {
   return request<ImprovementItem>({
     url: `/improvement-items/${id}/complete`,
@@ -32,11 +32,7 @@ export function completeImprovementApi(id: number, doneNote: string): Promise<Im
   })
 }
 
-/** 督导确认关闭：done_self → closed */
-export function closeImprovementApi(id: number, note = ''): Promise<ImprovementItem> {
-  return request<ImprovementItem>({
-    url: `/improvement-items/${id}/close`,
-    method: 'put',
-    data: { note }
-  })
+/** 教师删除本人改进项。 */
+export function deleteImprovementApi(id: number): Promise<{ id: number }> {
+  return request<{ id: number }>({ url: `/improvement-items/${id}`, method: 'delete' })
 }

@@ -40,8 +40,8 @@ import type { ScoreTrendSeries, TeacherTimelineItem } from '@/types/teacher'
  * 教学提优页（教师）。
  * 排版原则（避免与「我的质量档案」重复）：
  *   1. 课程基本信息置顶；
- *   2. 「本课程综合评分」：五维双源横向柱条（增长动画）+ 综合分雷达；
- *   3. 督导评语流 / 智能体提优建议 / 分数趋势自上而下；
+ *   2. 「本课程综合评分」：AI 五维柱条（增长动画）+ 综合分雷达；
+ *   3. 督导评语流（纯文字）/ 智能体提优建议 / 分数趋势自上而下；
  *   4. 资源管理入口置于页面最下方。
  */
 const route = useRoute()
@@ -98,17 +98,16 @@ const summaryItems = computed(() => {
 const compositeScore = computed(() => courseSummary.value?.compositeScore ?? null)
 const compositeColor = computed(() => scoreToneColor(scoreTone(compositeScore.value)))
 
-/** 五维双源柱条：每维督导 / AI 两条，宽度为 0-100 分。 */
+/** 五维柱条：只保留 AI 单条，宽度为 0-100 分。 */
 const dimensionRows = computed(() =>
   EVALUATION_DIMENSIONS.map((meta) => {
     const dim = courseSummary.value?.dimensions.find((item) => item.key === meta.key)
+    const agentScore = dim?.agentScore ?? dim?.score ?? null
     return {
       ...meta,
-      supervisorScore: dim?.supervisorScore ?? null,
-      agentScore: dim?.agentScore ?? null,
+      agentScore,
       score: dim?.score ?? null,
-      supervisorRatio: barsReady.value ? Math.max(0, Math.min(100, dim?.supervisorScore ?? 0)) : 0,
-      agentRatio: barsReady.value ? Math.max(0, Math.min(100, dim?.agentScore ?? 0)) : 0
+      agentRatio: barsReady.value ? Math.max(0, Math.min(100, agentScore ?? 0)) : 0
     }
   })
 )
@@ -117,9 +116,7 @@ const courseRadarItems = computed(() =>
   (courseSummary.value?.dimensions ?? []).map((dim) => ({
     key: dim.key,
     name: EVALUATION_DIMENSIONS.find((item) => item.key === dim.key)?.shortName ?? dim.name,
-    score: dim.score,
-    supervisorScore: dim.supervisorScore,
-    agentScore: dim.agentScore,
+    score: dim.agentScore ?? dim.score,
     isObservation: dim.isObservation
   }))
 )
@@ -293,7 +290,7 @@ onMounted(async () => {
           </el-tag>
         </div>
       </template>
-      <template #subtitle>本课程提优 · 督导评分与 AI 建议双源驱动</template>
+      <template #subtitle>本课程提优，AI 评分与提优建议并列呈现</template>
       <template #actions>
         <el-select
           v-model="semester"
@@ -349,15 +346,12 @@ onMounted(async () => {
         </div>
       </section>
 
-      <!-- 2. 本课程综合评分：五维双源柱条（增长动画） + 综合分雷达 -->
+      <!-- 2. 本课程综合评分：五维对照柱条（增长动画） + 综合分雷达 -->
       <section class="course-improve__score">
         <div class="course-improve__score-main">
           <div class="course-improve__score-head">
             <h2 class="course-improve__section-title">您在当前课程获得的综合评分</h2>
             <div class="course-improve__legend">
-              <span class="course-improve__legend-item">
-                <i class="course-improve__swatch course-improve__swatch--sup" />督导评价
-              </span>
               <span class="course-improve__legend-item">
                 <i class="course-improve__swatch course-improve__swatch--ai" />AI 智能体评价
               </span>
@@ -378,19 +372,6 @@ onMounted(async () => {
                 </span>
                 <span class="course-improve__dim-score tabular-nums">
                   {{ formatScore(row.score) }}
-                </span>
-              </div>
-
-              <div class="course-improve__bar-row">
-                <span class="course-improve__bar-label">督导</span>
-                <div class="course-improve__bar-track">
-                  <i
-                    class="course-improve__bar-fill course-improve__bar-fill--sup"
-                    :style="{ width: `${row.supervisorRatio}%` }"
-                  />
-                </div>
-                <span class="course-improve__bar-value tabular-nums">
-                  {{ formatScore(row.supervisorScore) }}
                 </span>
               </div>
 
