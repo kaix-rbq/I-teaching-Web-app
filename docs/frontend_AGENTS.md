@@ -22,7 +22,7 @@
 >
 > **重构已落地的前端变更（本轮）**：① 草稿箱路由 `/drafts` 与侧边栏入口删除（`EvaluationForm` 移除「保存草稿」，提交改 `PUT /sessions/:id/supervisor-observation`）；② 督导侧边栏补「听评课管理」（`/supervision`，N12）；③ 评估页督导态 `EvaluationForm` 以 `comment-only` 渲染（无五维刻度，只留评语，B8）；④ 录音区新增 `BrowserRecorder` 浏览器录音**演示占位**（禁用、不调接口，R2.4/B5）；⑤ 新增 `/teachers/:id/report` 一页纸报告打印视图（`TeacherReportView`，N9）；⑥ 顶栏新增 DEV 可见「载入演示数据」按钮（`POST /demo/seed`，B6/N7）。
 >
-> **重构已落地的前端变更（提优闭环批次）**：⑦ 新增 `/improvements`（教师自评 / 督导确认关闭，含关联反思只读弹窗）、`/reflections`（教师反思 CRUD）、`/notifications`（站内信）三页；⑧ 顶栏新增站内信铃铛 + 未读红点（`el-badge`，进详情自动已读 → 红点收敛）；⑨ 督导侧边栏新增「改进清单」，教师侧边栏新增「改进清单 / 教学反思」；⑩ 督导工作台「草稿箱」区块替换为**抽样复评队列**（`GET /supervision/ai-tasks?pending=1`，B2/T1）；⑪ 教师工作台 `/me/quality` 追加「待改进清单」与「督导意见与 AI 观察」双源并置区块。动画统一走 `styles/base.scss` 的 `.anim-rise`（带 `--stagger` 级联）与 `.anim-grow-x`，`prefers-reduced-motion` 下禁用。
+> **重构已落地的前端变更（提优闭环批次）**：⑦ 新增 `/improvements`（教师自评 / 督导确认关闭，含关联反思只读弹窗）、`/reflections`（教师反思 CRUD）、`/notifications`（站内信）三页；⑧ 顶栏新增站内信铃铛 + 未读红点（`el-badge`，进详情自动已读 → 红点收敛）；⑨ 督导侧边栏新增「改进清单」，教师侧边栏新增「改进清单 / 教学反思」；⑩ 督导工作台「草稿箱」区块替换为**抽样复评队列**（`GET /supervision/ai-tasks?pending=1`，B2/T1）；⑪ 教师质量档案 `/me/quality` 追加「待改进清单」与「AI 观察与待改进」区块。动画统一走 `styles/base.scss` 的 `.anim-rise`（带 `--stagger` 级联）与 `.anim-grow-x`，`prefers-reduced-motion` 下禁用。
 
 ---
 
@@ -31,7 +31,7 @@
 > 本次更新对既有页面做了**破坏性重排**（以可读性/职责单一为准，规范从宽）。要点：
 >
 > 1. **登录页 `LoginView`**：品牌雷达五轴标注维度名称；移除雷达下方「教研室主任·director / 教师·teacher / 教学督导·supervisor」角色图例；登录后默认落点由 `defaultRouteName(role)` 决定（教师 → `/me/quality`，其余 → `/dashboard`）。
-> 2. **教师端**：**删除「质量驾驶舱」**（与质量档案重复），`/me/quality` 为登录后首页；侧边栏为「我的质量档案 / 我的课程 / 个人中心」。质量档案第三卡由「本学期样本」改为 **「提优分析」**（可提优方向 + 提优建议，AI 预留接口）；删除「全部评价流」「AI 提优建议摘要」；新增 **「授课快照」**（逐次授课卡片，色条对应质量水平，高分标亮点、低分标不足）。
+> 2. **教师端**：**删除「质量驾驶舱」**（与质量档案重复），`/me/quality` 为登录后首页；侧边栏为「我的质量档案 / 我的课程 / 个人中心」。`/me/quality` 重排为**纵向叙事**「AI 评价总览（单环仪表 + 样本口径 + 五维评分）→ 我的课程评分明细 → 授课快照 → 待改进清单 → AI 观察与待改进」；删除「全部评价流」「AI 提优建议摘要」，并删除无真实接口的「提优分析」示例卡。
 > 3. **提优页 `CourseImproveView`**：重排为「课程信息置顶 → 五维双源横向柱条（增长动画）+ 综合雷达 → 督导评语流 → 智能体提优建议 → 分数趋势 → 课程资源置底」，删除与质量档案重复的罗盘/样本/教师级五维区块。
 > 4. **督导端**：「质量驾驶舱」改 **「工作台」**：删除四个统计卡与覆盖率图表；保留 **待评课队列**（今日/本周/本月/**未评**按钮切换）；**评估入口按日期闸门**——`plannedDate <= 今天` 且未评估显示「去评估」（无授课记录先建档），未来课次仅预览不开放评估；「未评」列出已过日期未评课的记录便于补录；工作台右上角新增 **新增授课记录**（替代教务录入），并新增 **待评估授课记录** 区块；新增 **草稿箱**（最近三次 + 更多>>）与 `/drafts` 页面（按课程名查询、编辑/提交/删除）；评估页新增 **保存草稿**。侧边栏精简为「工作台 / 草稿箱 / 个人中心」，删除「全校课程库」「课堂评估」等入口。
 > 5. **契约同步**：新增接口 `GET/PUT /sessions/:id/draft`、`GET /drafts`、`DELETE /drafts/:id`、`POST /drafts/:id/submit`；`GET /dashboard` 督导 DTO 改为 `recentPlans + recentDrafts`；`PlanItem` 新增 `sessionId`；seed 扩充为多教师/多课程/多记录且 AI 评分覆盖五维。
@@ -320,10 +320,11 @@ frontend/                       # 包名 aijiaoxue-web
     │   │   ├── ScheduleTable.vue
     │   │   └── EvaluationQueue.vue     # 督导待评课队列
     │   ├── evaluation/
-    │   │   ├── ScoreRadar.vue           # 五维雷达/条形（支持督导/AI 双源）
-    │   │   ├── ScoreDimensionsCard.vue  # 五维评分卡（雷达 + 维度条）
+    │   │   ├── ScoreRadar.vue           # 五维雷达（单源：AI 评价 / 评分表单），tone 控制语义色
+    │   │   ├── ScoreDimensionsCard.vue  # 五维评分卡（AI 雷达 + 维度条，雷达左/读数右）
     │   │   ├── ScoreHeatmap.vue         # 教师 × 五维质量热力
-    │   │   ├── QualityCompass.vue       # 双源罗盘（综合分签名图形）
+    │   │   ├── AiScoreHero.vue          # AI 评价总览横带（单环仪表 + 样本口径读数）
+    │   │   ├── QualityCompass.vue       # AI 单源罗盘（综合分签名图形）
     │   │   ├── AnchorScale.vue          # 锚点刻度条（评分表单控件）
     │   │   ├── EvaluationForm.vue       # 督导评分表单
     │   │   ├── EvaluationCompare.vue    # 督导 vs 智能体对比
@@ -466,7 +467,7 @@ frontend/                       # 包名 aijiaoxue-web
 /dashboard  质量驾驶舱：统计卡带（GET /dashboard）+ 本室质量热力 + 重点关注 + 快捷操作
    ├─▶ /courses（课程库）
    └─▶ /teachers  教师画像（GET /teacher-scores）｜综合分｜5维分｜评价次数 n
-         └─▶ /teachers/:id  教师画像详情（TeacherScorePanel：双源罗盘 + 五维卡 + 样本与口径 + 课程明细 + 评价时间线）
+         └─▶ /teachers/:id  教师画像详情（TeacherScorePanel：AI 评价总览（单环仪表 + 样本口径）+ 五维评分 + 课程明细 + 评价时间线）
                └─▶ /courses/:id ─▶ 历史授课记录 ─▶ /sessions/:id/evaluation（只读）
 ```
 
@@ -486,7 +487,7 @@ frontend/                       # 包名 aijiaoxue-web
 
 **③ 教师**
 ```
-/me/quality  我的质量档案（登录后首页；人视角：综合分 + 五维 + 提优分析 + 课程明细 + 授课快照）
+/me/quality  我的质量档案（登录后首页；人视角：AI 评价总览 + 五维评分 + 课程明细 + 授课快照 + 待改进 / AI 观察）
    ├─▶ /courses/:id/improve  教学提优（课程视角：课程信息置顶 + 五维双源柱条/雷达 + 评语流 + AI 建议/趋势 + 资源置底）
    └─▶ /sessions/:id/evaluation  授课快照「查看详细记录」：只读督导评分 + AI 评价 + 脱敏转写
 ```
@@ -603,7 +604,7 @@ Tabs：
 ```
 PageHeader：返回 + 课程名称 + 课程编码 Tag + 状态 Tag
 信息条：教研室 | 授课教师 | 学期 | 开课班级数 | 学生人次
-综合评分区：本课程当前综合评分（督导分 / AI 分 / 综合分）+ ScoreDimensionsCard 五维双源 + 样本卡
+综合评分区：本课程当前综合评分（督导分 / AI 分 / 综合分）+ ScoreDimensionsCard 五维评分（AI 单源）+ 样本卡
 历史授课记录区：日期 | 节次 | 主题 | 状态 Tag | 督导分 | 智能体分 | 已评次数 | 操作
 分页器（右下，10/20/50 条每页）
 ```
@@ -662,18 +663,19 @@ FilterBar：学期下拉 · 教研室下拉（督导可按教研室筛选）· �
 ```
 PageHeader：教师姓名 + RoleTag/工号 + 学期选择 + 返回
 伦理提示 el-alert：「仅用于教学支持，不作为考核依据」
-TeacherScorePanel（summary + timeline 一次传入）：
-  三卡横排：① 综合分 · 双源罗盘（QualityCompass，size=lg）
-            ② 五维雷达（ScoreDimensionsCard，督导/AI 双源叠加 + 权重徽章）
-            ③ 样本与口径（evaluatedCount/sessionCount、督导·AI 计数、alignedCount、融合权重、formulaVersion、flags 提示条）
-  按课程明细：课程编码 | 课程名称 | 综合分 | 各维度分 | 评价次数（行可点击）
-  历次评价时间线：EvaluationTimeline（竖线 + 课次徽章 + 分数色阶节点；督导评语分色 + AI 评价）
+TeacherScorePanel（summary + timeline 一次传入，纵向四段）：
+  ① AI 评价总览（AiScoreHero）：AI 单环罗盘（QualityCompass，size=lg；主分取 agentScore）
+     + 样本口径读数（AI 已评 agentCount、口径版本 formulaVersion、样本充足性）+ flags 警示条
+  ② 五维评分（ScoreDimensionsCard：AI 单源雷达 + 维度条权重徽章）
+  ③ 按课程明细：课程编码 | 课程名称 | 综合分（取 AI 分）| 各维度分 | 评价次数（行可点击）
+  ④ 历次评价时间线：EvaluationTimeline（竖线 + 课次徽章 + 分数色阶节点；督导评语分色 + AI 评价）
 ```
 
 - 数据源：面板汇总 `GET /teachers/:id/evaluation-summary?semester=`；**历次评价时间线 `GET /teachers/:id/evaluations?semester=&page=&pageSize=`**（一次拉取即含督导评语与智能体参考，**禁止**逐场调 `/sessions/:id/evaluation` 拼时间线）；
 - **数字一致性**：本页综合分与教师端 `/courses/:id/improve` 的综合分必须逐位相同（同一聚合函数），前端不得做任何四舍五入差异处理，直接展示后端返回值；
 - 必须展示 `sample`：`sessionCount / evaluatedCount / supervisorCount / agentCount / alignedCount`，其中 `sampleSufficient` 以 **`evaluatedCount`** 为准；
-- `flags` 必须显式渲染为提示条（如 `no_data` → 「暂无评价」、`sample_insufficient` → 「样本不足」、`disjoint` → 「督导与智能体评价尚未对齐，当前分数代表性有限」、`formula_mixed` → 「口径版本混杂」）；
+- `flags` 必须显式渲染为提示条（如 `no_data` → 「暂无评价」、`sample_insufficient` → 「样本不足」、`disjoint` → 「样本不足，当前分数代表性有限」、`formula_mixed` → 「口径版本混杂」）；
+- **AI 唯一评分源**：本页所有分数图表与综合分取 `agentScore`（AI 未评时回退后端综合分），彻底不展示督导分数标注；
 - 「按课程明细」行可跳到对应课程详情（再进历史授课记录）。
 
 ### 7.10 SessionEvaluationView 当堂课质量评估页（S6.3 / S7.1 / S7.2，T1.11 / T2.7 / T2.8）
@@ -764,21 +766,22 @@ PageHeader：返回 + 课程名称 + 课程编码/状态 + 学期选择
 > 教师的「质量主页」与**登录后首页**（教师端不再有质量驾驶舱）。数据全部来自教师查本人接口，只读。
 
 ```
-PageHeader：「我的质量档案」+ 副标题「督导与 AI 双源融合的教学质量全景 · 当前学期口径」
+PageHeader：「我的质量档案」+ 副标题「AI 评价 · 当前学期口径（{{ semester }}）」
 伦理提示 el-alert：「仅用于教学支持，不作为考核依据」
-三卡横排：
-  ① 我的综合分 —— QualityCompass（size=lg）+ flags 提示条
-  ② 五维评分 —— ScoreDimensionsCard（雷达双源叠加 + 维度条）
-  ③ 提优分析 ——「可提优方向 / 提优建议」两分区 + AiBadge「AI 生成」（当前为示例文本 + `AI · 示例` Tag）
-我的课程评分明细：课程编码 | 课程名称 | 综合分（null → 「暂无评价」）| QualityBadge | n=evaluatedCount | 「去提优 →」
-授课快照：逐次授课卡片（按时间倒序），左侧色条颜色 = 综合分质量水平；
-          高分标「亮点」、低分标「主要不足」（取督导评语，缺省回退 AI 评语），每卡「查看详细记录 →」
+纵向叙事（AI 唯一评分源）：
+  ① AI 评价总览 —— AiScoreHero：AI 单环罗盘（QualityCompass，size=lg；主分取 agentScore）
+     + 样本口径读数（AI 已评 agentCount、口径版本 formulaVersion、样本充足性）+ flags 警示条
+  ② 五维评分 —— ScoreDimensionsCard（AI 单源雷达 + 维度条）
+  ③ 我的课程评分明细 —— 课程编码 | 课程名称 | 综合分（取 AI 分；null → 「暂无评价」）| QualityBadge | n=evaluatedCount | 「去提优 →」
+  ④ 授课快照 —— 逐次授课卡片（按时间倒序），左侧色条颜色 = AI 分质量水平；
+       高分标「亮点」、低分标「主要不足」（取 AI 观察；无观察时不渲染空提示），每卡「查看详细记录 →」
+  ⑤ 待改进清单 —— 教师自评 → 督导确认（openImprovements 取前 5）
+  ⑥ AI 观察与待改进 —— 近三次课后 AI 观察 + 待改进；督导纯文字评语作为补充保留
 ```
 
 - 数据源：`GET /teachers/:id/evaluation-summary?semester=`（`id` = 当前登录用户，`fetchTeacherSummaryApi`）+ `GET /teachers/:id/evaluations?semester=&pageSize=50`（授课快照，`fetchTeacherEvaluationsApi`）（`frontend/src/views/ProfileQualityView.vue:66-91`）；
 - 「去提优 →」跳 `/courses/:id/improve`；**授课快照「查看详细记录 →」跳 `/sessions/:id/evaluation`**（`ProfileQualityView.vue:93-103`），展示该次课的督导评分（只读）与 AI 智能体评价，并提供当堂课脱敏转写入口；
-- 第三卡「提优分析」当前为**页面内示例文本**（`ProfileQualityView.vue:46-55`，注释明确「预留 AI 接口，当前为示例文本」），不是真实 AI 输出；
-- 只读，无编辑态控件；综合分为 `null` 显示「暂无评价」，**不得显示 0**；
+- 分数一律取 AI 评价（`agentScore`，AI 未评时回退后端综合分），不再展示督导分数标注；`null` 显示「暂无评价」，**不得显示 0**；
 - 主任/督导无此路由与菜单（他们走 `/teachers/:id`）。
 
 ### 7.14 DraftBoxView 草稿箱（督导，`/drafts`，v1.2 新增）
@@ -837,9 +840,10 @@ FilterBar：按课程名称查询（keyword）+ 重置
 
 | 组件 | Props（概要） | 职责 | 对应故事 | 阶段 |
 |------|--------------|------|---------|------|
-| ScoreRadar | `items: RadarItem[], max?, loading?` | 五维条形/雷达；`RadarItem` 支持 `supervisorScore/agentScore` 双源叠加；`isObservation` 维度单独作亮点标记 | S6.5 / S6.6 | ① |
-| QualityCompass | `summary: ScoreSummary\|null, size?: 'lg'\|'md'\|'sm', loading?, title?` | 双源罗盘：综合分 + 等级徽章 + 双弧 + 样本 + flags；`null` → 灰环「暂无评价」 | S6.5 / S6.6 | v1.0 |
-| ScoreDimensionsCard | `summary: ScoreSummary\|null, title?` | 五维评分卡（雷达双源叠加 + 维度条权重徽章） | S6.5 / S6.6 | v1.0 |
+| ScoreRadar | `items: RadarItem[], max?, loading?, tone?: 'primary'\|'ai'` | 五维雷达（单源）；`isObservation` 维度单独作亮点标记；`tone='ai'` 时以 AI 语义色渲染并显示「AI 评价」图例 | S6.5 / S6.6 | ① |
+| QualityCompass | `summary: ScoreSummary\|null, size?: 'lg'\|'md'\|'sm', loading?, title?` | AI 单源罗盘：AI 综合分 + 等级徽章 + 单主环（弧线进场生长）+ 样本 + flags；`null` → 灰环「暂无 AI 评价」 | S6.5 / S6.6 | v1.0 |
+| AiScoreHero | `summary: ScoreSummary\|null, loading?, semester?` | AI 评价总览横带：单环仪表 + 样本口径读数 + flags 警示（画像 / 质量档案首屏） | S6.5 / S6.6 | v1.3 |
+| ScoreDimensionsCard | `summary: ScoreSummary\|null, title?` | 五维评分卡（AI 单源雷达 + 维度条权重徽章；宽屏雷达左 / 读数右） | S6.5 / S6.6 | v1.0 |
 | ScoreHeatmap | `teachers: TeacherScoreItem[], loading?` + `@select` | 教师 × 五维质量热力（主任驾驶舱；点行下钻教师画像） | S6.4 | v1.0 |
 | AnchorScale | `dimensionKey, dimensionName, modelValue, readonly?, compact?` + `@update:modelValue` | 锚点刻度条（1–5 五档 + 锚点 tooltip，原生 radio） | S6.3 | v1.0 |
 | EvaluationForm | `readonly?, submitting?, showDraft?, draftSaving?` + `@submit/@save-draft` | 5 维锚点评分 + 结构化评语；`readonly` 时禁用 | S6.3 | ① |
@@ -863,8 +867,8 @@ FilterBar：按课程名称查询（keyword）+ 重置
 | 组件 | Props（概要） | 职责 | 对应故事 | 阶段 |
 |------|--------------|------|---------|------|
 | TeacherScoreTable | `rows: TeacherScoreItem[], loading?` + `@view` | 教师列表：综合分、5 维分、评价次数 n、样本不足标记；默认按姓名排序 | S6.4 | ① |
-| TeacherScoreCard | `item: TeacherScoreItem` + `@view` | 教师质量卡片（罗盘缩略 + 五维迷你条 + 样本徽章），画像列表默认视图 | S6.4 | v1.0 |
-| TeacherScorePanel | `summary: TeacherSummary\|null, timeline, loading?, timelineLoading?` + `@select-course` | 教师画像详情面板：三卡（双源罗盘 + 五维卡 + 样本与口径）+ 按课程明细 + 历次评价时间线 | S6.5 | ① |
+| TeacherScoreCard | `item: TeacherScoreItem` + `@view` | 教师质量卡片（AI 单环罗盘缩略 + 五维迷你条 + 样本徽章），画像列表默认视图 | S6.4 | v1.0 |
+| TeacherScorePanel | `summary: TeacherSummary\|null, timeline, loading?, timelineLoading?` + `@select-course` | 教师画像详情面板：AI 评价总览（单环仪表 + 样本口径）+ 五维评分 + 按课程明细 + 历次评价时间线 | S6.5 | ① |
 
 ### 8.7 组件编写规则
 
@@ -886,14 +890,14 @@ FilterBar：按课程名称查询（keyword）+ 重置
 
 ```
    测            融              察              提
-（督导锚点评分）（督导×AI 双源融合）（质量全景下钻）（AI 建议 + 对话）
+（督导锚点评分）（综合分聚合）（质量画像下钻）（AI 建议 + 对话）
       └────── 场次级 ──────┘        │               │
               └──── 课程级 ────────┤               │
                      └──── 教师级 ─┴── 趋势 ────────┘
 ```
 
 - **测**：当堂课评估页是系统的「核心动作页」，锚点刻度可视化（§9.0 / §8.4 `AnchorScale`）；
-- **融**：综合分永远是「督导 × AI 双源罗盘」图形（`QualityCompass`），而不是一个裸数字；
+- **融**：综合分在教师画像 / 质量档案以「AI 单源罗盘」（`QualityCompass`）显形，而不是一个裸数字（后端综合分的加权口径不变，仅画像链路不再展示督导分数标注）；
 - **察**：主任工作台以质量热力（`ScoreHeatmap`）/ 待评队列为主角（§7.3）；
 - **提**：教师端首屏直达「我的质量档案」与 AI 提优建议，AI 视觉全链路可识别。
 
@@ -901,7 +905,7 @@ FilterBar：按课程名称查询（keyword）+ 重置
 
 | 签名 | 图形 | 出现位置 | 传达的信息 |
 |------|------|---------|-----------|
-| **① 双源罗盘** | 内外双弧（督导弧·靛蓝 `#2F54EB` + AI 弧·亮紫 `#8B5CF6`）+ 中心综合分大数字 | 所有综合分展示位（工作台、评估页、教师画像、质量档案、提优页、课程快照） | 「分数 = 人 + AI 双源融合」，一眼看懂可信度结构 |
+| **① AI 单源罗盘** | 单一主环（AI 亮紫 `#8B5CF6`，10px）+ 中心综合分大数字 | 教师画像 / 质量档案 / 教师列表卡片 / 课程快照 | 「画像链路的综合分只采纳 AI 评价」，一眼看到样本口径与可信度 |
 | **② 质量色阶 + 等级徽章** | 5 级色带（红→琥珀→绿）+「优秀/良好/合格/待改进/需干预」徽章 `QualityBadge` | 全部评分数字、维度条、热力图、状态流 | 分数可读化：不用记数值也知道好坏，色阶即品牌 |
 | **③ AI 视觉语言（琥珀紫）** | 四芒星徽标 `AiBadge` + `--gradient-ai` 亮紫渐变 + 浅紫虚线卡 + 流式光标 | AI 参考卡、AI 建议、AI 对话、转写区 | 「这是 AI 的产出，可参考、可追溯」，人机分工可视化 |
 
@@ -948,7 +952,7 @@ FilterBar：按课程名称查询（keyword）+ 重置
 | | `--color-ink-3` | `#1F3A5F` | 菜单激活底、深色内描边 |
 | | `--color-ink-text` | `#DCE7F5` | 侧栏主文字 |
 | | `--color-ink-text-dim` | `#8FA3BF` | 侧栏次级文字 |
-| AI 视觉色 | `--color-ai` | `#8B5CF6` | AI 锚点色（徽标、AI 弧、AI 文字强调） |
+| AI 视觉色 | `--color-ai` | `#8B5CF6` | AI 锚点色（徽标、罗盘主环、AI 文字强调） |
 | | `--color-ai-bright` | `#A855F7` | AI 徽标亮紫、悬停、流式光标 |
 | | `--color-ai-deep` | `#6D28D9` | AI 描边、按下 |
 | | `--color-ai-bg` | `#F6F3FF` | AI 卡片浅底 |
@@ -985,7 +989,7 @@ FilterBar：按课程名称查询（keyword）+ 重置
 
 // 评分数字专用（tokens.scss「评分数字字体与字号」组）
 --font-score: 'Bahnschrift', 'DIN Alternate', 'Segoe UI', sans-serif; // 系统自带 DIN 风，零依赖兜底
---font-size-score-xl: 40px;  // 双源罗盘中心综合分
+--font-size-score-xl: 40px;  // AI 单源罗盘中心综合分
 --font-size-score-lg: 28px;  // StatCard 级评分
 --font-size-score-md: 20px;  // 维度条端数字
 ```
@@ -1045,9 +1049,9 @@ FilterBar：按课程名称查询（keyword）+ 重置
 
 | 动效 | 参数 | 场景 | reduced-motion 降级 |
 |------|------|------|-------------------|
-| 数字进场 count-up | 600ms ease-out（`--duration-count`），一次/进页 | 双源罗盘综合分、驾驶舱关键数字 | 直接显示终值 |
+| 数字进场 count-up | 600ms ease-out（`--duration-count`），一次/进页 | AI 单源罗盘综合分、驾驶舱关键数字 | 直接显示终值 |
 | 雷达展开 | 400ms（`--duration-mid`），从中心放散 | `ScoreRadar` 挂载 | 直接显示 |
-| 罗盘弧生长 | 500ms `stroke-dashoffset` | `QualityCompass` 挂载 | 直接显示 |
+| 罗盘弧生长 | 未单独实现（综合分随 count-up 显形） | — | 直接显示 |
 | 五维双源柱条增长 | `width` 过渡（`--duration-mid`） | 教学提优页评分区 | 直接显示 |
 | 转写波形呼吸 | 2s 无限循环，仅 opacity | `TranscriptViewer` `pending/running` | 静态占位 |
 | AI 流式光标 | 800ms 闪烁（光标色 `--color-ai-bright`） | `AgentChat` streaming | 常亮下划线 |

@@ -1,25 +1,20 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 import dayjs from 'dayjs'
 import type { SupervisionPlan } from '@/types/supervision'
-import { formatDate } from '@/utils/format'
-import EmptyState from '@/components/common/EmptyState.vue'
 
 /**
- * 督导待评课队列（工作台核心组件）。
- * 通过「今日 / 本周 / 本月 / 未评」按钮切换卡片内容：
- *   - 评估入口按授课日期闸门控制：**未来课次仅预览（不开放评估）**；
- *     到达/超过授课日期后自动暴露「去评估」（未建档则「创建授课记录并评估」）；
- *   - 「未评」专门列出**已过授课日期且尚未评价**的记录（不含今日），便于补录过去课程评分；
- *   - **已评估的听评课安排一律不再出现**：提交评分后授课记录状态变为 evaluated，
- *     从本队列清除，改由「课程列表 → 课程综合评分 → 历史授课记录」查看。
+ * 督导待评安排台账行。
+ * 只负责把一组听评课安排排成时间轨行；今日、未来、补录的分组由工作台决定。
+ * 未来课次不开放评估入口，已评估课次不会出现在传入的 plans 中。
  */
 const props = withDefaults(
   defineProps<{
     plans: SupervisionPlan[]
     loading?: boolean
+    emptyText?: string
   }>(),
-  { loading: false }
+  { loading: false, emptyText: '暂无待评安排' }
 )
 
 const emit = defineEmits<{
@@ -27,56 +22,36 @@ const emit = defineEmits<{
   evaluate: [plan: SupervisionPlan]
 }>()
 
-type RangeKey = 'day' | 'week' | 'month' | 'pending'
+const WEEK_LABELS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
 
-const range = ref<RangeKey>('day')
-
-const RANGES: { key: RangeKey; label: string }[] = [
-  { key: 'day', label: '今日' },
-  { key: 'week', label: '本周' },
-  { key: 'month', label: '本月' },
-  { key: 'pending', label: '未评' }
-]
-
-const rangedPlans = computed<SupervisionPlan[]>(() => {
-  const today = dayjs()
-  return props.plans
-    .filter((plan) => {
-      // 已评估 → 已从待评课队列清除（不在主工作台展示）
-      if (plan.evaluated) return false
-      const date = dayjs(plan.plannedDate)
-      if (range.value === 'day') return date.isSame(today, 'day')
-      if (range.value === 'week') return date.isSame(today, 'week')
-      if (range.value === 'month') return date.isSame(today, 'month')
-      // 未评：已过授课日期（严格早于今天，不与「今日」重合）且尚未评估
-      return date.isBefore(today, 'day')
-    })
-    .sort((a, b) => dayjs(a.plannedDate).valueOf() - dayjs(b.plannedDate).valueOf())
-})
-
-const pendingCount = computed(() => rangedPlans.value.length)
-
-const emptyText = computed(() => {
-  if (range.value === 'pending') return '暂无已过日期且未评课的记录'
-  return `${RANGES.find((r) => r.key === range.value)?.label}暂无待评课安排`
-})
-
-/** 授课日期是否已到达/超过（date <= 今天）——未来课程不开放评估入口 */
-function isReached(plan: SupervisionPlan): boolean {
-  return !dayjs(plan.plannedDate).isAfter(dayjs(), 'day')
-}
+const sortedPlans = computed(() =>
+  props.plans
+    .filter((plan) => !plan.evaluated)
+    .slice()
+    .sort((left, right) => dayjs(left.plannedDate).valueOf() - dayjs(right.plannedDate).valueOf())
+)
 
 function isFuture(plan: SupervisionPlan): boolean {
   return dayjs(plan.plannedDate).isAfter(dayjs(), 'day')
 }
 
-/** 到达/超过授课日期且未评估：暴露「去评估」入口（未来课次仅预览） */
-function canEvaluateEntry(plan: SupervisionPlan): boolean {
-  return isReached(plan) && !plan.evaluated
+function isPast(plan: SupervisionPlan): boolean {
+  return dayjs(plan.plannedDate).isBefore(dayjs(), 'day')
 }
 
-/** 无授课记录时先创建再评估；已有记录直接进入评估页 */
+function dateText(value: string): string {
+  const date = dayjs(value)
+  return `${date.format('MM-DD')} ${WEEK_LABELS[date.day()]}`
+}
+
+function statusText(plan: SupervisionPlan): string {
+  if (isFuture(plan)) return '未开始'
+  if (isPast(plan)) return '待补录'
+  return '待评估'
+}
+
 function handleEvaluateClick(plan: SupervisionPlan): void {
+  if (isFuture(plan)) return
   if (plan.sessionId === null) {
     emit('create', plan)
   } else {
@@ -87,59 +62,37 @@ function handleEvaluateClick(plan: SupervisionPlan): void {
 
 <template>
   <div class="evaluation-queue">
-    <div class="evaluation-queue__tabs">
-      <button
-        v-for="item in RANGES"
-        :key="item.key"
-        type="button"
-        class="evaluation-queue__tab"
-        :class="{ 'evaluation-queue__tab--active': range === item.key }"
-        @click="range = item.key"
-      >
-        {{ item.label }}
-      </button>
-      <span class="evaluation-queue__summary">待评 {{ pendingCount }} 条</span>
-    </div>
+    <el-skeleton v-if="loading" :rows="4" animated />
 
-    <el-skeleton v-if="loading" :rows="5" animated />
-
-    <template v-else-if="rangedPlans.length">
+    <template v-else-if="sortedPlans.length">
       <ul class="evaluation-queue__list">
-        <li v-for="plan in rangedPlans" :key="plan.id" class="evaluation-queue__item">
-          <span class="evaluation-queue__date">
-            {{ formatDate(plan.plannedDate, 'MM-DD') }}
-          </span>
+        <li v-for="plan in sortedPlans" :key="plan.id" class="evaluation-queue__item">
+          <span class="evaluation-queue__date">{{ dateText(plan.plannedDate) }}</span>
           <span class="evaluation-queue__course" :title="plan.courseName">
             {{ plan.courseName }}
           </span>
           <span class="evaluation-queue__teacher">{{ plan.teacherName }}</span>
-          <el-tag
-            class="evaluation-queue__status"
-            size="small"
-            :type="isFuture(plan) ? 'info' : 'warning'"
-            effect="plain"
-          >
-            {{ isFuture(plan) ? '未开始' : '待评估' }}
-          </el-tag>
-
-          <span class="evaluation-queue__actions">
-            <el-button
-              v-if="canEvaluateEntry(plan)"
-              size="small"
-              type="primary"
-              @click="handleEvaluateClick(plan)"
-            >
-              去评估
-            </el-button>
-            <span v-else-if="isFuture(plan)" class="evaluation-queue__preview">
-              未到授课日期 · 仅预览
-            </span>
+          <span class="evaluation-queue__status" :data-state="statusText(plan)">
+            <i class="evaluation-queue__dot" aria-hidden="true" />
+            {{ statusText(plan) }}
           </span>
+
+          <span v-if="isFuture(plan)" class="evaluation-queue__wait" title="授课日期未到，评估入口在当天开放">
+            当天开放
+          </span>
+          <button
+            v-else
+            type="button"
+            class="evaluation-queue__link"
+            @click="handleEvaluateClick(plan)"
+          >
+            去评估
+          </button>
         </li>
       </ul>
     </template>
 
-    <EmptyState v-else :description="emptyText" />
+    <p v-else class="evaluation-queue__empty">{{ emptyText }}</p>
   </div>
 </template>
 
@@ -147,74 +100,39 @@ function handleEvaluateClick(plan: SupervisionPlan): void {
 .evaluation-queue {
   width: 100%;
 
-  &__tabs {
-    display: flex;
-    gap: var(--spacing-2);
-    align-items: center;
-    margin-bottom: var(--spacing-4);
-  }
-
-  &__tab {
-    padding: 4px 14px;
+  &__empty {
+    padding: var(--spacing-4) 0;
     font-size: var(--font-size-sm);
-    color: var(--color-text-secondary);
-    cursor: pointer;
-    background-color: var(--color-bg-page);
-    border: 1px solid var(--color-divider);
-    border-radius: 999px;
-    transition: all var(--duration-fast) ease;
-
-    &:hover {
-      color: var(--color-primary);
-    }
-
-    &--active {
-      font-weight: 600;
-      color: #ffffff;
-      background-color: var(--color-primary);
-      border-color: var(--color-primary);
-    }
-  }
-
-  &__summary {
-    margin-left: auto;
-    font-size: var(--font-size-xs);
     color: var(--color-text-tertiary);
   }
 
   &__list {
     display: flex;
     flex-direction: column;
-    gap: var(--spacing-2);
   }
 
   &__item {
-    display: flex;
+    display: grid;
+    grid-template-columns: 92px minmax(0, 1fr) 88px 80px 64px;
     gap: var(--spacing-3);
-    align-items: center;
-    padding: var(--spacing-3);
-    background-color: var(--color-bg-page);
-    border-radius: var(--radius-md);
-    transition: box-shadow var(--duration-fast) ease;
+    align-items: baseline;
+    padding: var(--spacing-3) 0;
+    border-top: 1px solid var(--color-divider);
 
-    &:hover {
-      box-shadow: var(--shadow-card-hover);
+    &:first-child {
+      border-top: none;
     }
   }
 
   &__date {
-    flex-shrink: 0;
     font-family: var(--font-score);
-    font-size: var(--font-size-sm);
-    font-weight: 600;
+    font-size: var(--font-size-xs);
     font-variant-numeric: tabular-nums;
-    color: var(--color-primary);
+    color: var(--color-text-tertiary);
   }
 
   &__course {
     overflow: hidden;
-    flex: 1;
-    min-width: 0;
     font-size: var(--font-size-base);
     font-weight: 500;
     color: var(--color-text-primary);
@@ -223,8 +141,6 @@ function handleEvaluateClick(plan: SupervisionPlan): void {
   }
 
   &__teacher {
-    flex-shrink: 0;
-    max-width: 140px;
     overflow: hidden;
     font-size: var(--font-size-sm);
     color: var(--color-text-tertiary);
@@ -233,20 +149,76 @@ function handleEvaluateClick(plan: SupervisionPlan): void {
   }
 
   &__status {
-    flex-shrink: 0;
-  }
-
-  &__actions {
     display: flex;
-    flex-shrink: 0;
-    gap: var(--spacing-2);
+    gap: var(--spacing-1);
     align-items: center;
-    margin-left: auto;
-  }
-
-  &__preview {
     font-size: var(--font-size-xs);
     color: var(--color-text-tertiary);
+
+    &[data-state='待评估'],
+    &[data-state='待补录'] {
+      color: var(--color-warning);
+    }
+  }
+
+  &__dot {
+    width: 6px;
+    height: 6px;
+    background-color: var(--color-text-disabled);
+    border-radius: 50%;
+
+    [data-state='待评估'] &,
+    [data-state='待补录'] & {
+      background-color: var(--color-warning);
+    }
+  }
+
+  &__wait {
+    font-size: var(--font-size-xs);
+    color: var(--color-text-tertiary);
+    text-align: right;
+  }
+
+  &__link {
+    padding: 0;
+    font: inherit;
+    font-size: var(--font-size-sm);
+    color: var(--color-primary);
+    text-align: right;
+    cursor: pointer;
+    background: none;
+    border: none;
+
+    &:hover {
+      text-decoration: underline;
+      text-underline-offset: 3px;
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--color-primary);
+      outline-offset: 3px;
+      border-radius: 2px;
+    }
+  }
+}
+
+@media (max-width: 1080px) {
+  .evaluation-queue__item {
+    grid-template-columns: 84px minmax(0, 1fr) 72px 64px;
+
+    .evaluation-queue__status {
+      display: none;
+    }
+  }
+}
+
+@media (max-width: 840px) {
+  .evaluation-queue__item {
+    grid-template-columns: 76px minmax(0, 1fr) 56px;
+
+    .evaluation-queue__teacher {
+      display: none;
+    }
   }
 }
 </style>

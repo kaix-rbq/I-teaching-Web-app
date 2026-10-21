@@ -3,7 +3,6 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import PageHeader from '@/components/common/PageHeader.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
-import ScoreDimensionsCard from '@/components/evaluation/ScoreDimensionsCard.vue'
 import { fetchCourseDetailApi, fetchCourseEvaluationSummaryApi } from '@/api/course'
 import { fetchCourseSessionsApi, uploadSessionRecordingApi } from '@/api/session'
 import { useSemester } from '@/composables/useSemester'
@@ -13,11 +12,11 @@ import type { Course, CourseEvaluationSummary } from '@/types/course'
 import type { SessionListItem } from '@/types/evaluation'
 
 /**
- * 督导「课程综合评分」页（课程列表 → 具体课程）。
- * 一块页面承载三件事：
- *   1. 本课程当前综合评分（督导 × AI 双源融合，缺失分一律 —）；
- *   2. 过去授课记录评估入口：未评价去评估、已评价可查看/修改（跳当堂课评估页，督导可覆盖提交）；
- *   3. 课堂录音上传入口：逐次授课记录直接传音频，转写与查看在评估页完成。
+ * 督导「课程评分与授课记录」页（课程列表 → 具体课程）。
+ * 三段式：
+ *   1. 抬头：课程名与 AI 评价分一行；
+ *   2. 授课记录：时间轨行，未评价去评估、已评价查看记录；
+ *   3. 录音：收进每行的文本链，转写与查看在评估页完成。
  */
 const route = useRoute()
 const router = useRouter()
@@ -42,8 +41,9 @@ const statusMeta = computed(() =>
   course.value ? getCourseStatusMeta(course.value.status) : null
 )
 
-const compositeScore = computed(() => summary.value?.compositeScore ?? null)
-const compositeColor = computed(() => scoreToneColor(scoreTone(compositeScore.value)))
+/** 页面只展示 AI 评价分（AI 未评时回退后端综合分，缺失显示 —） */
+const aiScore = computed(() => summary.value?.agentScore ?? summary.value?.compositeScore ?? null)
+const aiColor = computed(() => scoreToneColor(scoreTone(aiScore.value)))
 
 const infoItems = computed(() => {
   if (!course.value) return []
@@ -59,6 +59,10 @@ const infoItems = computed(() => {
 /** 数字一致性铁律：直接展示后端值，不做前端四舍五入 */
 function formatScore(score: number | null | undefined): string {
   return score === null || score === undefined ? '—' : score.toFixed(2)
+}
+
+function scoreColor(score: number | null | undefined): string {
+  return scoreToneColor(scoreTone(score))
 }
 
 async function loadCourse(): Promise<void> {
@@ -169,13 +173,21 @@ onMounted(() => reload())
           <div class="supervisor-course__title">
             <el-button link @click="goBack">返回</el-button>
             <span class="supervisor-course__name">{{ course.name }}</span>
-            <el-tag effect="plain">{{ course.code }}</el-tag>
-            <el-tag v-if="statusMeta" :type="statusMeta.tag" effect="light" round>
-              {{ statusMeta.label }}
-            </el-tag>
+            <span class="supervisor-course__code">{{ course.code }}</span>
+            <span v-if="statusMeta" class="supervisor-course__status">{{ statusMeta.label }}</span>
           </div>
         </template>
-        <template #subtitle>课程综合评分 · 督导负责评估 · 历史授课记录与课堂录音</template>
+        <template #actions>
+          <div class="supervisor-course__ai">
+            <span class="supervisor-course__ai-label">AI 评价</span>
+            <strong class="supervisor-course__ai-score score-num" :style="{ color: aiColor }">
+              {{ formatScore(aiScore) }}
+            </strong>
+            <span class="supervisor-course__ai-sample tabular-nums">
+              已评 {{ summary?.sample.evaluatedCount ?? 0 }} / {{ summary?.sample.sessionCount ?? 0 }} 场
+            </span>
+          </div>
+        </template>
       </PageHeader>
 
       <div class="supervisor-course__info">
@@ -183,57 +195,16 @@ onMounted(() => reload())
           <span class="supervisor-course__info-label">{{ item.label }}</span>
           <span class="supervisor-course__info-value">{{ item.value }}</span>
         </div>
+        <span v-if="summary && !summary.sample.sampleSufficient" class="supervisor-course__flag">
+          样本不足，分数代表性有限
+        </span>
       </div>
 
-      <!-- 当前综合评分 -->
-      <section class="supervisor-course__score">
-        <div class="supervisor-course__score-main">
-          <h2 class="supervisor-course__section-title">本课程当前综合评分</h2>
-          <p class="supervisor-course__section-sub">
-            督导评分与 AI 智能体评分双源融合；缺失分显示「—」，不以 0 冒充。
-          </p>
-          <div class="supervisor-course__tips">
-            <span>综合分</span>
-            <strong class="score-num" :style="{ color: compositeColor }">
-              {{ formatScore(compositeScore) }}
-            </strong>
-            <span class="supervisor-course__muted">
-              督导 {{ formatScore(summary?.supervisorScore) }} · AI {{ formatScore(summary?.agentScore) }}
-            </span>
-          </div>
-        </div>
-
-        <div class="supervisor-course__score-dims">
-          <ScoreDimensionsCard :summary="summary" title="五维评分 · 双源叠加" />
-        </div>
-
-        <aside class="supervisor-course__score-side">
-          <div class="supervisor-course__sample">
-            <span class="supervisor-course__sample-label">样本</span>
-            <span class="supervisor-course__sample-value tabular-nums">
-              已评 {{ summary?.sample.evaluatedCount ?? 0 }} / {{ summary?.sample.sessionCount ?? 0 }} 场
-            </span>
-            <span class="supervisor-course__muted">
-              督导 {{ summary?.sample.supervisorCount ?? 0 }} 场 · AI {{ summary?.sample.agentCount ?? 0 }} 场
-            </span>
-            <span v-if="summary && !summary.sample.sampleSufficient" class="supervisor-course__flag">
-              样本不足，分数代表性有限
-            </span>
-          </div>
-        </aside>
-      </section>
-
-      <!-- 历史授课记录：评估入口 + 录音上传 -->
+      <!-- 授课记录：时间轨行 -->
       <section class="supervisor-course__panel">
         <div class="supervisor-course__panel-head">
-          <div>
-            <h2 class="supervisor-course__section-title">
-              历史授课记录（{{ sessionTotal }}）
-            </h2>
-            <p class="supervisor-course__section-sub">
-              点击「去评估」进入当堂课评估页打分；已评价记录可查看/修改并覆盖提交；可在此上传课堂录音。
-            </p>
-          </div>
+          <h2 class="supervisor-course__section-title">授课记录</h2>
+          <span class="supervisor-course__section-count tabular-nums">{{ sessionTotal }} 节</span>
         </div>
 
         <div v-if="sessionsError" class="supervisor-course__state">
@@ -245,77 +216,51 @@ onMounted(() => reload())
         </div>
 
         <template v-else>
-          <el-table
-            v-if="sessionsLoading || sessions.length"
-            v-loading="sessionsLoading"
-            :data="sessions"
-            row-key="id"
-            stripe
-          >
-            <el-table-column label="日期" width="130">
-              <template #default="{ row }">
-                <span class="tabular-nums">{{ row.sessionDate }}</span>
-              </template>
-            </el-table-column>
-            <el-table-column label="节次" width="100">
-              <template #default="{ row }">{{ row.period || '—' }}</template>
-            </el-table-column>
-            <el-table-column label="主题" min-width="180">
-              <template #default="{ row }">{{ row.topic || '—' }}</template>
-            </el-table-column>
-            <el-table-column label="状态" width="100" align="center">
-              <template #default="{ row }">
-                <el-tag :type="getSessionStatusMeta(row.status).tag" effect="light" round>
-                  {{ getSessionStatusMeta(row.status).label }}
-                </el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column label="督导分" width="100" align="right">
-              <template #default="{ row }">
-                <span class="tabular-nums">{{ formatScore(row.supervisorScore) }}</span>
-              </template>
-            </el-table-column>
-            <el-table-column label="智能体分" width="110" align="right">
-              <template #default="{ row }">
-                <span class="tabular-nums supervisor-course__muted">
-                  {{ formatScore(row.agentScore) }}
-                </span>
-              </template>
-            </el-table-column>
-            <el-table-column label="已评次数" width="100" align="center">
-              <template #default="{ row }">
-                <span class="tabular-nums">{{ row.evaluationCount }}</span>
-              </template>
-            </el-table-column>
-            <el-table-column label="操作" width="240" fixed="right">
-              <template #default="{ row }">
-                <el-button link type="primary" @click="goSession(asSession(row))">
-                  {{ sessionActionLabel(asSession(row)) }}
-                </el-button>
-                <el-upload
-                  class="supervisor-course__upload"
-                  :show-file-list="false"
-                  accept=".mp3,.wav,.m4a"
-                  :before-upload="(file) => handleRecording(asSession(row), file)"
+          <el-skeleton v-if="sessionsLoading && !sessions.length" :rows="5" animated />
+
+          <ol v-else-if="sessions.length" class="course-sessions">
+            <li v-for="row in sessions" :key="row.id" class="course-sessions__row">
+              <div class="course-sessions__rail">
+                <span class="course-sessions__date tabular-nums">{{ row.sessionDate }}</span>
+                <span class="course-sessions__period">{{ row.period || '节次待定' }}</span>
+              </div>
+              <div class="course-sessions__body">
+                <p class="course-sessions__topic">{{ row.topic || '未填写主题' }}</p>
+                <p class="course-sessions__meta">
+                  <span class="course-sessions__ai" :style="{ color: scoreColor(row.agentScore) }">
+                    AI {{ formatScore(row.agentScore) }}
+                  </span>
+                  <span>督导 {{ formatScore(row.supervisorScore) }}</span>
+                  <span>已评 {{ row.evaluationCount }} 次</span>
+                </p>
+              </div>
+              <span class="course-sessions__status" :data-status="row.status">
+                <i class="course-sessions__dot" aria-hidden="true" />
+                {{ getSessionStatusMeta(row.status).label }}
+              </span>
+              <button type="button" class="course-sessions__link" @click="goSession(asSession(row))">
+                {{ sessionActionLabel(asSession(row)) }}
+              </button>
+              <el-upload
+                class="course-sessions__upload"
+                :show-file-list="false"
+                accept=".mp3,.wav,.m4a"
+                :before-upload="(file) => handleRecording(asSession(row), file)"
+              >
+                <button
+                  type="button"
+                  class="course-sessions__link course-sessions__link--quiet"
+                  :disabled="uploadingSessionId === row.id"
                 >
-                  <el-button
-                    link
-                    type="primary"
-                    :loading="uploadingSessionId === row.id"
-                  >
-                    上传录音
-                  </el-button>
-                </el-upload>
-              </template>
-            </el-table-column>
-            <template #empty>
-              <span class="supervisor-course__muted">暂无授课记录</span>
-            </template>
-          </el-table>
+                  {{ uploadingSessionId === row.id ? '上传中' : '上传录音' }}
+                </button>
+              </el-upload>
+            </li>
+          </ol>
 
           <EmptyState v-else description="本课程暂无授课记录，可前往工作台新增授课记录" />
 
-          <div class="supervisor-course__pagination">
+          <div v-if="sessionTotal > sessionPageSize" class="supervisor-course__pagination">
             <el-pagination
               :current-page="sessionPage"
               :page-size="sessionPageSize"
@@ -337,7 +282,8 @@ onMounted(() => reload())
 .supervisor-course {
   &__title {
     display: flex;
-    align-items: center;
+    flex-wrap: wrap;
+    align-items: baseline;
     gap: var(--spacing-3);
   }
 
@@ -347,11 +293,45 @@ onMounted(() => reload())
     color: var(--color-text-primary);
   }
 
+  &__code {
+    font-family: var(--font-score);
+    font-size: var(--font-size-sm);
+    color: var(--color-text-tertiary);
+  }
+
+  &__status {
+    font-size: var(--font-size-xs);
+    color: var(--color-text-secondary);
+  }
+
+  &__ai {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--spacing-2) var(--spacing-3);
+    align-items: baseline;
+  }
+
+  &__ai-label {
+    font-size: var(--font-size-xs);
+    color: var(--color-text-tertiary);
+  }
+
+  &__ai-score {
+    font-size: var(--font-size-score-lg);
+    line-height: 1;
+  }
+
+  &__ai-sample {
+    font-size: var(--font-size-xs);
+    color: var(--color-text-tertiary);
+  }
+
   &__info {
     display: flex;
     flex-wrap: wrap;
-    gap: var(--spacing-6);
-    padding: var(--spacing-3) var(--spacing-6);
+    gap: var(--spacing-3) var(--spacing-6);
+    align-items: baseline;
+    padding: var(--spacing-4) var(--spacing-6);
     margin-bottom: var(--spacing-4);
     background-color: var(--color-bg-card);
     border: 1px solid var(--color-divider);
@@ -375,81 +355,7 @@ onMounted(() => reload())
     color: var(--color-text-primary);
   }
 
-  &__score {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) minmax(220px, 0.8fr);
-    gap: var(--spacing-4);
-    padding: var(--spacing-6);
-    margin-bottom: var(--spacing-4);
-    background-color: var(--color-bg-card);
-    border: 1px solid var(--color-divider);
-    border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-card);
-
-    @media (max-width: 1280px) {
-      grid-template-columns: 1fr;
-    }
-  }
-
-  &__score-main {
-    display: flex;
-    flex-direction: column;
-    gap: var(--spacing-3);
-  }
-
-  &__score-dims {
-    padding-left: var(--spacing-6);
-    border-left: 1px solid var(--color-divider);
-
-    @media (max-width: 1280px) {
-      padding-left: 0;
-      border-left: none;
-    }
-  }
-
-  &__score-side {
-    padding-left: var(--spacing-6);
-    border-left: 1px solid var(--color-divider);
-
-    @media (max-width: 1280px) {
-      padding-left: 0;
-      border-left: none;
-    }
-  }
-
-  &__tips {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--spacing-2);
-    align-items: baseline;
-    font-size: var(--font-size-sm);
-    color: var(--color-text-secondary);
-
-    strong {
-      font-size: var(--font-size-score-xl);
-      font-weight: 600;
-    }
-  }
-
-  &__sample {
-    display: flex;
-    flex-direction: column;
-    gap: var(--spacing-1);
-  }
-
-  &__sample-label {
-    font-size: var(--font-size-xs);
-    color: var(--color-text-tertiary);
-  }
-
-  &__sample-value {
-    font-size: var(--font-size-lg);
-    font-weight: 600;
-    color: var(--color-text-primary);
-  }
-
   &__flag {
-    margin-top: var(--spacing-2);
     font-size: var(--font-size-xs);
     color: var(--color-warning);
   }
@@ -459,15 +365,14 @@ onMounted(() => reload())
     background-color: var(--color-bg-card);
     border: 1px solid var(--color-divider);
     border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-card);
   }
 
   &__panel-head {
     display: flex;
-    gap: var(--spacing-4);
-    align-items: flex-start;
+    gap: var(--spacing-3);
+    align-items: baseline;
     justify-content: space-between;
-    margin-bottom: var(--spacing-4);
+    margin-bottom: var(--spacing-2);
   }
 
   &__section-title {
@@ -475,10 +380,8 @@ onMounted(() => reload())
     color: var(--color-text-primary);
   }
 
-  &__section-sub {
-    margin-top: var(--spacing-1);
+  &__section-count {
     font-size: var(--font-size-xs);
-    line-height: 1.6;
     color: var(--color-text-tertiary);
   }
 
@@ -486,20 +389,152 @@ onMounted(() => reload())
     padding: var(--spacing-6);
   }
 
-  &__muted {
-    font-size: var(--font-size-xs);
-    color: var(--color-text-tertiary);
-  }
-
-  &__upload {
-    display: inline-block;
-    margin-left: var(--spacing-3);
-  }
-
   &__pagination {
     display: flex;
     justify-content: flex-end;
     margin-top: var(--spacing-4);
+  }
+}
+
+.course-sessions {
+  display: flex;
+  flex-direction: column;
+
+  &__row {
+    display: grid;
+    grid-template-columns: 112px minmax(0, 1fr) 76px 88px 72px;
+    gap: var(--spacing-4);
+    align-items: center;
+    padding: var(--spacing-4) 0;
+    border-top: 1px solid var(--color-divider);
+
+    &:first-child {
+      border-top: none;
+    }
+  }
+
+  &__rail {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  &__date {
+    font-family: var(--font-score);
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+    color: var(--color-text-primary);
+  }
+
+  &__period {
+    font-size: var(--font-size-xs);
+    color: var(--color-text-tertiary);
+  }
+
+  &__body {
+    min-width: 0;
+  }
+
+  &__topic {
+    overflow: hidden;
+    font-size: var(--font-size-base);
+    font-weight: 500;
+    color: var(--color-text-primary);
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  &__meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--spacing-3);
+    margin-top: 2px;
+    font-size: var(--font-size-xs);
+    color: var(--color-text-tertiary);
+  }
+
+  &__status {
+    display: flex;
+    gap: var(--spacing-1);
+    align-items: center;
+    font-size: var(--font-size-xs);
+    color: var(--color-text-tertiary);
+
+    &[data-status='evaluated'] {
+      color: var(--color-success);
+    }
+  }
+
+  &__dot {
+    width: 6px;
+    height: 6px;
+    background-color: var(--color-text-disabled);
+    border-radius: 50%;
+
+    [data-status='evaluated'] & {
+      background-color: var(--color-success);
+    }
+
+    [data-status='scheduled'] &,
+    [data-status='recorded'] & {
+      background-color: var(--color-warning);
+    }
+  }
+
+  &__link {
+    padding: 0;
+    font: inherit;
+    font-size: var(--font-size-sm);
+    color: var(--color-primary);
+    text-align: right;
+    cursor: pointer;
+    background: none;
+    border: none;
+
+    &:hover {
+      text-decoration: underline;
+      text-underline-offset: 3px;
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--color-primary);
+      outline-offset: 3px;
+      border-radius: 2px;
+    }
+
+    &--quiet {
+      color: var(--color-text-tertiary);
+    }
+
+    &:disabled {
+      color: var(--color-text-disabled);
+      cursor: default;
+      text-decoration: none;
+    }
+  }
+
+  &__upload {
+    display: inline-block;
+  }
+}
+
+@media (max-width: 1080px) {
+  .course-sessions__row {
+    grid-template-columns: 100px minmax(0, 1fr) 72px 64px;
+
+    .course-sessions__upload {
+      display: none;
+    }
+  }
+}
+
+@media (max-width: 840px) {
+  .course-sessions__row {
+    grid-template-columns: 88px minmax(0, 1fr) 56px;
+
+    .course-sessions__status {
+      display: none;
+    }
   }
 }
 </style>

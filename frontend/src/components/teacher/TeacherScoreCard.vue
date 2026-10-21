@@ -1,121 +1,105 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import QualityCompass from '@/components/evaluation/QualityCompass.vue'
 import { EVALUATION_DIMENSIONS } from '@/constants'
 import { scoreTone, scoreToneColor } from '@/utils/format'
 import type { TeacherScoreItem } from '@/types/teacher'
 
 /**
- * 教师质量卡片（docs/frontend_AGENTS.md §7.8 列表页默认视图）。
- * 三件套：罗盘缩略 + 五维迷你条 + 样本徽章；null → 灰环「暂无评价」，禁止以 0 充当。
+ * 教师名录行（画像列表默认视图）。
+ * 只保留决策所需的一行：姓名、部门、AI 分、样本、薄弱维度。
+ * 罗盘与五维详图留在详情页，列表不重复呈现。
  */
 const props = withDefaults(
   defineProps<{
     item: TeacherScoreItem
+    department?: string
   }>(),
-  {}
+  { department: '' }
 )
 
 const emit = defineEmits<{ (e: 'view', item: TeacherScoreItem): void }>()
 
-const dimBars = computed(() =>
-  EVALUATION_DIMENSIONS.map((meta) => {
-    const dimension = props.item.dimensions.find((entry) => entry.key === meta.key)
-    const score = dimension?.score ?? null
-    return {
-      key: meta.key,
-      name: meta.shortName,
-      isObservation: meta.isObservation,
-      score,
-      ratio: score === null ? 0 : Math.max(0, Math.min(100, score)),
-      color: scoreToneColor(scoreTone(score))
-    }
-  })
-)
+const aiScore = computed(() => props.item.agentScore ?? props.item.compositeScore ?? null)
+const tone = computed(() => scoreTone(aiScore.value))
+const scoreColor = computed(() => scoreToneColor(tone.value))
 
 function formatScore(score: number | null): string {
   return score === null || score === undefined ? '—' : score.toFixed(2)
 }
+
+/** 薄弱维度取可计分维度中的最低分；无数据时留空，不虚构 */
+const weakest = computed(() => {
+  const rows = props.item.dimensions
+    .filter((entry) => !entry.isObservation)
+    .map((entry) => ({
+      name: entry.name,
+      shortName: EVALUATION_DIMENSIONS.find((meta) => meta.key === entry.key)?.shortName ?? entry.name,
+      score: entry.agentScore ?? entry.score ?? null
+    }))
+    .filter((entry): entry is { name: string; shortName: string; score: number } => entry.score !== null)
+  if (!rows.length) return null
+  return rows.reduce((min, entry) => (entry.score < min.score ? entry : min))
+})
+
+function open(): void {
+  emit('view', props.item)
+}
 </script>
 
 <template>
-  <article class="teacher-card" @click="emit('view', item)">
-    <header class="teacher-card__head">
-      <span class="teacher-card__name">{{ item.teacherName }}</span>
-      <span class="teacher-card__jobno">{{ item.jobNo }}</span>
-      <el-tag
-        v-if="item.compositeScore !== null && !item.sample.sampleSufficient"
-        class="teacher-card__warn"
-        type="warning"
-        size="small"
-        effect="plain"
-        round
-      >
-        样本不足
-      </el-tag>
-    </header>
-
-    <QualityCompass :summary="item" size="sm" />
-
-    <ul class="teacher-card__dims">
-      <li v-for="bar in dimBars" :key="bar.key" class="teacher-card__dim">
-        <span class="teacher-card__dim-name" :title="bar.isObservation ? '观测项，不计入加权' : ''">
-          {{ bar.name }}
-        </span>
-        <span class="teacher-card__dim-track">
-          <i
-            class="teacher-card__dim-fill"
-            :class="{ 'teacher-card__dim-fill--void': bar.score === null }"
-            :style="{ width: `${bar.ratio}%`, backgroundColor: bar.color }"
-          />
-        </span>
-        <span class="teacher-card__dim-value tabular-nums">{{ formatScore(bar.score) }}</span>
-      </li>
-    </ul>
-
-    <footer class="teacher-card__foot">
-      <span class="teacher-card__sample tabular-nums">n={{ item.sample.evaluatedCount }}</span>
-      <el-tag
-        v-if="item.compositeScore !== null && item.sample.sampleSufficient"
-        type="success"
-        size="small"
-        effect="plain"
-        round
-      >
-        样本充足
-      </el-tag>
-      <span class="teacher-card__cta">查看画像 →</span>
-    </footer>
+  <article
+    class="teacher-row"
+    role="link"
+    tabindex="0"
+    :aria-label="`查看 ${item.teacherName} 的教师画像`"
+    @click="open"
+    @keydown.enter.prevent="open"
+    @keydown.space.prevent="open"
+  >
+    <div class="teacher-row__identity">
+      <span class="teacher-row__name">{{ item.teacherName }}</span>
+      <span class="teacher-row__jobno tabular-nums">{{ item.jobNo }}</span>
+    </div>
+    <span class="teacher-row__department">{{ department || '—' }}</span>
+    <span class="teacher-row__score score-num" :style="{ color: scoreColor }">
+      {{ formatScore(aiScore) }}
+    </span>
+    <span class="teacher-row__sample tabular-nums">
+      n={{ item.sample.evaluatedCount }}
+      <em v-if="!item.sample.sampleSufficient">样本不足</em>
+    </span>
+    <span class="teacher-row__weak">
+      {{ weakest ? `薄弱 ${weakest.shortName}` : '暂无可计分维度' }}
+    </span>
   </article>
 </template>
 
 <style scoped lang="scss">
-.teacher-card {
-  display: flex;
-  flex-direction: column;
-  gap: var(--spacing-2);
-  padding: var(--spacing-4);
+.teacher-row {
+  display: grid;
+  grid-template-columns: minmax(140px, 1.1fr) minmax(120px, 1fr) 72px 132px minmax(120px, 1.1fr);
+  gap: var(--spacing-4);
+  align-items: center;
+  padding: var(--spacing-4) var(--spacing-2);
   cursor: pointer;
-  background-color: var(--color-bg-card);
-  border: 1px solid var(--color-divider);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-card);
-  transition: border-color var(--duration-fast) var(--ease-out-soft),
-    box-shadow var(--duration-fast) var(--ease-out-soft),
-    transform var(--duration-fast) var(--ease-out-soft);
+  border-top: 1px solid var(--color-divider);
+  transition: background-color var(--duration-fast) var(--ease-out-soft);
 
-  &:hover,
-  &:focus-visible {
-    border-color: var(--color-primary-light);
-    box-shadow: var(--shadow-card-hover, var(--shadow-card));
-    transform: translateY(-2px);
+  &:hover {
+    background-color: var(--color-bg-page);
   }
 
-  &__head {
+  &:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: -2px;
+    border-radius: var(--radius-sm);
+  }
+
+  &__identity {
     display: flex;
     flex-wrap: wrap;
     gap: var(--spacing-2);
-    align-items: center;
+    align-items: baseline;
   }
 
   &__name {
@@ -125,89 +109,61 @@ function formatScore(score: number | null): string {
   }
 
   &__jobno {
+    font-family: var(--font-score);
     font-size: var(--font-size-xs);
     color: var(--color-text-tertiary);
   }
 
-  &__warn {
-    margin-left: auto;
-  }
-
-  &__dims {
-    display: flex;
-    flex-direction: column;
-    gap: var(--spacing-1);
-    width: 100%;
-    padding: 0;
-    margin: 0;
-    list-style: none;
-  }
-
-  &__dim {
-    display: grid;
-    grid-template-columns: 56px 1fr 40px;
-    gap: var(--spacing-2);
-    align-items: center;
-    font-size: var(--font-size-xs);
-    color: var(--color-text-secondary);
-  }
-
-  &__dim-name {
+  &__department {
     overflow: hidden;
-    text-overflow: ellipsis;
+    font-size: var(--font-size-sm);
+    color: var(--color-text-secondary);
     white-space: nowrap;
+    text-overflow: ellipsis;
   }
 
-  &__dim-track {
-    position: relative;
-    height: 6px;
-    overflow: hidden;
-    background-color: var(--color-bg-page);
-    border: 1px solid var(--color-divider);
-    border-radius: var(--radius-sm);
-  }
-
-  &__dim-fill {
-    position: absolute;
-    inset: 0 auto 0 0;
-    border-radius: var(--radius-sm);
-
-    &--void {
-      background-color: var(--color-score-void);
-    }
-  }
-
-  &__dim-value {
+  &__score {
+    font-size: var(--font-size-score-md);
     text-align: right;
-    color: var(--color-text-secondary);
-  }
-
-  &__foot {
-    display: flex;
-    gap: var(--spacing-2);
-    align-items: center;
-    padding-top: var(--spacing-2);
-    margin-top: var(--spacing-1);
-    border-top: 1px dashed var(--color-divider);
   }
 
   &__sample {
     font-size: var(--font-size-xs);
-    font-weight: 600;
+    color: var(--color-text-tertiary);
+
+    em {
+      margin-left: var(--spacing-1);
+      font-style: normal;
+      color: var(--color-warning);
+    }
+  }
+
+  &__weak {
+    overflow: hidden;
+    font-size: var(--font-size-sm);
     color: var(--color-text-secondary);
+    white-space: nowrap;
+    text-overflow: ellipsis;
   }
+}
 
-  &__cta {
-    margin-left: auto;
-    font-size: var(--font-size-xs);
-    color: var(--color-primary);
-    opacity: 0;
-    transition: opacity var(--duration-fast) var(--ease-out-soft);
+@media (max-width: 1080px) {
+  .teacher-row {
+    grid-template-columns: minmax(120px, 1fr) 64px 116px minmax(100px, 1fr);
+
+    &__department {
+      display: none;
+    }
   }
+}
 
-  &:hover &__cta,
-  &:focus-visible &__cta {
-    opacity: 1;
+@media (max-width: 840px) {
+  .teacher-row {
+    grid-template-columns: minmax(110px, 1fr) 56px 96px;
+
+    &__weak {
+      display: none;
+    }
   }
 }
 </style>

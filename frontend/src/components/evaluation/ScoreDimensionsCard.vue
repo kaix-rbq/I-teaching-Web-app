@@ -6,8 +6,9 @@ import { scoreTone, scoreToneColor } from '@/utils/format'
 import type { ScoreSummary } from '@/types/teacher'
 
 /**
- * 五维评分卡（雷达双源叠加 + 维度条权重徽章，docs/frontend_AGENTS.md §8.4）。
- * 教师画像详情与「我的质量档案」共用；缺失分渲染 — 不补 0。
+ * 五维评分卡（AI 单源雷达 + 维度条权重徽章，docs/frontend_AGENTS.md §8.4）。
+ * 教师画像 / 我的质量档案共用：分数一律取 AI 评价，缺失分渲染 — 不补 0。
+ * 布局：雷达在左、维度读数在右（宽屏），窄屏回落单列。
  */
 const props = withDefaults(
   defineProps<{
@@ -15,16 +16,20 @@ const props = withDefaults(
     title?: string
   }>(),
   {
-    title: '五维评分 · 双源叠加'
+    title: '五维评分 · AI 评价'
   }
 )
+
+/** 该维度的展示分 = AI 分；AI 未评时回退到后端该维度分，避免已有评价却显示空轴 */
+function dimensionScore(dimension: ScoreSummary['dimensions'][number]): number | null {
+  return dimension.agentScore ?? dimension.score ?? null
+}
 
 const radarItems = computed(() =>
   (props.summary?.dimensions ?? []).map((dimension) => ({
     key: dimension.key,
     name: dimension.name,
-    score: dimension.score,
-    supervisorScore: dimension.supervisorScore,
+    score: dimensionScore(dimension),
     agentScore: dimension.agentScore,
     isObservation: dimension.isObservation
   }))
@@ -33,7 +38,7 @@ const radarItems = computed(() =>
 const dimensionRows = computed(() =>
   EVALUATION_DIMENSIONS.map((meta) => {
     const dimension = props.summary?.dimensions.find((item) => item.key === meta.key)
-    const score = dimension?.score ?? null
+    const score = dimension ? dimensionScore(dimension) : null
     return {
       ...meta,
       score,
@@ -52,34 +57,44 @@ function formatScore(score: number | null | undefined): string {
 <template>
   <div class="dimensions-card">
     <h2 class="dimensions-card__title">{{ title }}</h2>
-    <ScoreRadar :items="radarItems" :max="100" />
-    <ul class="dimensions-card__dims">
-      <li v-for="row in dimensionRows" :key="row.key" class="dimensions-card__dim">
-        <div class="dimensions-card__dim-head">
-          <span class="dimensions-card__dim-name">
-            {{ row.name }}
-            <el-tag v-if="row.isObservation" type="warning" size="small" effect="light" round>
-              观测项
-            </el-tag>
-            <el-tag v-else type="info" size="small" effect="plain" round>
-              {{ Math.round(row.weight * 100) }}%
-            </el-tag>
-          </span>
-          <span
-            class="dimensions-card__dim-score score-num"
-            :style="{ color: row.score === null ? undefined : row.color }"
-          >
-            {{ formatScore(row.score) }}
-          </span>
-        </div>
-        <div class="dimensions-card__track">
-          <i
-            class="dimensions-card__fill"
-            :style="{ width: `${row.ratio}%`, backgroundColor: row.color }"
-          />
-        </div>
-      </li>
-    </ul>
+
+    <div class="dimensions-card__body">
+      <div class="dimensions-card__radar">
+        <ScoreRadar :items="radarItems" :max="100" tone="ai" />
+      </div>
+
+      <ul class="dimensions-card__dims">
+        <li v-for="(row, index) in dimensionRows" :key="row.key" class="dimensions-card__dim">
+          <div class="dimensions-card__dim-head">
+            <span class="dimensions-card__dim-name">
+              {{ row.name }}
+              <el-tag v-if="row.isObservation" type="warning" size="small" effect="light" round>
+                观测项
+              </el-tag>
+              <el-tag v-else type="info" size="small" effect="plain" round>
+                {{ Math.round(row.weight * 100) }}%
+              </el-tag>
+            </span>
+            <span
+              class="dimensions-card__dim-score score-num"
+              :style="{ color: row.score === null ? undefined : row.color }"
+            >
+              {{ formatScore(row.score) }}
+            </span>
+          </div>
+          <div class="dimensions-card__track">
+            <i
+              class="dimensions-card__fill anim-grow-x"
+              :style="{
+                width: `${row.ratio}%`,
+                backgroundColor: row.color,
+                '--stagger': `${index * 60}ms`
+              }"
+            />
+          </div>
+        </li>
+      </ul>
+    </div>
   </div>
 </template>
 
@@ -89,11 +104,23 @@ function formatScore(score: number | null | undefined): string {
   flex-direction: column;
 
   &__title {
-    margin-bottom: var(--spacing-3);
+    margin-bottom: var(--spacing-4);
     padding-bottom: var(--spacing-2);
     font-size: var(--font-size-base);
     color: var(--color-text-primary);
     border-bottom: 1px solid var(--color-divider);
+  }
+
+  &__body {
+    display: grid;
+    grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+    gap: var(--spacing-8);
+    align-items: center;
+  }
+
+  &__radar {
+    display: flex;
+    justify-content: center;
   }
 
   &__dims {
@@ -101,7 +128,7 @@ function formatScore(score: number | null | undefined): string {
     flex-direction: column;
     gap: var(--spacing-3);
     padding: 0;
-    margin: var(--spacing-4) 0 0;
+    margin: 0;
     list-style: none;
   }
 
@@ -139,7 +166,13 @@ function formatScore(score: number | null | undefined): string {
     display: block;
     height: 100%;
     border-radius: var(--radius-sm);
-    transition: width var(--duration-mid) var(--ease-out-soft);
+  }
+}
+
+@media (max-width: 960px) {
+  .dimensions-card__body {
+    grid-template-columns: 1fr;
+    gap: var(--spacing-4);
   }
 }
 </style>

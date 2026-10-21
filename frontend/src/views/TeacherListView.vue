@@ -56,8 +56,8 @@ const cardRows = computed(() => {
   if (sortKey.value === 'name') return rows.value
   const direction = sortKey.value === 'score-desc' ? -1 : 1
   return [...rows.value].sort((a, b) => {
-    const left = a.compositeScore
-    const right = b.compositeScore
+    const left = a.agentScore ?? a.compositeScore
+    const right = b.agentScore ?? b.compositeScore
     if (left === null && right === null) return 0
     if (left === null) return 1
     if (right === null) return -1
@@ -116,6 +116,13 @@ function handleView(item: TeacherScoreItem): void {
   void router.push({ name: 'teacher-detail', params: { id: item.teacherId } })
 }
 
+/** 名录行补一个部门名：教师评分接口不带部门，用字典按 teacherId 映射。 */
+function departmentName(teacherId: number): string {
+  const teacher = dict.teachers.find((item) => item.id === teacherId)
+  if (!teacher?.departmentId) return ''
+  return dict.departments.find((item) => item.id === teacher.departmentId)?.name || ''
+}
+
 onMounted(() => {
   void dict.load()
   void load()
@@ -126,17 +133,12 @@ onMounted(() => {
   <div class="teacher-list">
     <PageHeader
       title="教师画像"
-      subtitle="以质量卡片纵览本室教师：双源罗盘、五维分与样本量，点击进入单人画像"
+      subtitle="本室教师 AI 评价综览，点击一行进入单人画像"
     />
 
-    <el-alert
-      class="teacher-list__ethics"
-      type="info"
-      :closable="false"
-      show-icon
-      title="仅用于教学支持，不作为考核依据"
-      description="评分用于帮助教师改进教学，不用于绩效与人事评价。请勿外传或作他用。"
-    />
+    <p class="teacher-list__ethics">
+      评分仅用于教学支持与改进，不作为考核依据。请勿外传或作他用。
+    </p>
 
     <section class="teacher-list__panel">
       <FilterBar @search="search" @reset="reset">
@@ -175,29 +177,37 @@ onMounted(() => {
       <template v-else>
         <div class="teacher-list__toolbar">
           <el-radio-group :model-value="view" size="default" @update:model-value="setView">
-            <el-radio-button value="card">质量卡片</el-radio-button>
+            <el-radio-button value="card">教师名录</el-radio-button>
             <el-radio-button value="table">数据表格</el-radio-button>
           </el-radio-group>
           <el-select
             v-if="view === 'card'"
             v-model="sortKey"
             class="teacher-list__sort"
-            aria-label="卡片排序"
+            aria-label="名录排序"
           >
             <el-option value="name" label="按姓名" />
-            <el-option value="score-desc" label="综合分 高→低" />
-            <el-option value="score-asc" label="综合分 低→高" />
+            <el-option value="score-desc" label="AI 分从高到低" />
+            <el-option value="score-asc" label="AI 分从低到高" />
           </el-select>
         </div>
 
         <template v-if="view === 'card'">
           <el-skeleton v-if="loading" :rows="6" animated />
           <template v-else>
-            <div v-if="cardRows.length" class="teacher-list__cards">
+            <div v-if="cardRows.length" class="teacher-list__roster">
+              <div class="teacher-list__roster-head" aria-hidden="true">
+                <span>教师</span>
+                <span>部门</span>
+                <span>AI 分</span>
+                <span>样本</span>
+                <span>薄弱维度</span>
+              </div>
               <TeacherScoreCard
                 v-for="item in cardRows"
                 :key="item.teacherId"
                 :item="item"
+                :department="departmentName(item.teacherId)"
                 @view="handleView"
               />
             </div>
@@ -235,6 +245,8 @@ onMounted(() => {
 .teacher-list {
   &__ethics {
     margin-bottom: var(--spacing-4);
+    font-size: var(--font-size-xs);
+    color: var(--color-text-tertiary);
   }
 
   &__panel {
@@ -258,10 +270,38 @@ onMounted(() => {
     width: 160px;
   }
 
-  &__cards {
+  &__roster {
+    border-top: 1px solid var(--color-divider);
+  }
+
+  &__roster-head {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(248px, 1fr));
+    grid-template-columns: minmax(140px, 1.1fr) minmax(120px, 1fr) 72px 132px minmax(120px, 1.1fr);
     gap: var(--spacing-4);
+    padding: var(--spacing-3) var(--spacing-2);
+    font-size: var(--font-size-xs);
+    color: var(--color-text-tertiary);
+    border-bottom: 1px solid var(--color-divider);
+
+    span:nth-child(3) {
+      text-align: right;
+    }
+
+    @media (max-width: 1080px) {
+      grid-template-columns: minmax(120px, 1fr) 64px 116px minmax(100px, 1fr);
+
+      span:nth-child(2) {
+        display: none;
+      }
+    }
+
+    @media (max-width: 840px) {
+      grid-template-columns: minmax(110px, 1fr) 56px 96px;
+
+      span:nth-child(5) {
+        display: none;
+      }
+    }
   }
 
   &__field {

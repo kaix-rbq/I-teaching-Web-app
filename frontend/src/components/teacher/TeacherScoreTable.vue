@@ -23,7 +23,12 @@ function toItem(row: unknown): TeacherScoreItem {
 }
 
 function dimensionScore(item: TeacherScoreItem, key: DimensionKey): number | null {
-  return item.dimensions.find((dimension) => dimension.key === key)?.score ?? null
+  const dimension = item.dimensions.find((entry) => entry.key === key)
+  return dimension?.agentScore ?? dimension?.score ?? null
+}
+
+function teacherScore(item: TeacherScoreItem): number | null {
+  return item.agentScore ?? item.compositeScore ?? null
 }
 
 /** 缺失分一律渲染 —，禁止显示 0（前端 AGENTS §9.6） */
@@ -33,8 +38,8 @@ function formatScore(score: number | null): string {
 
 /** 综合分为 null 时置底，且不按 0 参与排序（§7.8） */
 function sortByComposite(a: TeacherScoreItem, b: TeacherScoreItem): number {
-  const left = a.compositeScore
-  const right = b.compositeScore
+  const left = teacherScore(a)
+  const right = teacherScore(b)
   if (left === null && right === null) return 0
   if (left === null) return 1
   if (right === null) return -1
@@ -58,14 +63,14 @@ function handleRowClick(row: TeacherScoreItem): void {
   >
     <el-table-column prop="teacherName" label="教师" min-width="130" fixed />
     <el-table-column prop="jobNo" label="工号" width="120" />
-    <el-table-column label="综合分" width="160" sortable :sort-method="sortByComposite">
+    <el-table-column label="AI 分" width="160" sortable :sort-method="sortByComposite">
       <template #default="{ row }">
-        <template v-if="row.compositeScore === null">
-          <span class="teacher-score-table__muted">暂无评价</span>
+        <template v-if="teacherScore(toItem(row)) === null">
+          <span class="teacher-score-table__muted">暂无 AI 评价</span>
         </template>
         <template v-else>
           <span class="teacher-score-table__composite tabular-nums">
-            {{ formatScore(row.compositeScore) }}
+            {{ formatScore(teacherScore(toItem(row))) }}
           </span>
           <el-tag
             v-if="!row.sample.sampleSufficient"
