@@ -391,4 +391,4 @@ mysql -u root -p --default-character-set=utf8mb4 aijiaoxue < aijiaoxue_2026-09-1
 
 ---
 
-*文档版本：v1.1（2026-09 合并整理：DDL 事实源改指 `database/schema.sql` + `migrations/`，迁移清单更新至 V6，种子口径与 `scripts/init_db.sh` 对齐）· 维护人：成员四（胡凯翔，后端架构）· 数据口径评审：成员一（徐仕杰，DRI）· 联调对接：成员二（刘子杰，前端）*
+*文档版本：v1.1（2026-09 合并整理：DDL 事实源改指 `database/schema.sql` + `migrations/`，迁移清单更新至 V6，种子口径与 `scripts/init_db.sh` 对齐）· 维护人：成员三（胡凯翔，后端架构）· 数据口径评审：成员一（徐仕杰，DRI）· 联调对接：成员二（刘子杰，前端）*
