@@ -131,7 +131,7 @@ git push origin --delete feature/S6.3-session-evaluation
 | 2 | `git push --force` / `-f` | **重写已共享历史，抹掉别人的提交** | 撤销已推送的提交用 `git revert`；只有自己的 feature 分支且已 rebase 时，才可用 `git push --force-with-lease` |
 | 3 | `git reset --hard` 后强推 | 同上，且本地未提交改动永久丢失 | 用 `git revert <sha>` 生成反向提交 |
 | 4 | `git add -A` / `git add .` 后不看 diff 就提交 | 会把 `config.yaml`、`.devtools/`、临时文件带进仓库 | `git status` + `git diff --staged` 确认后再 `git add <具体文件>` |
-| 5 | 提交 `backend/config.yaml`、`.env*`、`uploads/`、`.devtools/` | 泄露密钥、隐私数据、本地环境 | 这些已被 `.gitignore` 覆盖；若已误提交立即告知成员四 |
+| 5 | 提交 `backend/config.yaml`、`.env*`、`uploads/`、`.devtools/` | 泄露密钥、隐私数据、本地环境 | 这些已被 `.gitignore` 覆盖；若已误提交立即告知成员三 |
 | 6 | 在别人的分支上直接 push | 覆盖对方未完成的工作 | 在 PR 里评论建议，或协商后由本人修改 |
 | 7 | `git checkout .` / `git clean -fd` 清理不认识的改动 | 可能是同事未提交的工作 | 先 `git stash` 保存，再操作 |
 | 8 | 对共享数据库执行 `make db-seed` | **`seed.sql` 会 TRUNCATE 全部 9 张表（当前库共 12 张表），数据清空** | 只对本地库执行 |
@@ -165,13 +165,13 @@ git rebase --abort
 | 事故 | 处置 |
 |------|------|
 | 不小心把提交推到 `main` 了 | **不要** rebase main。立即开分支做 `git revert <sha>`，提 PR 合入；并在群里说明 |
-| 误提交了密钥 / `config.yaml` | 立即通知成员四。**仅 revert 不够**（历史里仍有），密钥必须作废重发 |
+| 误提交了密钥 / `config.yaml` | 立即通知成员三。**仅 revert 不够**（历史里仍有），密钥必须作废重发 |
 | 本地改动不见了 / 被覆盖 | `git reflog` 找到丢失的 commit → `git switch -c rescue <sha>` 救回 |
 | 推错了分支 | `git branch -m <正确名>` 本地改名；远端 `git push origin --delete <错分支>` |
 | 提交信息写错但还没 push | `git commit --amend` |
 | 提交信息写错且已 push | **不要改历史**，在 PR 描述里更正即可 |
 | `git pull` 报 non-fast-forward | 说明你分支落后或有本地提交，改用 `git fetch && git rebase origin/main` |
-| 不确定当前状态 | 先 `git status` + `git log --oneline -5`，**看不懂就不要继续敲命令**，问成员四 |
+| 不确定当前状态 | 先 `git status` + `git log --oneline -5`，**看不懂就不要继续敲命令**，问成员三 |
 
 ---
 
@@ -179,9 +179,9 @@ git rebase --abort
 
 **谁审**（人名与分工见 `docs/Sprint2-3-教学评价与提优-开发计划.md` §7；初审 / 复审为团队约定）：
 
-- 后端改动：成员四（胡凯翔）初审 → 成员一 / 成员三复审
+- 后端改动：成员三（胡凯翔）初审 → 成员一 / 成员二复审
 - 前端改动：成员二（刘子杰）初审 → 成员一 / 成员三复审
-- 涉及表结构、接口契约、权限的改动：**必须经成员四确认**
+- 涉及表结构、接口契约、权限的改动：**必须经成员三确认**
 
 **看什么**（评审人按此 5 条检查）：
 
@@ -233,11 +233,11 @@ git rebase --abort
 
 | 情况 | 找谁 |
 |------|------|
-| 环境搭建、启动失败、数据库连不上 | 成员四（后端架构） |
+| 环境搭建、启动失败、数据库连不上 | 成员三（后端架构） |
 | 前端页面、组件、样式规范 | 成员二（前端） |
 | 接口契约争议、需求范围、优先级 | 成员一（DRI / 产品） |
-| 表结构变更审批 | 成员四 |
-| **Git / 分支 / 合并操作不确定** | **先别继续敲命令**，截图当前 `git status` 问成员四 |
+| 表结构变更审批 | 成员三 |
+| **Git / 分支 / 合并操作不确定** | **先别继续敲命令**，截图当前 `git status` 问成员三 |
 
 > 「不确定就先停手」是本文最重要的一条。Git 的大部分事故都来自"以为没事"的连续操作。
 
