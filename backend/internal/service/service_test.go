@@ -605,7 +605,7 @@ func TestSubmitSupervisorEvaluationIdempotent(t *testing.T) {
 	require.NotNil(t, first.TotalScore)
 	assert.Equal(t, 52.5, *first.TotalScore)
 	assert.Equal(t, "v1", first.FormulaVersion)
-	assert.Equal(t, "evaluated", sessions.lastStatus)
+	assert.Empty(t, sessions.lastStatus, "督导评分不得改 teaching_sessions.status（只由 AI 任务写入）")
 
 	second, err := svc.SubmitSupervisorEvaluation(context.Background(), 5, 7, dto.SupervisorEvaluationReq{
 		Objective: i(5), Content: i(4), Interaction: i(4), Organization: i(4), Frontier: i(3),

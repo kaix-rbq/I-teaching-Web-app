@@ -225,9 +225,9 @@ func NewWithReport(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) (*gin.
 		GET("/supervision/plans", supervisionH.Plans).
 		GET("/supervision/comment-tags", supervisionH.CommentTags).
 		GET("/supervision/ai-tasks", supervisionTaskH.Queue).
+		// 督导五维评分为主入口；observation 仅保留旧客户端评语兼容，不暴露在新 UI。
+		PUT("/sessions/:id/supervisor-evaluation", sessionH.Submit).
 		PUT("/sessions/:id/supervisor-observation", sessionH.SubmitObservation).
-		// 2026-10-16 重构 §4.5：五维评分与草稿箱整套停用，路由暂留并返回 50002。
-		PUT("/sessions/:id/supervisor-evaluation", handler.Deprecated("督导五维评分已废弃，请改用督导观察接口")).
 		POST("/ai-tasks/:id/retry", aiTaskH.Retry).
 		GET("/sessions/:id/draft", handler.Deprecated("评估草稿已停用")).
 		PUT("/sessions/:id/draft", handler.Deprecated("评估草稿已停用")).

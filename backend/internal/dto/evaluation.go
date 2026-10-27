@@ -70,7 +70,7 @@ type PendingSessionItem struct {
 // 督导评分强制 5 个维度全部录入：维度分 1-5 整数，任一维度缺失返回 40002，越界返回 40001。
 // （仅智能体侧允许维度为 null，见开发计划 §2.1。）
 //
-// ⚠️ 2026-10-16 重构后该接口已废弃（返回 50002）；督导改为纯评语，见 SupervisorObservationReq。
+// 该接口是督导评分主入口（五维必填）；supervisor-observation 仅保留旧客户端纯评语兼容。
 type SupervisorEvaluationReq struct {
 	Objective    *int   `json:"objective" binding:"omitempty,min=1,max=5"`
 	Content      *int   `json:"content" binding:"omitempty,min=1,max=5"`
@@ -178,7 +178,7 @@ type RecordingDTO struct {
 	StreamURL    string `json:"streamUrl"`
 	// PlaybackURL 是带短时票据的流式播放地址，可直接交给 <audio src>：
 	// 浏览器播放期间会持续发出 Range 请求，无法携带 Authorization 头，只能靠查询串鉴权。
-	// 仅对 supervisor 返回（教师侧恒为空串）；票据绑定录音 id，见 §8.9。
+	// 对 supervisor 与授课教师本人课程签发（其他角色为空串）；票据绑定录音 id，见 §8.9。
 	PlaybackURL string `json:"playbackUrl"`
 }
 
