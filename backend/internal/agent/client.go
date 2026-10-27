@@ -14,8 +14,13 @@ import (
 )
 
 const (
-	// s1MaxTokens 为 S1 预留足够输出空间，避免长评语/证据被截断成非法 JSON。
-	s1MaxTokens = 3000
+	// s1MaxTokens 为 S1 预留足够输出空间。
+	//
+	// ⚠️ 该模型会先输出 reasoning_content，且 reasoning token 也计入 max_tokens。
+	// 实测 3000 时一次评析 reasoning≈2275 tokens、正文 724 tokens 即触发
+	// finish_reason=length，正文 JSON 被截断 → "unexpected end of JSON input"。
+	// 8000 可覆盖当前单次课输入（reasoning + 正文）；仍保留 length 显式报错。
+	s1MaxTokens = 8000
 	// s1ParseAttempts 只对 JSON 解析失败重试一次（共 2 次调用）。
 	s1ParseAttempts = 2
 )
@@ -90,6 +95,7 @@ type chatResponse struct {
 		Message struct {
 			Content string `json:"content"`
 		} `json:"message"`
+		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
 	Error *struct {
 		Message string `json:"message"`
@@ -170,6 +176,12 @@ func (c *Client) analyzeSessionOnce(ctx context.Context, in EvalInput) (*Result,
 	}
 	if len(cr.Choices) == 0 {
 		return nil, fmt.Errorf("agent: 上游返回空 choices")
+	}
+	if cr.Choices[0].FinishReason == "length" {
+		return nil, &responseParseError{fmt.Errorf(
+			"agent: 上游输出被 max_tokens 截断（finish_reason=length，content=%d 字节），请提高 s1MaxTokens",
+			len(cr.Choices[0].Message.Content),
+		)}
 	}
 	promptVersion := c.cfg.PromptVersion
 	if promptVersion == "" {

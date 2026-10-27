@@ -11,8 +11,9 @@ import (
 	"strings"
 )
 
-// s2MaxTokens 为教师级报告预留输出空间；S2 输出比 S1 短，但保留足够余量避免截断。
-const s2MaxTokens = 3000
+// s2MaxTokens 为教师级报告预留输出空间。
+// 与 S1 相同，reasoning token 也计入 max_tokens；3000 在结构化报告上同样有截断风险。
+const s2MaxTokens = 8000
 
 // ReportInput 是 S2 教师级报告的输入：只包含结构化评价摘要，
 // 绝不包含转写全文、音频或原始学生信息。
@@ -164,6 +165,12 @@ func (c *Client) AnalyzeReport(ctx context.Context, in ReportInput) (*ReportResu
 	}
 	if len(cr.Choices) == 0 {
 		return nil, errors.New("agent: S2 上游返回空 choices")
+	}
+	if cr.Choices[0].FinishReason == "length" {
+		return nil, fmt.Errorf(
+			"agent: S2 输出被 max_tokens 截断（finish_reason=length，content=%d 字节），请提高 s2MaxTokens",
+			len(cr.Choices[0].Message.Content),
+		)
 	}
 	return ParseReportResponse(cr.Choices[0].Message.Content)
 }
