@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
 
+	"aijiaoxue-api/internal/agent"
 	"aijiaoxue-api/internal/model"
 )
 
@@ -166,4 +168,64 @@ func (s *Store) CountChunks(ctx context.Context, documentID uint64) (int64, erro
 	err := s.db.WithContext(ctx).Model(&model.KnowledgeChunk{}).
 		Where("document_id = ?", documentID).Count(&n).Error
 	return n, err
+}
+
+// LoadVectors 只读加载符合过滤条件且已完成入库的知识库切片向量。
+//
+// 模型与维度必须同时匹配，避免不同向量空间混用；embedding 为 NULL 或
+// 长度与查询维度不符时返回明确错误，不静默混入候选集。
+func (s *Store) LoadVectors(ctx context.Context, q agent.VectorQuery) ([]agent.StoredChunk, error) {
+	if s == nil || s.db == nil {
+		return nil, errors.New("kb: store 未初始化")
+	}
+	if len(q.Collections) == 0 {
+		return []agent.StoredChunk{}, nil
+	}
+	if strings.TrimSpace(q.EmbeddingModel) == "" {
+		return nil, errors.New("kb: 加载向量时 embedding model 不能为空")
+	}
+	if q.EmbeddingDim <= 0 {
+		return nil, fmt.Errorf("kb: 加载向量时 embedding dim 非法: %d", q.EmbeddingDim)
+	}
+
+	var rows []struct {
+		ID         uint64 `gorm:"column:id"`
+		Collection string `gorm:"column:collection"`
+		Heading    string `gorm:"column:heading"`
+		Content    string `gorm:"column:content"`
+		Embedding  []byte `gorm:"column:embedding"`
+	}
+	tx := s.db.WithContext(ctx).
+		Table("knowledge_chunks AS kc").
+		Select("kc.id AS id, kc.collection AS collection, kc.heading AS heading, kc.content AS content, kc.embedding AS embedding").
+		Joins("JOIN knowledge_documents AS kd ON kd.id = kc.document_id").
+		Where("kd.status = ?", "done").
+		Where("kc.embedding IS NOT NULL").
+		Where("kc.embedding_model = ? AND kc.embedding_dim = ?", strings.TrimSpace(q.EmbeddingModel), q.EmbeddingDim).
+		Where("kc.collection IN ?", q.Collections)
+	if q.CourseID != nil {
+		tx = tx.Where("(kc.course_id = 0 OR kc.course_id = ?)", *q.CourseID)
+	}
+	if subject := strings.TrimSpace(q.Subject); subject != "" {
+		tx = tx.Where("kc.subject = ?", subject)
+	}
+	if err := tx.Order("kc.id ASC").Scan(&rows).Error; err != nil {
+		return nil, fmt.Errorf("查询知识库向量失败: %w", err)
+	}
+
+	out := make([]agent.StoredChunk, 0, len(rows))
+	for _, row := range rows {
+		vec, err := DecodeVector(row.Embedding, q.EmbeddingDim)
+		if err != nil {
+			return nil, fmt.Errorf("kb: 解析向量 %s#%d 失败: %w", row.Collection, row.ID, err)
+		}
+		out = append(out, agent.StoredChunk{
+			ID:         row.ID,
+			Collection: row.Collection,
+			Heading:    row.Heading,
+			Content:    row.Content,
+			Embedding:  vec,
+		})
+	}
+	return out, nil
 }

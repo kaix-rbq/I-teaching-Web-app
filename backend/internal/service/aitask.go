@@ -44,6 +44,7 @@ type aiTaskService struct {
 	evals      repository.EvaluationRepository
 	recordings repository.RecordingRepository
 	analyzer   agent.SessionAnalyzer
+	retriever  agent.Retriever
 	agentCfg   config.AgentConfig
 	evalCfg    config.EvaluationConfig
 	sem        chan struct{}
@@ -56,6 +57,7 @@ func NewAiTaskService(
 	evals repository.EvaluationRepository,
 	recordings repository.RecordingRepository,
 	analyzer agent.SessionAnalyzer,
+	retriever agent.Retriever,
 	agentCfg config.AgentConfig,
 	evalCfg config.EvaluationConfig,
 ) AiTaskService {
@@ -65,6 +67,7 @@ func NewAiTaskService(
 		evals:      evals,
 		recordings: recordings,
 		analyzer:   analyzer,
+		retriever:  retriever,
 		agentCfg:   agentCfg,
 		evalCfg:    evalCfg,
 		sem:        make(chan struct{}, agentCfg.Concurrency()),
@@ -200,6 +203,20 @@ func (s *aiTaskService) process(parent context.Context, taskID uint64) {
 		return
 	}
 
+	var knowledge []agent.RetrievedChunk
+	if s.retriever != nil {
+		q := strings.TrimSpace(session.CourseName + " " + session.Topic + " 课堂教学质量 五维评分锚点")
+		hits, rerr := s.retriever.Retrieve(ctx, q, agent.ChunkFilter{
+			Collections: []string{"kb-rubric"},
+			CourseID:    &session.CourseID,
+		})
+		if rerr != nil {
+			slog.Warn("知识库检索失败，S1 降级为无 KB", "sessionID", session.ID, "err", rerr)
+		} else {
+			knowledge = hits
+		}
+	}
+
 	result, err := s.analyzer.AnalyzeSession(ctx, agent.EvalInput{
 		SessionID:   session.ID,
 		CourseName:  session.CourseName,
@@ -209,6 +226,7 @@ func (s *aiTaskService) process(parent context.Context, taskID uint64) {
 		Topic:       session.Topic,
 		Transcript:  tr.Content,
 		Segments:    decodeSegments(tr.Segments),
+		Knowledge:   knowledge,
 	})
 	if err != nil {
 		fail("AI 评析调用失败")

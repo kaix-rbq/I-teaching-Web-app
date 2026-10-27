@@ -29,7 +29,7 @@ import (
 	"aijiaoxue-api/internal/agent"
 	"aijiaoxue-api/internal/config"
 	"aijiaoxue-api/internal/kb"
-	"aijiaoxue-api/internal/service"
+	"aijiaoxue-api/pkg/scrub"
 )
 
 func main() {
@@ -216,7 +216,7 @@ func buildIngester(cfg *config.Config, db *gorm.DB) (*kb.Store, *kb.Ingester, er
 	if embedder == nil {
 		return nil, nil, fmt.Errorf("embedding 未启用或缺凭据/模型：检查 embedding.enabled、AIJIAOXUE_AGENT_API_KEY 与 embedding.model")
 	}
-	scrubber := service.NewScrubber(cfg.Transcription.StudentNames)
+	scrubber := scrub.NewScrubber(cfg.Transcription.StudentNames)
 	scrub := func(s string) string {
 		out, _ := scrubber.Scrub(s, nil)
 		return out

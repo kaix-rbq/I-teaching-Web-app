@@ -10,6 +10,7 @@ import (
 	"aijiaoxue-api/internal/config"
 	"aijiaoxue-api/internal/dto"
 	"aijiaoxue-api/internal/handler"
+	"aijiaoxue-api/internal/kb"
 	"aijiaoxue-api/internal/middleware"
 	"aijiaoxue-api/internal/repository"
 	"aijiaoxue-api/internal/service"
@@ -69,9 +70,15 @@ func New(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) (*gin.Engine, se
 	if client := agent.NewClient(cfg.Agent); client != nil {
 		sessionAnalyzer = client
 	}
+	// 知识库检索器与 embedding 客户端同生共死：未启用 embedding 时保持 nil，
+	// S1 会无 KB 降级运行，且不会因检索失败把 ai_tasks 标 failed。
+	var retriever agent.Retriever
+	if emb := agent.NewEmbeddingClient(cfg.Agent, cfg.Embedding); emb != nil {
+		retriever = agent.NewRetriever(emb, kb.NewStore(db), cfg.Embedding)
+	}
 	aiTaskSvc := service.NewAiTaskService(
 		aiTaskRepo, sessionRepo, evaluationRepo, recordingRepo,
-		sessionAnalyzer, cfg.Agent, cfg.Evaluation,
+		sessionAnalyzer, retriever, cfg.Agent, cfg.Evaluation,
 	)
 	recordingSvc := service.NewRecordingService(
 		recordingRepo, sessionRepo,

@@ -34,6 +34,8 @@ type EvalInput struct {
 	Topic       string
 	Transcript  string
 	Segments    []Segment
+	// Knowledge 是本次检索命中的知识库片段；为空表示无 KB 降级运行。
+	Knowledge []RetrievedChunk
 }
 
 // Quote 是一段可定位的转写引用（start/end 单位秒）。
@@ -232,4 +234,29 @@ func nonNilStrings(in []string) []string {
 		return []string{}
 	}
 	return in
+}
+
+// filterCitedChunks 只保留本次实际注入的知识库 chunk id，去重并保持原顺序。
+// 没有知识片段时一律返回空切片，防止模型在无 KB 运行时编造引用。
+func filterCitedChunks(cited []string, knowledge []RetrievedChunk) []string {
+	allowed := make(map[string]struct{}, len(knowledge))
+	for _, k := range knowledge {
+		if id := strings.TrimSpace(k.ChunkID); id != "" {
+			allowed[id] = struct{}{}
+		}
+	}
+	out := make([]string, 0, len(cited))
+	seen := make(map[string]struct{}, len(cited))
+	for _, raw := range cited {
+		id := strings.TrimSpace(raw)
+		if _, ok := allowed[id]; !ok {
+			continue
+		}
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out
 }
