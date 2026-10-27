@@ -331,7 +331,7 @@ want "同日同节次重复返回 40901"       "40901" "$(req -X POST "$BASE/ses
 
 EV="$(req -X PUT "$BASE/sessions/$SESS_ID/supervisor-observation" "${AUTH_S[@]}" -H 'Content-Type: application/json' \
   -d '{"comment":"verify.sh 审核意见","highlights":"亮点A","improvements":"主要问题B","suggestions":"改进建议C"}')"
-want "督导提交观察成功"               "0"   "$EV" "d['code']"
+want "旧客户端 observation 提交成功"   "0"   "$EV" "d['code']"
 want "观察无五维 objective=null"       "None" "$EV" "d['data']['objective']"
 want "观察无五维 totalScore=null"      "None" "$EV" "d['data']['totalScore']"
 want "观察 highlights 生效"            "亮点A" "$EV" "d['data']['highlights']"
@@ -339,12 +339,24 @@ want "观察写入口径版本=v1"             "v1"  "$EV" "d['data']['formulaVe
 want "督导观察不改场次状态（仍 scheduled）" "scheduled" "$(req "$BASE/sessions/$SESS_ID" "${AUTH_S[@]}")" "d['data']['status']"
 want "空观察返回 40002"                "40002" "$(req -X PUT "$BASE/sessions/$SESS_ID/supervisor-observation" "${AUTH_S[@]}" -H 'Content-Type: application/json' -d '{}')" "d['code']"
 want "教师提交督导观察返回 40301"      "40301" "$(req -X PUT "$BASE/sessions/$SESS_ID/supervisor-observation" "${AUTH_T[@]}" -H 'Content-Type: application/json' -d '{"comment":"x"}')" "d['code']"
-want "旧五维评分接口返回 50002"        "50002" "$(req -X PUT "$BASE/sessions/$SESS_ID/supervisor-evaluation" "${AUTH_S[@]}" -H 'Content-Type: application/json' -d '{"objective":5}')" "d['code']"
+want "五维评分缺维度返回 40002"        "40002" "$(req -X PUT "$BASE/sessions/$SESS_ID/supervisor-evaluation" "${AUTH_S[@]}" -H 'Content-Type: application/json' -d '{"objective":5}')" "d['code']"
 want "草稿列表接口返回 50002"          "50002" "$(req "$BASE/drafts" "${AUTH_S[@]}")" "d['code']"
+
+SE="$(req -X PUT "$BASE/sessions/$SESS_ID/supervisor-evaluation" "${AUTH_S[@]}" -H 'Content-Type: application/json' \
+  -d '{"objective":5,"content":4,"interaction":4,"organization":3,"frontier":2,"comment":"verify.sh 正式评分","highlights":"亮点A","improvements":"主要问题B","suggestions":"改进建议C"}')"
+want "督导五维评分主入口成功"           "0"    "$SE" "d['code']"
+want "督导总分=77.5（0-100）"           "77.5" "$SE" "d['data']['totalScore']"
+want "督导评分写入口径版本=v1"          "v1"   "$SE" "d['data']['formulaVersion']"
+want "督导评分不改场次状态（仍 scheduled）" "scheduled" "$(req "$BASE/sessions/$SESS_ID" "${AUTH_S[@]}")" "d['data']['status']"
+want "evaluation 暴露 supervisorEvaluated" "True" "$(req "$BASE/sessions/$SESS_ID/evaluation" "${AUTH_S[@]}")" "d['data']['supervisorEvaluated']"
+want "AI 综合分不受督导评分影响=null"   "None" "$(req "$BASE/sessions/$SESS_ID/evaluation" "${AUTH_S[@]}")" "d['data']['agentScore']"
+want "督导评分后趋势仍无 agent 点"      "True" "$(req "$BASE/teachers/2/score-trend?semester=2026-2027-1" "${AUTH_S[@]}")" "any(p['value'] is None for s in d['data'] if s['key']=='composite' for p in s['points'] if p['date']=='2026-09-16')"
 
 EV2="$(req -X PUT "$BASE/sessions/$SESS_ID/supervisor-observation" "${AUTH_S[@]}" -H 'Content-Type: application/json' \
   -d '{"comment":"verify.sh 审核意见（重提）","highlights":"亮点A2"}')"
-want "观察幂等覆盖 comment 生效"       "verify.sh 审核意见（重提）" "$EV2" "d['data']['comment']"
+want "observation 兼容覆盖评语生效"    "verify.sh 审核意见（重提）" "$EV2" "d['data']['comment']"
+want "observation 保留五维 objective=5" "5"  "$EV2" "d['data']['objective']"
+want "observation 保留 totalScore=77.5" "77.5" "$EV2" "d['data']['totalScore']"
 want "幂等覆盖后评价仍为 1 条"         "1"   "$(req "$BASE/sessions/$SESS_ID/evaluation" "${AUTH_S[@]}")" "len(d['data']['supervisorScores'])"
 want "新增后课程 1 授课记录总数=4"     "4"   "$(req "$BASE/courses/1/sessions" "${AUTH_S[@]}")" "d['data']['total']"
 
