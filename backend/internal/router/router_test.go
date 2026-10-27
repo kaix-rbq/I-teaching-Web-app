@@ -77,8 +77,8 @@ func TestStreamRouteUsesTicketAuth(t *testing.T) {
 	})
 }
 
-// TestAgentReportRoutesRegistered 锁定 P3 两条路由及现有 P2 路由不冲突。
-func TestAgentReportRoutesRegistered(t *testing.T) {
+// TestAgentRoutesRegistered 锁定 P3/P4 路由及现有 P2 路由不冲突。
+func TestAgentRoutesRegistered(t *testing.T) {
 	mgr := jwtutil.New("router-test-secret", time.Hour)
 	engine, _, _, _ := NewWithReport(newOfflineDB(t), testConfig(), mgr)
 
@@ -90,4 +90,5 @@ func TestAgentReportRoutesRegistered(t *testing.T) {
 	assert.True(t, registered["POST /api/v1/teachers/:id/ai-report/regenerate"])
 	assert.True(t, registered["GET /api/v1/teachers/:id/score-trend"])
 	assert.True(t, registered["GET /api/v1/courses/:id/agent-suggestions"])
+	assert.True(t, registered["POST /api/v1/agent/chat"])
 }

@@ -76,9 +76,11 @@ func NewWithReport(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) (*gin.
 	// 同理：agent.NewClient 未配置时返回 nil *Client，直接装进接口同样会 holds-nil-pointer。
 	var sessionAnalyzer agent.SessionAnalyzer
 	var reportAnalyzer agent.ReportAnalyzer
+	var chatStreamer agent.ChatStreamer
 	if client := agent.NewClient(cfg.Agent); client != nil {
 		sessionAnalyzer = client
 		reportAnalyzer = client
+		chatStreamer = client
 	}
 	// 知识库检索器与 embedding 客户端同生共死：未启用 embedding 时保持 nil，
 	// S1 会无 KB 降级运行，且不会因检索失败把 ai_tasks 标 failed。
@@ -89,6 +91,9 @@ func NewWithReport(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) (*gin.
 	reportSvc := service.NewReportService(
 		aiTaskRepo, teacherReportRepo, evaluationRepo, userRepo,
 		reportAnalyzer, cfg.Agent, cfg.Evaluation,
+	)
+	agentChatSvc := service.NewAgentChatService(
+		courseRepo, evaluationRepo, retriever, chatStreamer, cfg.Agent, cfg.Evaluation,
 	)
 	aiTaskSvc := service.NewAiTaskService(
 		aiTaskRepo, sessionRepo, evaluationRepo, recordingRepo,
@@ -111,6 +116,7 @@ func NewWithReport(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) (*gin.
 	teacherScoreH := handler.NewTeacherScoreHandler(teacherScoreSvc)
 	agentImproveH := handler.NewAgentImproveHandler(agentImproveSvc)
 	agentReportH := handler.NewAgentReportHandler(reportSvc)
+	agentChatH := handler.NewAgentChatHandler(agentChatSvc)
 	recordingH := handler.NewRecordingHandler(recordingSvc)
 	aiTaskH := handler.NewAiTaskHandler(aiTaskSvc)
 	improvementH := handler.NewImprovementHandler(improvementSvc)
@@ -167,6 +173,8 @@ func NewWithReport(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) (*gin.
 	// §8.15 P3 教师级 AI 报告：读接口裁剪在 service；重生成仅 supervisor/director。
 	authed.GET("/teachers/:id/ai-report", agentReportH.Get)
 	authed.POST("/teachers/:id/ai-report/regenerate", agentReportH.Regenerate)
+	// §8.15 P4 S3 流式提优对话：无状态，不落库；课程范围裁剪在 service 层。
+	authed.POST("/agent/chat", agentChatH.Chat)
 
 	// —— AI 观察（D3 / R0.2）：详情与入队；数据裁剪在 service 层（D8 教师侧风险脱敏）——
 	authed.GET("/sessions/:id/ai-observation", aiTaskH.Observation)
