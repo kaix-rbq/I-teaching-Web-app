@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"unicode"
 )
 
 // ErrUnavailable 表示 AI 引擎未配置（无 Key / 未启用），任务应记为 failed 而非崩溃。
@@ -179,19 +180,54 @@ func assignScore(r *Result, key string, score *int) {
 
 // locateQuotes 只保留能在脱敏转写中定位到子串的引用（宁缺勿滥）。
 // 定位失败（模型编造或脱敏改写）的引用一律丢弃。
+//
+// 定位使用归一化后的文本：删除空白与标点、全角 ASCII 转半角、ASCII 转小写。
+// 归一化只服务匹配，返回给前端的 Quote 仍是模型原文（TrimSpace 后）。
+// 归一化后为空的引用直接丢弃，避免「只含标点」被误判为命中。
 func locateQuotes(quotes []Quote, transcript string) []Quote {
+	normalizedTranscript := normalizeQuoteText(transcript)
 	out := make([]Quote, 0, len(quotes))
 	for _, q := range quotes {
 		text := strings.TrimSpace(q.Quote)
 		if text == "" {
 			continue
 		}
-		if transcript != "" && !strings.Contains(transcript, text) {
+		normalizedQuote := normalizeQuoteText(text)
+		if normalizedQuote == "" {
+			continue
+		}
+		// 空转写保持历史行为：无法定位时不做子串校验；非空转写必须命中。
+		if transcript != "" && !strings.Contains(normalizedTranscript, normalizedQuote) {
 			continue
 		}
 		out = append(out, Quote{Start: q.Start, End: q.End, Quote: text})
 	}
 	return out
+}
+
+// normalizeQuoteText 生成用于引文定位的归一化文本：
+//   - 删除 unicode.IsSpace（空白）与 unicode.IsPunct（中英文/全半角标点）；
+//   - U+FF01–U+FF5E 全角 ASCII 转半角；
+//   - ASCII 大写转小写；
+//   - 汉字、数字及其他文字保持原样。
+//
+// 不做模糊匹配（如编辑距离/短片段包含），编造引用仍必须定位失败。
+func normalizeQuoteText(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		if r >= 0xFF01 && r <= 0xFF5E {
+			r -= 0xFEE0
+		}
+		if unicode.IsSpace(r) || unicode.IsPunct(r) {
+			continue
+		}
+		if r >= 'A' && r <= 'Z' {
+			r += 'a' - 'A'
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }
 
 // orderedNotObservable 去重并按固定维度顺序输出，保证结果稳定（含无对应维度的键则丢弃）。

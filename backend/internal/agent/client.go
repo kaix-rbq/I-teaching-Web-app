@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,6 +12,20 @@ import (
 
 	"aijiaoxue-api/internal/config"
 )
+
+const (
+	// s1MaxTokens 为 S1 预留足够输出空间，避免长评语/证据被截断成非法 JSON。
+	s1MaxTokens = 3000
+	// s1ParseAttempts 只对 JSON 解析失败重试一次（共 2 次调用）。
+	s1ParseAttempts = 2
+)
+
+// responseParseError 标记「上游已成功返回，但内容不是可解析的 S1 JSON」。
+// 仅这类错误允许重试；HTTP 错误、超时与上游业务错误不重试，避免重复计费。
+type responseParseError struct{ err error }
+
+func (e *responseParseError) Error() string { return e.err.Error() }
+func (e *responseParseError) Unwrap() error { return e.err }
 
 // SessionAnalyzer 是 AI 单次课评析能力接口；*Client 实现它，测试用假实现替换。
 type SessionAnalyzer interface {
@@ -84,6 +99,9 @@ type chatResponse struct {
 
 // AnalyzeSession 调用 LLM 评析单次课并解析为结构化结果。
 // 上游失败统一包装为普通 error，由 service 层记 ai_tasks.failed，绝不向 HTTP 主链路传播。
+//
+// 重试策略（P1.4）：只对「上游 200 但响应 JSON / S1 JSON 解析失败」重试一次；
+// 两次调用复用同一个 ctx 与同一个 semaphore 名额，不绕过并发闸门。
 func (c *Client) AnalyzeSession(ctx context.Context, in EvalInput) (*Result, error) {
 	select {
 	case c.sem <- struct{}{}:
@@ -92,6 +110,23 @@ func (c *Client) AnalyzeSession(ctx context.Context, in EvalInput) (*Result, err
 		return nil, ctx.Err()
 	}
 
+	var lastErr error
+	for attempt := 0; attempt < s1ParseAttempts; attempt++ {
+		res, err := c.analyzeSessionOnce(ctx, in)
+		if err == nil {
+			return res, nil
+		}
+		lastErr = err
+		var parseErr *responseParseError
+		if !errors.As(err, &parseErr) {
+			return nil, err
+		}
+	}
+	return nil, lastErr
+}
+
+// analyzeSessionOnce 执行一次完整的上游调用与解析；解析失败包装为 responseParseError。
+func (c *Client) analyzeSessionOnce(ctx context.Context, in EvalInput) (*Result, error) {
 	body, err := json.Marshal(chatRequest{
 		Model: c.cfg.LLMModel,
 		Messages: []chatMessage{
@@ -100,7 +135,7 @@ func (c *Client) AnalyzeSession(ctx context.Context, in EvalInput) (*Result, err
 		},
 		Temperature:    0.2,
 		ResponseFormat: &respFormat{Type: "json_object"},
-		MaxTokens:      2000,
+		MaxTokens:      s1MaxTokens,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("agent: 构造请求失败: %w", err)
@@ -118,14 +153,17 @@ func (c *Client) AnalyzeSession(ctx context.Context, in EvalInput) (*Result, err
 		return nil, fmt.Errorf("agent: 调用上游失败: %w", err)
 	}
 	defer resp.Body.Close()
-	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	raw, readErr := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if readErr != nil {
+		return nil, fmt.Errorf("agent: 读取上游响应失败: %w", readErr)
+	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("agent: 上游返回 %d: %s", resp.StatusCode, truncate(string(raw), 200))
 	}
 
 	var cr chatResponse
 	if err := json.Unmarshal(raw, &cr); err != nil {
-		return nil, fmt.Errorf("agent: 解析上游响应失败: %w", err)
+		return nil, &responseParseError{fmt.Errorf("agent: 解析上游响应失败: %w", err)}
 	}
 	if cr.Error != nil {
 		return nil, fmt.Errorf("agent: 上游错误: %s", cr.Error.Message)
@@ -139,7 +177,7 @@ func (c *Client) AnalyzeSession(ctx context.Context, in EvalInput) (*Result, err
 	}
 	res, err := ParseS1Response(cr.Choices[0].Message.Content, in.Transcript, promptVersion, c.cfg.LLMModel)
 	if err != nil {
-		return nil, err
+		return nil, &responseParseError{err}
 	}
 	res.Evidence.CitedChunks = filterCitedChunks(res.Evidence.CitedChunks, in.Knowledge)
 	return res, nil

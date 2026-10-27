@@ -16,8 +16,13 @@ import (
 	"aijiaoxue-api/pkg/scoring"
 )
 
-// aiTaskErrMaxLen 对齐 ai_tasks.error_message 的 VARCHAR(255)。
-const aiTaskErrMaxLen = 255
+const (
+	// aiTaskErrMaxLen 对齐 ai_tasks.error_message 的 VARCHAR(255)。
+	aiTaskErrMaxLen = 255
+	// maxEvalRunes 是送入 S1 的转写长度上限（按 rune 计，不是字节）。
+	// 超长转写会显著推高时延与 token 成本，截断后正常评析；证据定位失败按现有规则降级。
+	maxEvalRunes = 80000
+)
 
 // AiTaskService 负责 AI 评析任务链（D3 / R0.2）。
 //
@@ -120,12 +125,13 @@ func (s *aiTaskService) enqueue(ctx context.Context, sessionID uint64) (*model.A
 			return existing, false, nil
 		}
 		if err := s.tasks.Update(ctx, existing.ID, map[string]any{
-			"status": model.AiTaskStatusPending, "error_message": "",
+			"status": model.AiTaskStatusPending, "attempts": 0, "error_message": "",
 			"started_at": nil, "finished_at": nil,
 		}); err != nil {
 			return nil, false, errcode.Wrap(errcode.Internal, "重置 AI 任务失败", err)
 		}
 		existing.Status = model.AiTaskStatusPending
+		existing.Attempts = 0
 		existing.ErrorMessage = ""
 		return existing, true, nil
 	}
@@ -168,6 +174,15 @@ func (s *aiTaskService) process(parent context.Context, taskID uint64) {
 		_ = s.tasks.Update(failCtx, taskID, map[string]any{
 			"status": model.AiTaskStatusFailed, "error_message": reason, "finished_at": time.Now(),
 		})
+	}
+
+	// 自动重试上限（P1.5）：必须在置 running 前判断，达到上限直接 failed，不调用模型。
+	// 人工 Retry 会先把 attempts 复位为 0，从而允许再次执行。
+	if task.Attempts >= model.AiTaskMaxAttempts {
+		fail("AI 评析重试次数已达上限")
+		slog.Warn("AI 评析达到重试上限", "taskID", taskID, "attempts", task.Attempts,
+			"limit", model.AiTaskMaxAttempts)
+		return
 	}
 
 	if err := s.tasks.Update(ctx, taskID, map[string]any{
@@ -217,6 +232,13 @@ func (s *aiTaskService) process(parent context.Context, taskID uint64) {
 		}
 	}
 
+	segments := decodeSegments(tr.Segments)
+	transcript, segments, truncated, originalRunes := truncateEvalTranscript(tr.Content, segments)
+	if truncated {
+		slog.Warn("transcript truncated",
+			"sessionID", session.ID, "originalRunes", originalRunes, "limit", maxEvalRunes)
+	}
+
 	result, err := s.analyzer.AnalyzeSession(ctx, agent.EvalInput{
 		SessionID:   session.ID,
 		CourseName:  session.CourseName,
@@ -224,8 +246,8 @@ func (s *aiTaskService) process(parent context.Context, taskID uint64) {
 		SessionDate: session.SessionDate.Format("2006-01-02"),
 		Period:      session.Period,
 		Topic:       session.Topic,
-		Transcript:  tr.Content,
-		Segments:    decodeSegments(tr.Segments),
+		Transcript:  transcript,
+		Segments:    segments,
 		Knowledge:   knowledge,
 	})
 	if err != nil {
@@ -351,12 +373,14 @@ func (s *aiTaskService) Retry(ctx context.Context, taskID uint64) (*dto.AiTaskDT
 		return nil, errcode.Wrap(errcode.Internal, "查询 AI 任务失败", err)
 	}
 	if err := s.tasks.Update(ctx, taskID, map[string]any{
-		"status": model.AiTaskStatusPending, "error_message": "", "started_at": nil, "finished_at": nil,
+		"status": model.AiTaskStatusPending, "attempts": 0, "error_message": "",
+		"started_at": nil, "finished_at": nil,
 	}); err != nil {
 		return nil, errcode.Wrap(errcode.Internal, "重置 AI 任务失败", err)
 	}
 	go s.process(context.Background(), taskID)
 	task.Status = model.AiTaskStatusPending
+	task.Attempts = 0
 	task.ErrorMessage = ""
 	return toAiTaskDTO(task), nil
 }
@@ -377,6 +401,59 @@ func (s *aiTaskService) ResumeStuck(ctx context.Context) (int, error) {
 		n++
 	}
 	return n, nil
+}
+
+// truncateEvalTranscript 把送入 S1 的转写限制在 maxEvalRunes（按 rune 计）。
+//
+//   - 有 segments：按累计 rune 截断 segments，并用保留的 segments 文本拼接 Transcript，
+//     确保 analyzer 无论读 Transcript 还是读 Segments，看到的内容都不超过上限；
+//   - 无 segments：直接截断 Content；
+//   - truncated 表示原始内容超过上限；originalRunes 用于日志定位数据规模。
+//
+// 截断导致的引用定位失败由 agent.locateQuotes 按现有规则丢弃（不放松证据校验）。
+func truncateEvalTranscript(content string, segments []agent.Segment) (string, []agent.Segment, bool, int) {
+	contentRunes := []rune(content)
+	originalRunes := len(contentRunes)
+
+	if len(segments) > 0 {
+		segmentRunes := 0
+		for _, seg := range segments {
+			segmentRunes += len([]rune(seg.Text))
+		}
+		if segmentRunes > originalRunes {
+			originalRunes = segmentRunes
+		}
+
+		remaining := maxEvalRunes
+		kept := make([]agent.Segment, 0, len(segments))
+		var b strings.Builder
+		for _, seg := range segments {
+			if remaining <= 0 {
+				break
+			}
+			runes := []rune(seg.Text)
+			if len(runes) == 0 {
+				continue
+			}
+			if len(runes) > remaining {
+				runes = runes[:remaining]
+			}
+			seg.Text = string(runes)
+			kept = append(kept, seg)
+			b.WriteString(seg.Text)
+			remaining -= len(runes)
+		}
+		if len(kept) > 0 {
+			return b.String(), kept, originalRunes > maxEvalRunes, originalRunes
+		}
+		// segments 全为空串时退化为纯文本截断。
+		segments = nil
+	}
+
+	if len(contentRunes) <= maxEvalRunes {
+		return content, segments, originalRunes > maxEvalRunes, originalRunes
+	}
+	return string(contentRunes[:maxEvalRunes]), segments, true, originalRunes
 }
 
 // decodeSegments 解析 transcripts.segments JSON 为 agent.Segment（失败则退化为纯文本）。

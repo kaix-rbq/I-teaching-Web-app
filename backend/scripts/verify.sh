@@ -74,12 +74,9 @@ want "课程 1 班级明细 2 条" "2"  "$DETAIL" "len(d['data']['classes'])"
 want "课程 1 编码"          "SE3101" "$DETAIL" "d['data']['code']"
 
 echo
-echo "${c_dim}== 4. 督导覆盖率与听评课安排 S5.1（对照 MySQL 文档 §6）==${c_reset}"
-COV="$(req "$BASE/supervision/coverage" "${AUTH_S[@]}")"
-want "当前学期 open 课程数=6" "6"   "$COV" "d['data']['totalCourses']"
-want "已完成听评课程数=3"     "3"   "$COV" "d['data']['supervisedCourses']"
-want "总体覆盖率=0.5"         "0.5" "$COV" "d['data']['rate']"
-want "分教研室覆盖率条目=3"   "3"   "$COV" "len(d['data']['byDepartment'])"
+echo "${c_dim}== 4. 听评课安排 S5.1（覆盖率口径已停用 D2）==${c_reset}"
+# 覆盖率不再作为业务指标：仅保留 deprecated 路由的 code smoke，不断言数值。
+want "覆盖率接口保留 deprecated（仅 code smoke）" "0" "$(req "$BASE/supervision/coverage" "${AUTH_S[@]}")" "d['code']"
 PLANS="$(req "$BASE/supervision/plans?page=1&pageSize=10" "${AUTH_S[@]}")"
 want "听评课安排总数=7"       "7"   "$PLANS" "d['data']['total']"
 want "筛选 status=completed 命中 3" "3" "$(req "$BASE/supervision/plans?status=completed" "${AUTH_S[@]}")" "d['data']['total']"
@@ -101,7 +98,7 @@ want "教师：资源总数=3"     "3"   "$DASH_T" "d['data']['resourceCount']"
 DASH_S="$(req "$BASE/dashboard" "${AUTH_S[@]}")"
 want "督导：听评课安排=7"       "7"    "$DASH_S" "len(d['data']['recentPlans'])"
 want "督导：最近草稿=0"         "0"    "$DASH_S" "len(d['data']['recentDrafts'])"
-want "督导：待评估授课记录=0"   "0"    "$DASH_S" "len(d['data']['pendingSessions'])"
+want "督导：待 AI 评析授课记录=0" "0"  "$DASH_S" "len(d['data']['pendingSessions'])"
 want "督导：计划 1 已关联评估"   "True" "$DASH_S" "[p['evaluated'] for p in d['data']['recentPlans'] if p['id']==1][0]"
 
 echo
@@ -185,6 +182,22 @@ want "场次 1 督导总分=null（B8 不打分）"       "None" "$E1" "d['data'
 want "场次 1 智能体参考=qwen-audio-v1" "qwen-audio-v1" "$E1" "d['data']['agentScore']['aiModelVersion']"
 want "场次 1 智能体 objective=4"    "4"     "$E1" "d['data']['agentScore']['objective']"
 want "场次 1 智能体置信度=0.7"         "0.7"   "$E1" "d['data']['agentScore']['aiConfidence']"
+want "P1a 授课记录列表含 supervisorEvaluated" "True" "$C1SESS" "all('supervisorEvaluated' in x for x in d['data']['list'])"
+want "P1a 评估聚合 supervisorEvaluated=true" "True" "$E1" "d['data']['supervisorEvaluated']"
+
+echo
+echo "${c_dim}== 10.1 P2 提优读接口 smoke ==${c_reset}"
+AS="$(req "$BASE/courses/1/agent-suggestions?semester=2026-2027-1" "${AUTH_S[@]}")"
+want "P2 课程提优建议 code=0"           "0"           "$AS" "d['code']"
+want "P2 课程提优建议返回数组"          "True"        "$AS" "isinstance(d['data'], list)"
+want "P2 课程提优建议按课次倒序"        "2026-09-26"  "$AS" "d['data'][0]['sessionDate']"
+want "P2 课程提优建议 evidence 为字符串" "True"       "$AS" "isinstance(d['data'][0]['evidence'], str)"
+TR="$(req "$BASE/teachers/2/score-trend?semester=2026-2027-1" "${AUTH_S[@]}")"
+want "P2 教师趋势 code=0"               "0"           "$TR" "d['code']"
+want "P2 教师趋势返回 6 条 series"      "6"           "$TR" "len(d['data'])"
+want "P2 教师趋势首条=composite"        "composite"   "$TR" "d['data'][0]['key']"
+want "P2 教师趋势 frontier 为观测项"    "True"        "$TR" "d['data'][5]['isObservation']"
+want "P2 教师趋势点含 value 字段"       "True"        "$TR" "all('value' in p for s in d['data'] for p in s['points'])"
 
 echo
 echo "${c_dim}== 11. 教师级/课程级聚合（与 pkg/scoring 种子数据集单测同源）==${c_reset}"
@@ -279,6 +292,8 @@ SESS_ID="$(json "$SESS" "d['data']['id']")"
 want "督导创建授课记录成功"           "0"        "$SESS" "d['code']"
 want "新场次初始状态=scheduled"       "scheduled" "$SESS" "d['data']['status']"
 want "新场次教师随课程落库=李明"      "李明"      "$SESS" "d['data']['teacherName']"
+TR_PENDING="$(req "$BASE/teachers/2/score-trend?semester=2026-2027-1" "${AUTH_S[@]}")"
+want "P2 趋势无 agent 评价点为 null"   "True"      "$TR_PENDING" "any(p['value'] is None for s in d['data'] if s['key']=='composite' for p in s['points'] if p['date']=='2026-09-16')"
 want "同日同节次重复返回 40901"       "40901" "$(req -X POST "$BASE/sessions" "${AUTH_S[@]}" -H 'Content-Type: application/json' -d '{"courseId":1,"classId":1,"sessionDate":"2026-09-16","period":"验收节次"}')" "d['code']"
 
 EV="$(req -X PUT "$BASE/sessions/$SESS_ID/supervisor-observation" "${AUTH_S[@]}" -H 'Content-Type: application/json' \
@@ -359,9 +374,7 @@ IM="$(req -X POST "$BASE/improvement-items" "${AUTH_T[@]}" -H 'Content-Type: app
 want "教师创建改进项成功"               "0"         "$IM" "d['code']"
 IM_ID="$(json "$IM" "d['data']['id']")"
 want "改进项初始状态=open"              "open"      "$IM" "d['data']['status']"
-want "未自评先关闭返回 40002"           "40002"     "$(req -X PUT "$BASE/improvement-items/$IM_ID/close" "${AUTH_S[@]}" -H 'Content-Type: application/json' -d '{}')" "d['code']"
-want "教师自评完成=done_self"           "done_self" "$(req -X PUT "$BASE/improvement-items/$IM_ID/complete" "${AUTH_T[@]}" -H 'Content-Type: application/json' -d '{"doneNote":"已改进"}')" "d['data']['status']"
-want "督导确认关闭=closed"              "closed"    "$(req -X PUT "$BASE/improvement-items/$IM_ID/close" "${AUTH_S[@]}" -H 'Content-Type: application/json' -d '{}')" "d['data']['status']"
+want "教师自评完成=closed（2026-10-20 简化）" "closed" "$(req -X PUT "$BASE/improvement-items/$IM_ID/complete" "${AUTH_T[@]}" -H 'Content-Type: application/json' -d '{"doneNote":"已改进"}')" "d['data']['status']"
 want "主任访问清单返回 40301"           "40301"     "$(req "$BASE/improvement-items" "${AUTH_D[@]}")" "d['code']"
 want "教师创建反思成功"                 "0"         "$(req -X POST "$BASE/teaching-reflections" "${AUTH_T[@]}" -H 'Content-Type: application/json' -d '{"sessionId":1,"content":"反思内容"}')" "d['code']"
 want "教师反思列表非空"                 "True"      "$(req "$BASE/teaching-reflections" "${AUTH_T[@]}")" "len(d['data'])>0"

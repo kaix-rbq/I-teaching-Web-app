@@ -72,3 +72,76 @@ func TestParseS1ResponseRejectsNonJSON(t *testing.T) {
 	_, err := ParseS1Response("没有 JSON 对象", sampleTranscript, "v1", "m")
 	require.Error(t, err)
 }
+
+// TestLocateQuotesNormalized 覆盖 P1.3：空白、中英文标点、全半角与 ASCII 大小写
+// 差异仍可定位；返回给前端的 quote 必须保留模型原文。
+func TestLocateQuotesNormalized(t *testing.T) {
+	cases := []struct {
+		name       string
+		transcript string
+		quote      string
+		wantKeep   bool
+	}{
+		{
+			name:       "中文标点与空白差异",
+			transcript: "今天我们讲用户故事。请大家思考：什么是好的用户故事？",
+			quote:      "今天，我们讲用户故事",
+			wantKeep:   true,
+		},
+		{
+			name:       "全角字母数字与大小写",
+			transcript: "OK 第 3 章：SQL 优化",
+			quote:      "ｏｋ第３章sql优化",
+			wantKeep:   true,
+		},
+		{
+			name:       "仅标点归一化后为空必须丢弃",
+			transcript: "今天我们讲用户故事。",
+			quote:      "，。！？：；",
+			wantKeep:   false,
+		},
+		{
+			name:       "编造引用仍必须丢弃",
+			transcript: "今天我们讲用户故事。",
+			quote:      "今天我们来学习量子力学",
+			wantKeep:   false,
+		},
+		{
+			name:       "全角标点差异仍可定位",
+			transcript: "请大家思考：什么是好的用户故事",
+			quote:      "请大家思考，什么是好的用户故事",
+			wantKeep:   true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := locateQuotes([]Quote{{Start: 1, End: 2, Quote: tc.quote}}, tc.transcript)
+			if !tc.wantKeep {
+				assert.Empty(t, got)
+				return
+			}
+			require.Len(t, got, 1)
+			assert.Equal(t, tc.quote, got[0].Quote, "返回前端必须保留原文")
+			assert.InDelta(t, 1.0, got[0].Start, 1e-9)
+			assert.InDelta(t, 2.0, got[0].End, 1e-9)
+		})
+	}
+}
+
+// TestParseS1ResponseNormalizedQuoteKeepsScore 验证归一化只用于定位，不放松证据校验：
+// 标点差异命中后分数保留；编造引用仍将维度置 null。
+func TestParseS1ResponseNormalizedQuoteKeepsScore(t *testing.T) {
+	raw := `{"dimensions":{
+	  "objective":{"score":4,"confidence":0.8,"quotes":[{"start":0,"end":4,"quote":"今天，我们讲用户故事"}]},
+	  "content":{"score":5,"confidence":0.9,"quotes":[{"start":0,"end":4,"quote":"完全编造的内容"}]}
+	}}`
+	res, err := ParseS1Response(raw, sampleTranscript, "v1", "m")
+	require.NoError(t, err)
+	require.NotNil(t, res.Objective)
+	assert.Equal(t, 4, *res.Objective)
+	require.Len(t, res.Evidence.Dimensions["objective"].Quotes, 1)
+	assert.Equal(t, "今天，我们讲用户故事", res.Evidence.Dimensions["objective"].Quotes[0].Quote)
+	assert.Nil(t, res.Content, "编造引用仍必须定位失败")
+	assert.Contains(t, res.Evidence.NotObservable, "content")
+}
