@@ -212,6 +212,16 @@ want "P3 教师重生成返回 40301"           "40301" "$(req -X POST "$BASE/te
 want "P3 教师查看他人报告返回 40302"     "40302" "$(req "$BASE/teachers/3/ai-report?semester=2026-2027-1" "${AUTH_T[@]}")" "d['code']"
 
 echo
+echo "${c_dim}== 10.3 P4 SSE 错误帧 smoke（不触发模型）==${c_reset}"
+chat_err="$(req -X POST "$BASE/agent/chat" "${AUTH_T[@]}" -H 'Content-Type: application/json' \
+  -d '{"courseId":0,"question":"参数校验","history":[]}')"
+if [[ "$chat_err" == *'"error"'* && "$chat_err" == *'"code":40001'* && "$chat_err" == *'data: [DONE]'* ]]; then
+  pass "P4 SSE 错误帧结构可解析（40001 + [DONE]）"
+else
+  fail "P4 SSE 错误帧结构异常：$chat_err"
+fi
+
+echo
 echo "${c_dim}== 11. 教师级/课程级聚合（与 pkg/scoring 种子数据集单测同源）==${c_reset}"
 TS="$(req "$BASE/teachers/2/evaluation-summary" "${AUTH_D[@]}")"
 want "李明综合分=72.5（只按AI）"       "72.5"  "$TS" "d['data']['compositeScore']"
