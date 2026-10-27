@@ -60,10 +60,12 @@ func main() {
 		"apiKey", cfg.Agent.MaskedAPIKey(),
 		"maxConcurrency", cfg.Agent.Concurrency(),
 		"promptVersion", cfg.Agent.PromptVersion,
+		"reportEnabled", cfg.Agent.ReportEnabled,
+		"reportDebounce", cfg.Agent.ReportDebounceDuration(),
 	)
 
 	jwtManager := jwtutil.New(cfg.JWT.Secret, cfg.JWT.TTLDuration())
-	engine, recordingSvc, aiTaskSvc := router.New(db, cfg, jwtManager)
+	engine, recordingSvc, aiTaskSvc, reportSvc := router.NewWithReport(db, cfg, jwtManager)
 
 	// 进程重启会把中断的转写永久卡在 running：启动时重新入队（幂等）。
 	recoverCtx, cancelRecover := context.WithTimeout(context.Background(), 10*time.Second)
@@ -79,6 +81,11 @@ func main() {
 		slog.Info("resumed stuck ai tasks", "count", n)
 	}
 	cancelRecover()
+
+	// S2 教师级报告 worker：只在主进程启动一次，context 取消时退出。
+	reportCtx, cancelReport := context.WithCancel(context.Background())
+	defer cancelReport()
+	reportSvc.Start(reportCtx)
 
 	srv := &http.Server{
 		Addr:              fmt.Sprintf(":%d", cfg.Server.Port),

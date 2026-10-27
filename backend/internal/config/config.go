@@ -129,6 +129,19 @@ type AgentConfig struct {
 	MaxConcurrency int    `mapstructure:"maxConcurrency"`
 	// PromptVersion 写入 evidence.promptVersion，变更提示词时必须递增。
 	PromptVersion string `mapstructure:"promptVersion"`
+	// ReportDebounce 是教师级报告（S2）的去抖窗口；缺省 10m。
+	ReportDebounce string `mapstructure:"reportDebounce"`
+	// ReportEnabled 关闭时停止生成 S2，但读接口仍可用。
+	ReportEnabled bool `mapstructure:"reportEnabled"`
+}
+
+// ReportDebounceDuration 解析 S2 去抖窗口，缺省 10 分钟；非法值同样回退 10 分钟。
+func (a AgentConfig) ReportDebounceDuration() time.Duration {
+	d, err := time.ParseDuration(strings.TrimSpace(a.ReportDebounce))
+	if err != nil || d <= 0 {
+		return 10 * time.Minute
+	}
+	return d
 }
 
 // TimeoutDuration 解析单次评析超时，缺省 3 分钟。
@@ -298,6 +311,8 @@ func Load(path string) (*Config, error) {
 	v.SetDefault("agent.timeout", "3m")
 	v.SetDefault("agent.maxConcurrency", 2)
 	v.SetDefault("agent.promptVersion", "v1")
+	v.SetDefault("agent.reportDebounce", "10m")
+	v.SetDefault("agent.reportEnabled", true)
 	v.SetDefault("embedding.enabled", false)
 	v.SetDefault("embedding.model", "")
 	v.SetDefault("embedding.dim", 1024)
@@ -333,6 +348,8 @@ func Load(path string) (*Config, error) {
 	_ = v.BindEnv("agent.workspaceId", "AIJIAOXUE_AGENT_WORKSPACE_ID")
 	_ = v.BindEnv("agent.llmModel", "AIJIAOXUE_AGENT_LLM_MODEL")
 	_ = v.BindEnv("agent.baseUrl", "AIJIAOXUE_AGENT_BASE_URL")
+	_ = v.BindEnv("agent.reportDebounce", "AIJIAOXUE_AGENT_REPORT_DEBOUNCE")
+	_ = v.BindEnv("agent.reportEnabled", "AIJIAOXUE_AGENT_REPORT_ENABLED")
 	_ = v.BindEnv("embedding.model", "AIJIAOXUE_EMBEDDING_MODEL")
 	_ = v.BindEnv("embedding.dim", "AIJIAOXUE_EMBEDDING_DIM")
 	_ = v.BindEnv("embedding.batchSize", "AIJIAOXUE_EMBEDDING_BATCH_SIZE")

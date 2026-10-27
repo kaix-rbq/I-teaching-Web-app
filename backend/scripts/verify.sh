@@ -200,6 +200,18 @@ want "P2 教师趋势 frontier 为观测项"    "True"        "$TR" "d['data'][5
 want "P2 教师趋势点含 value 字段"       "True"        "$TR" "all('value' in p for s in d['data'] for p in s['points'])"
 
 echo
+echo "${c_dim}== 10.2 P3 教师级 AI 报告 smoke（不要求真实模型生成）==${c_reset}"
+# 建议以 AIJIAOXUE_AGENT_REPORT_ENABLED=false 运行本脚本，避免 regenerate 触发真实 S2 调用。
+AR="$(req "$BASE/teachers/2/ai-report?semester=2026-2027-1" "${AUTH_S[@]}")"
+want "P3 AI 报告读接口 code=0"          "0"     "$AR" "d['code']"
+want "P3 AI 报告响应含 status"           "True"  "$AR" "'status' in d['data']"
+want "P3 AI 报告响应含 report 字段"      "True"  "$AR" "'report' in d['data']"
+REG="$(req -X POST "$BASE/teachers/2/ai-report/regenerate?semester=2026-2027-1" "${AUTH_S[@]}")"
+want "P3 督导重生成返回 pending"         "pending" "$REG" "d['data']['status']"
+want "P3 教师重生成返回 40301"           "40301" "$(req -X POST "$BASE/teachers/2/ai-report/regenerate?semester=2026-2027-1" "${AUTH_T[@]}")" "d['code']"
+want "P3 教师查看他人报告返回 40302"     "40302" "$(req "$BASE/teachers/3/ai-report?semester=2026-2027-1" "${AUTH_T[@]}")" "d['code']"
+
+echo
 echo "${c_dim}== 11. 教师级/课程级聚合（与 pkg/scoring 种子数据集单测同源）==${c_reset}"
 TS="$(req "$BASE/teachers/2/evaluation-summary" "${AUTH_D[@]}")"
 want "李明综合分=72.5（只按AI）"       "72.5"  "$TS" "d['data']['compositeScore']"
@@ -385,8 +397,8 @@ want "全部已读后未读数=0"               "0"         "$(req "$BASE/notifi
 
 # 清理本轮提优闭环新增数据，保持种子纯净
 mysql -h 127.0.0.1 -P "${MYSQL_PORT:-3306}" -u aijiaoxue -paijiaoxue_dev aijiaoxue \
-  -e "DELETE FROM improvement_items; DELETE FROM teaching_reflections; DELETE FROM user_notifications; DELETE FROM ai_tasks;" >/dev/null 2>&1 \
-  && echo "${c_dim}已清理提优闭环新增数据${c_reset}"
+  -e "DELETE FROM improvement_items; DELETE FROM teaching_reflections; DELETE FROM user_notifications; DELETE FROM ai_tasks; DELETE FROM teacher_ai_reports WHERE teacher_id=2 AND semester='2026-2027-1' AND course_id=0;" >/dev/null 2>&1 \
+  && echo "${c_dim}已清理提优闭环与 P3 smoke 新增数据${c_reset}"
 
 echo
 echo "${c_dim}== 15. 报告导出（N9）与演示模式（B6/N7）==${c_reset}"

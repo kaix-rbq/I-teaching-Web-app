@@ -111,6 +111,13 @@ func Wrap(code Code, msg string, err error) *Error {
 	return &Error{Code: code, Msg: msg, Err: err}
 }
 
+// NewDependencyUnavailable 构造 50003 依赖服务不可用错误。
+// 默认文案仍为 ASR 的「转写服务不可用」；AI 链路传入「智能体暂时不可用」等参数化文案，
+// 避免修改既有 ASR 调用点的语义。
+func NewDependencyUnavailable(msg string) *Error {
+	return New(DependencyUnavailable, msg)
+}
+
 // From 从任意 error 中提取业务错误，提取不到时返回 Internal 兜底。
 func From(err error) *Error {
 	if err == nil {

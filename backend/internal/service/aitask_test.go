@@ -48,6 +48,10 @@ func (f *fakeAiTaskRepoForProcess) ListResumable(context.Context) ([]model.AiTas
 	return nil, nil
 }
 
+func (f *fakeAiTaskRepoForProcess) ListDueTeacherReportTasks(context.Context, time.Time) ([]model.AiTask, error) {
+	return nil, nil
+}
+
 type fakeRecordingRepoForProcess struct {
 	transcript *model.Transcript
 	evaluated  *model.Evaluation
@@ -202,6 +206,87 @@ func (r *retrieverWithHits) Retrieve(context.Context, string, agent.ChunkFilter)
 	return r.hits, nil
 }
 
+type fakeReportEnqueuer struct {
+	calls     int
+	teacherID uint64
+	semester  string
+	force     bool
+}
+
+func (f *fakeReportEnqueuer) Enqueue(teacherID uint64, semester string, force bool) error {
+	f.calls++
+	f.teacherID = teacherID
+	f.semester = semester
+	f.force = force
+	return nil
+}
+
+// TestProcessEnqueuesTeacherReportAfterS1Done 锁定 P3 触发：S1 done 后异步入队 S2，
+// 不影响 S1 自身完成；payload 只记录教师与学期。
+func TestProcessEnqueuesTeacherReportAfterS1Done(t *testing.T) {
+	task := &model.AiTask{
+		ID: 15, Kind: model.AiTaskKindSessionEval, RefType: model.AiTaskRefSession, RefID: 42,
+		Status: model.AiTaskStatusPending,
+	}
+	tasks := &fakeAiTaskRepoForProcess{task: task}
+	sessions := &fakeSessionRepo{
+		getDetail: func(context.Context, uint64) (*repository.SessionDetailRow, error) {
+			return &repository.SessionDetailRow{
+				ID: 42, CourseID: 9, CourseName: "软件工程", TeacherID: 2, TeacherName: "李老师",
+				Semester:    "2026-2027-1",
+				SessionDate: time.Date(2026, 10, 20, 0, 0, 0, 0, time.Local),
+				Period:      "第1-2节", Topic: "用户故事",
+			}, nil
+		},
+	}
+	recordings := &fakeRecordingRepoForProcess{transcript: &model.Transcript{
+		ID: 1, SessionID: 42, Content: "今天我们讲用户故事。", Status: model.TranscriptDone,
+	}}
+	reporter := &fakeReportEnqueuer{}
+	svc := NewAiTaskService(tasks, sessions, &fakeEvalRepo{}, recordings, &fakeAnalyzerForProcess{},
+		nil, config.AgentConfig{Timeout: "3m", MaxConcurrency: 1, ReportEnabled: true},
+		config.EvaluationConfig{}, reporter)
+
+	svc.(*aiTaskService).process(context.Background(), task.ID)
+
+	assert.Equal(t, model.AiTaskStatusDone, task.Status)
+	assert.Equal(t, 1, reporter.calls)
+	assert.Equal(t, uint64(2), reporter.teacherID)
+	assert.Equal(t, "2026-2027-1", reporter.semester)
+	assert.False(t, reporter.force)
+}
+
+// TestProcessSkipsTeacherReportWhenDisabled 验证 reportEnabled=false 时 S1 不触发 S2。
+func TestProcessSkipsTeacherReportWhenDisabled(t *testing.T) {
+	task := &model.AiTask{
+		ID: 16, Kind: model.AiTaskKindSessionEval, RefType: model.AiTaskRefSession, RefID: 42,
+		Status: model.AiTaskStatusPending,
+	}
+	tasks := &fakeAiTaskRepoForProcess{task: task}
+	sessions := &fakeSessionRepo{
+		getDetail: func(context.Context, uint64) (*repository.SessionDetailRow, error) {
+			return &repository.SessionDetailRow{
+				ID: 42, CourseID: 9, CourseName: "软件工程", TeacherID: 2, TeacherName: "李老师",
+				Semester:    "2026-2027-1",
+				SessionDate: time.Date(2026, 10, 20, 0, 0, 0, 0, time.Local),
+				Period:      "第1-2节", Topic: "用户故事",
+			}, nil
+		},
+	}
+	recordings := &fakeRecordingRepoForProcess{transcript: &model.Transcript{
+		ID: 1, SessionID: 42, Content: "今天我们讲用户故事。", Status: model.TranscriptDone,
+	}}
+	reporter := &fakeReportEnqueuer{}
+	svc := NewAiTaskService(tasks, sessions, &fakeEvalRepo{}, recordings, &fakeAnalyzerForProcess{},
+		nil, config.AgentConfig{Timeout: "3m", MaxConcurrency: 1, ReportEnabled: false},
+		config.EvaluationConfig{}, reporter)
+
+	svc.(*aiTaskService).process(context.Background(), task.ID)
+
+	assert.Equal(t, model.AiTaskStatusDone, task.Status)
+	assert.Equal(t, 0, reporter.calls)
+}
+
 // TestProcessStopsAtMaxAttempts 锁定 P1.5：attempts 已达上限时不得置 running、
 // 不得调用 analyzer，直接 failed 并正常写 finished_at。
 func TestProcessStopsAtMaxAttempts(t *testing.T) {
@@ -270,6 +355,10 @@ func (f *fakeAiTaskRepoForReset) Update(_ context.Context, _ uint64, fields map[
 }
 
 func (f *fakeAiTaskRepoForReset) ListResumable(context.Context) ([]model.AiTask, error) {
+	return nil, nil
+}
+
+func (f *fakeAiTaskRepoForReset) ListDueTeacherReportTasks(context.Context, time.Time) ([]model.AiTask, error) {
 	return nil, nil
 }
 

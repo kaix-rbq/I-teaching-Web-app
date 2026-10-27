@@ -21,9 +21,15 @@ import (
 //
 // 中间件生效顺序：Recovery → Logger → CORS → [Auth → RBAC]（按分组挂载）。
 //
-// 同时返回 recordingSvc：进程重启时需要由 main 驱动一次 RequeueStuck
-// （重新入队中断的转写任务）。路由层不承担生命周期副作用，故不在此处自行启动。
+// New 保留原有三元返回签名，供既有调用方/测试使用；需要启动 S2 worker 时用 NewWithReport。
 func New(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) (*gin.Engine, service.RecordingService, service.AiTaskService) {
+	engine, recordingSvc, aiTaskSvc, _ := NewWithReport(db, cfg, jwt)
+	return engine, recordingSvc, aiTaskSvc
+}
+
+// NewWithReport 额外返回 reportSvc：main 需要在进程级启动一次 S2 worker，
+// 路由层不承担生成任务的启动副作用，故不在此处自行启动。
+func NewWithReport(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) (*gin.Engine, service.RecordingService, service.AiTaskService, service.ReportService) {
 	dto.RegisterValidators()
 
 	userRepo := repository.NewUserRepository(db)
@@ -35,6 +41,7 @@ func New(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) (*gin.Engine, se
 	recordingRepo := repository.NewRecordingRepository(db)
 	draftRepo := repository.NewDraftRepository(db)
 	aiTaskRepo := repository.NewAiTaskRepository(db)
+	teacherReportRepo := repository.NewTeacherAiReportRepository(db)
 	improvementRepo := repository.NewImprovementRepository(db)
 	reflectionRepo := repository.NewReflectionRepository(db)
 	notificationRepo := repository.NewNotificationRepository(db)
@@ -68,8 +75,10 @@ func New(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) (*gin.Engine, se
 	}
 	// 同理：agent.NewClient 未配置时返回 nil *Client，直接装进接口同样会 holds-nil-pointer。
 	var sessionAnalyzer agent.SessionAnalyzer
+	var reportAnalyzer agent.ReportAnalyzer
 	if client := agent.NewClient(cfg.Agent); client != nil {
 		sessionAnalyzer = client
+		reportAnalyzer = client
 	}
 	// 知识库检索器与 embedding 客户端同生共死：未启用 embedding 时保持 nil，
 	// S1 会无 KB 降级运行，且不会因检索失败把 ai_tasks 标 failed。
@@ -77,9 +86,13 @@ func New(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) (*gin.Engine, se
 	if emb := agent.NewEmbeddingClient(cfg.Agent, cfg.Embedding); emb != nil {
 		retriever = agent.NewRetriever(emb, kb.NewStore(db), cfg.Embedding)
 	}
+	reportSvc := service.NewReportService(
+		aiTaskRepo, teacherReportRepo, evaluationRepo, userRepo,
+		reportAnalyzer, cfg.Agent, cfg.Evaluation,
+	)
 	aiTaskSvc := service.NewAiTaskService(
 		aiTaskRepo, sessionRepo, evaluationRepo, recordingRepo,
-		sessionAnalyzer, retriever, cfg.Agent, cfg.Evaluation,
+		sessionAnalyzer, retriever, cfg.Agent, cfg.Evaluation, reportSvc,
 	)
 	recordingSvc := service.NewRecordingService(
 		recordingRepo, sessionRepo,
@@ -97,6 +110,7 @@ func New(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) (*gin.Engine, se
 	sessionH := handler.NewSessionHandler(sessionSvc, recordingSvc)
 	teacherScoreH := handler.NewTeacherScoreHandler(teacherScoreSvc)
 	agentImproveH := handler.NewAgentImproveHandler(agentImproveSvc)
+	agentReportH := handler.NewAgentReportHandler(reportSvc)
 	recordingH := handler.NewRecordingHandler(recordingSvc)
 	aiTaskH := handler.NewAiTaskHandler(aiTaskSvc)
 	improvementH := handler.NewImprovementHandler(improvementSvc)
@@ -150,6 +164,9 @@ func New(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) (*gin.Engine, se
 	// §8.15 P2 提优读接口：数据裁剪在 service 层（teacher 本人 / director 本室 / supervisor 全校）。
 	authed.GET("/courses/:id/agent-suggestions", agentImproveH.Suggestions)
 	authed.GET("/teachers/:id/score-trend", agentImproveH.ScoreTrend)
+	// §8.15 P3 教师级 AI 报告：读接口裁剪在 service；重生成仅 supervisor/director。
+	authed.GET("/teachers/:id/ai-report", agentReportH.Get)
+	authed.POST("/teachers/:id/ai-report/regenerate", agentReportH.Regenerate)
 
 	// —— AI 观察（D3 / R0.2）：详情与入队；数据裁剪在 service 层（D8 教师侧风险脱敏）——
 	authed.GET("/sessions/:id/ai-observation", aiTaskH.Observation)
@@ -217,5 +234,5 @@ func New(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) (*gin.Engine, se
 		POST("/classroom-issues/:id/handle", classroomIssueH.Handle).
 		POST("/demo/seed", demoH.Seed)
 
-	return r, recordingSvc, aiTaskSvc
+	return r, recordingSvc, aiTaskSvc, reportSvc
 }

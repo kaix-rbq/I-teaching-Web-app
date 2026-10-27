@@ -52,6 +52,7 @@ type aiTaskService struct {
 	retriever  agent.Retriever
 	agentCfg   config.AgentConfig
 	evalCfg    config.EvaluationConfig
+	reporter   ReportEnqueuer
 	sem        chan struct{}
 }
 
@@ -65,8 +66,9 @@ func NewAiTaskService(
 	retriever agent.Retriever,
 	agentCfg config.AgentConfig,
 	evalCfg config.EvaluationConfig,
+	reporters ...ReportEnqueuer,
 ) AiTaskService {
-	return &aiTaskService{
+	svc := &aiTaskService{
 		tasks:      tasks,
 		sessions:   sessions,
 		evals:      evals,
@@ -77,6 +79,10 @@ func NewAiTaskService(
 		evalCfg:    evalCfg,
 		sem:        make(chan struct{}, agentCfg.Concurrency()),
 	}
+	if len(reporters) > 0 {
+		svc.reporter = reporters[0]
+	}
+	return svc
 }
 
 // Analyze 入队并发起评析。幂等：目标已有的未完成任务直接返回，不重复建（D3）。
@@ -163,6 +169,10 @@ func (s *aiTaskService) process(parent context.Context, taskID uint64) {
 
 	task, err := s.tasks.GetByID(ctx, taskID)
 	if err != nil {
+		return
+	}
+	// teacher_report 由 ReportService 处理，不能被 S1 的 process 误当作 session 任务。
+	if task.Kind != model.AiTaskKindSessionEval {
 		return
 	}
 	fail := func(reason string) {
@@ -269,6 +279,12 @@ func (s *aiTaskService) process(parent context.Context, taskID uint64) {
 	}); err != nil {
 		slog.Error("AI 任务置 done 失败", "taskID", taskID, "err", err)
 		return
+	}
+	// S1 成功后再触发 S2，不等待报告完成；Enqueue 失败只记日志，绝不回滚 S1。
+	if s.reporter != nil && s.agentCfg.ReportEnabled {
+		if err := s.reporter.Enqueue(session.TeacherID, session.Semester, false); err != nil {
+			slog.Warn("入队教师报告任务失败", "sessionID", session.ID, "teacherID", session.TeacherID, "err", err)
+		}
 	}
 	slog.Info("AI 评析完成", "taskID", taskID, "sessionID", session.ID)
 }
@@ -393,6 +409,10 @@ func (s *aiTaskService) ResumeStuck(ctx context.Context) (int, error) {
 	}
 	n := 0
 	for _, t := range rows {
+		// teacher_report 的后台执行由 ReportService 负责，S1 的重启恢复不得误处理。
+		if t.Kind != model.AiTaskKindSessionEval {
+			continue
+		}
 		if err := s.tasks.Update(ctx, t.ID, map[string]any{"status": model.AiTaskStatusPending}); err != nil {
 			slog.Warn("重排 AI 任务失败", "taskID", t.ID, "err", err)
 			continue

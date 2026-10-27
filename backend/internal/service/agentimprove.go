@@ -282,6 +282,12 @@ func (v trendValues) forSeries(key string) *float64 {
 //
 // 督导分（Sup*）完全不参与，符合「AI 单源」口径。
 func (s *agentImproveService) trendValues(row repository.SessionDimRow) trendValues {
+	return sessionTrendValues(row, s.cfg.ScoringWeights())
+}
+
+// sessionTrendValues 是趋势口径的唯一实现：P2 score-trend 与 P3 教师报告共用。
+// 只使用 agent 侧维度分；督导分不参与，缺维度按 scoring.SideTotal 的现有规则归一化。
+func sessionTrendValues(row repository.SessionDimRow, weights scoring.Weights) trendValues {
 	out := trendValues{values: map[string]*float64{}}
 	if !row.HasAgent {
 		return out
@@ -294,7 +300,7 @@ func (s *agentImproveService) trendValues(row repository.SessionDimRow) trendVal
 		Organization: row.AiOrganization,
 		Frontier:     row.AiFrontier,
 	}
-	if total := scoring.SideTotal(raw, s.cfg.ScoringWeights()); total != nil {
+	if total := scoring.SideTotal(raw, weights); total != nil {
 		v := round2(*total)
 		out.values["composite"] = &v
 	}
