@@ -14,18 +14,6 @@ export interface SupervisionPlan {
   evaluated: boolean
 }
 
-export interface DepartmentCoverage {
-  department: string
-  rate: number
-}
-
-export interface CoverageStat {
-  totalCourses: number
-  supervisedCourses: number
-  rate: number
-  byDepartment: DepartmentCoverage[]
-}
-
 export interface SupervisionQuery {
   status?: SupervisionStatus | ''
   /** 计划日期起（在 api 层映射为后端 dateFrom） */
@@ -70,7 +58,6 @@ export interface DashboardData {
   stats: DashboardStat[]
   courses?: import('./course').Course[]
   plans?: SupervisionPlan[]
-  coverage?: CoverageStat | null
   recentResources?: import('./resource').Resource[]
   /** 督导工作台「草稿箱」区块：最近创建的草稿 */
   recentDrafts?: import('./draft').DraftDTO[]

@@ -19,7 +19,6 @@ declare module 'vue' {
     CourseCard: typeof import('./components/course/CourseCard.vue')['default']
     CourseInfoForm: typeof import('./components/course/CourseInfoForm.vue')['default']
     CourseTable: typeof import('./components/course/CourseTable.vue')['default']
-    CoverageCard: typeof import('./components/supervision/CoverageCard.vue')['default']
     ElAlert: typeof import('element-plus/es')['ElAlert']
     ElBadge: typeof import('element-plus/es')['ElBadge']
     ElBreadcrumb: typeof import('element-plus/es')['ElBreadcrumb']
