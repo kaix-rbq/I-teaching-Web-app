@@ -1,9 +1,8 @@
 /**
  * 智能体域类型（Sprint 3 阶段③）。
  *
- * ⚠️ 智能体后端接口当前未实现（阶段②/③排期）。本文件与 `api/agent.ts` 定义
- * 与未来后端保持一致的字段形状，页面先行使用 `src/mocks/teacherImprove.ts`
- * 的临时演示数据；后端就绪后仅需替换 `api/agent.ts` 的实现，页面无需改动。
+ * S3 流式对话已接真实 SSE；提优建议/趋势仍由前端 mock 驱动（P6 再切换）。
+ * 本文件字段与后端 DTO 保持一致。
  */
 
 /** 智能体针对某次课堂记录给出的提优建议（对应 evaluations 的 agent 行 suggestions 字段） */
@@ -29,6 +28,11 @@ export interface AgentSuggestion {
 
 export type AgentChatRole = 'user' | 'agent'
 
+export interface AgentChatHistoryItem {
+  role: AgentChatRole
+  content: string
+}
+
 export interface AgentChatMessage {
   id: number
   role: AgentChatRole
@@ -41,9 +45,11 @@ export interface AgentChatMessage {
 export interface AgentChatPayload {
   courseId: number
   question: string
+  /** 最近对话历史；后端会截断为最近 6 条 */
+  history?: AgentChatHistoryItem[]
 }
 
-/** 流式对话回调；real 实现为 SSE，当前由 mock 模拟分包输出 */
+/** 流式对话回调；真实实现为 SSE */
 export interface AgentChatHandlers {
   onDelta: (chunk: string) => void
   onDone: () => void
