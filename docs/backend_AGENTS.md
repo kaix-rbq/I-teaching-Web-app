@@ -20,8 +20,8 @@
 | 阶段 | 主题 | 一句话目标 | 状态 |
 |------|------|-----------|------|
 | Sprint 1 | 查课程 | 课程信息透明可查、三角色数据打通、Web 框架稳定运行 | ✅ 已交付 |
-| Sprint 2 | 看课堂 | 授课记录 + 督导/智能体课堂评价闭环；课堂录音、异步转写与智能体接入 | 🚧 **当前阶段**（阶段① 评价闭环**已实现**；阶段② **部分实现**：录音上传/异步转写/脱敏/播放票据已落地，**智能体评分未接入**） |
-| Sprint 3 | 帮教师 | 教学提优：评语与提优建议、趋势折线、智能体对话、申诉复核、质量报告 | ⏳ **未实现**（对应开发计划「阶段三」，待排期） |
+| Sprint 2 | 看课堂 | 授课记录 + 督导/智能体课堂评价闭环；课堂录音、异步转写与智能体接入 | 🚧 **进行中（智能体接入）**：阶段① 评价闭环已实现；阶段② 录音/转写/脱敏已实现，**S1 单次课 AI 评析已实现（`3d4a6b9`，2026-10-17）**；S2 教师级报告 / S3 对话 / 知识库实施中，执行基线见 [`2026-10-27-教学提优智能体接入-审查与实施方案.md`](./2026-10-27-教学提优智能体接入-审查与实施方案.md) |
+| Sprint 3 | 帮教师 | 教学提优：评语与提优建议、趋势折线、智能体对话、申诉复核、质量报告 | 🚧 **进行中（智能体部分）**：提优建议 / 趋势 / 对话 / 教师级 AI 报告按 §8.15 契约实施；申诉复核与报告导出待排期 |
 
 后端使命始终是**保障数据链路连通无误**：登录鉴权 → 角色化数据裁剪 → 领域数据（课程 / 资源 / 督导 / 授课 / 评价）的可靠读写。
 
@@ -59,9 +59,9 @@ Sprint 2 分两阶段推进。**任务编号与完整任务列表见 [`Sprint2-3
 | 当堂课评估 | `GET /sessions/:id/evaluation`（场次 + 双侧评分 + 评语；录音/转写位在阶段②填充） |
 | 数据迁移 | `golang-migrate`，`migrations/2_teaching_sessions_and_evaluations.*.sql`（§13） |
 
-**阶段② 智能体接入（Sprint 2.2，部分实现）**
+**阶段② 智能体接入（Sprint 2.2，进行中）**
 
-已实现（后端落点，详见 §16）：
+已实现（后端落点，详见 §16 与 §8.10）：
 
 | 能力 | 后端落点 |
 |------|---------|
@@ -69,18 +69,23 @@ Sprint 2 分两阶段推进。**任务编号与完整任务列表见 [`Sprint2-3
 | 异步转写：`transcripts.status` 状态机（`pending→running→done/failed`）+ 失败重试 + 启动重排 | `internal/asr/client.go` · `internal/service/recording.go`（`RequeueStuck`） |
 | 学生姓名脱敏（称谓正则 + 可选词典） | `internal/service/desensitize.go` |
 | 短时播放票据（`?ticket=`） | `internal/middleware/auth.go:50`（`AuthOrPlaybackTicket`） |
+| **S1 单次课 AI 评析**：五维分 / 置信度 / 证据 / 四段评语，转写 `done` 后异步入队 | `internal/agent/{client,eval,prompt}.go` · `internal/service/aitask.go` · 写 `evaluations`（`evaluator_type='agent'`） |
+| AI 任务链：幂等 / 重试 / 重启恢复 / 教师侧风险标签脱敏 | `migrations/8_ai_tasks_and_reports.up.sql` · `internal/repository/aitask.go` · `internal/service/aitask.go` · §8.10 |
 
-**未实现（不得按已完成对待）**：
+**剩余未实现（不得按已完成对待）**：
 
-- **智能体评分未接入**：`internal/repository/recording.go:79` 已定义 `UpsertAgentEvaluation`，但**无任何调用方**，`router.go` 亦无 `/agent/*` 路由（契约见开发计划 §4.4）。聚合侧本已能读取 `evaluations` 中的 agent 行（`pkg/scoring/scoring.go:140`、`internal/service/teacherscore.go:330`、`internal/service/session.go:179`），但**没有写入通道**——现有 agent 行只来自种子数据；
-- 智能体故障降级未接入：`50003` 目前只覆盖转写链路（ASR 失败写 `failed` + `error_message`，不影响督导评分主流程）；`50002`（`NotImplemented` → HTTP 501）已在 `pkg/errcode` 定义但**当前无任何调用方**——`router.go` 无 `/agent/*` 路由，请求实际落 gin 默认 **404**。智能体评分链路尚未接入，故无其降级可言。
+- **S2 教师级 AI 报告**：仅有表 `teacher_ai_reports` 与 `TeacherAiReportRepository.GetByTeacherSemester`（`course_id=0`），**无生成 service / handler / route**；
+- **S3 提优对话与读接口**：`GET /courses/:id/agent-suggestions`、`GET /teachers/:id/score-trend`、`POST /agent/chat` 未实现；前端 `frontend/src/api/agent.ts` 仍返回 mock；
+- **知识库**：`knowledge_documents` / `knowledge_chunks`（V16）、embedder / retriever / `cmd/kb` 均未实现；
+- **真实 Key 未配置**：本机 `agent.enabled=false`、`.env.local` 无 `AIJIAOXUE_AGENT_*`，S1 目前只有单测，端到端待验收。
 
-### 2.3 Sprint 3「帮教师」（待排期）：目标与范围
+### 2.3 Sprint 3「帮教师」（进行中：智能体部分）：目标与范围
 
 - 督导评语（仅本人可见，时间倒序，标注对应课次）与智能体提优建议；
-- 各维度分数历史趋势接口（`GET /teachers/:id/score-trend?semester=&dimension=`）；
+- 各维度分数历史趋势接口（`GET /teachers/:id/score-trend?semester=&courseId=&dimension=`）；
 - 与智能体就课堂改进流式对话（SSE，断流可重连）；
-- 教师申诉 / 督导复核流程（留痕、状态可追溯）、督导间评分校准、质量报告导出。
+- 教师级 AI 综合报告（`GET /teachers/:id/ai-report`）；
+- 教师申诉 / 督导复核流程（留痕、状态可追溯）、督导间评分校准、质量报告导出（待排期）。
 
 ### 2.4 范围边界（Won't）
 
@@ -227,6 +232,29 @@ transcription:
   diarization: false                            # 说话人分离：仅支持单声道音频
   studentNames: []                              # 脱敏词典；为空时仅用称谓正则
 
+# AI 评析（S1 单次课；2026-10-27 起 S2/S3 与知识库同套凭据）
+# 🔴 API Key 只走环境变量 AIJIAOXUE_AGENT_API_KEY（显式 BindEnv）；enabled=true 且 Key/模型为空时启动 Fail-Fast。
+agent:
+  enabled: false
+  apiKey: ***                                   # 永远留空，由环境变量覆盖
+  workspaceId: ""                               # 百炼业务空间 ID（可与 ASR 复用）
+  llmModel: ""                                  # 控制台模型全名，禁止硬编码；2026-10-27 选定 deepseek-v4.1-flash-1017
+  baseUrl: ""                                   # 留空按 workspaceId 推导北京地域
+  timeout: "3m"
+  maxConcurrency: 2
+  promptVersion: "v1"
+  reportDebounce: "10m"                         # S2 去抖窗口（P3 引入）
+  reportEnabled: true                           # 关闭 S2 生成但保留读接口（回滚开关）
+
+# 知识库（P5 引入；北京已确认 qwen3.7-text-embedding-flash 可用，1024 维）
+embedding:
+  enabled: false
+  model: "qwen3.7-text-embedding-flash"
+  dim: 1024
+  batchSize: 20                                 # 对齐该模型批量上限
+  topK: 8
+  minScore: 0.35
+
 cors:
   origins: ["http://localhost:5173", "http://127.0.0.1:5173"]
   # 放行任意来源，仅限本地/局域网联调（Vite Network 地址）；生产必须 false。
@@ -259,7 +287,8 @@ evaluation:
 - 环境变量优先级高于 yaml，键名前缀 `AIJIAOXUE_`（viper `AutomaticEnv` + `SetEnvKeyReplacer`）；
   **新增配置键必须在 `config.Load` 中 `SetDefault` 或 `BindEnv`**，否则 `AutomaticEnv` 发现的键不在 `AllKeys()` 中，`Unmarshal` 会静默跳过（`internal/config/config.go:207-213` 有注释说明）；
 - **密钥不得提交仓库**：仓库内只放 `config.example.yaml`，`config.yaml` 进 `.gitignore`；
-- 启动期强制校验：`mysql.dsn` / `jwt.secret` 非空、`evaluation.weights` 非零项合计为 1.00、`transcription.enabled` 时 Key/Model 非空且 `engine`/`model` 长度 ≤64（`internal/config/config.go:223-260`）；
+- 启动期强制校验：`mysql.dsn` / `jwt.secret` 非空、`evaluation.weights` 非零项合计为 1.00、`transcription.enabled` 时 Key/Model 非空且 `engine`/`model` 长度 ≤64（`internal/config/config.go:223-260`）；**`agent.enabled=true` 时 `AIJIAOXUE_AGENT_API_KEY` 与 `llmModel` 必须非空**（2026-10-17 起）；
+- **2026-10-27 新增配置**：`agent.reportDebounce` / `agent.reportEnabled`（P3）、`embedding.enabled/model/dim/batchSize/topK/minScore`（P5）。新增键必须 `SetDefault` 或 `BindEnv`，`AIJIAOXUE_EMBEDDING_MODEL` / `AIJIAOXUE_EMBEDDING_DIM` 走显式绑定；
 - 前端开发期推荐 Vite proxy 将 `/api` 代理到 `127.0.0.1:8080`，CORS 作为兜底配置。
 
 ## 7. 统一响应与错误码
@@ -281,8 +310,8 @@ evaluation:
 | 40401 | 404 | 资源不存在 | 课程 id 无效 |
 | 40901 | 409 | 数据已存在 | 课程编码+学期重复、同课程同日同节次重复建课 |
 | 50001 | 500 | 服务器内部错误 | 数据库异常 |
-| 50002 | 501 | 功能未实现（Sprint 2.2 起） | 阶段一调用智能体接口 |
-| 50003 | 503 | 依赖服务不可用（Sprint 2.2 起） | ASR 引擎未配置或转写失败 |
+| 50002 | 501 | 功能未实现 | 已废弃接口占位（督导五维评分/草稿箱）；**智能体接口不使用此码** |
+| 50003 | 503 | 依赖服务不可用 | ASR 未配置/失败；智能体上游失败（文案需参数化，区分“转写服务不可用/智能体暂时不可用”） |
 
 > 🔴 **新增错误码必须三处同步**：`Code` 常量、`messages` 文案、`HTTPStatus()` 映射，并补 `pkg/errcode/errcode_test.go` 的表驱动用例。
 > 历史回归：`40002` 曾漏配 `HTTPStatus()`，落 `default → 500`——响应体 code 正确但 HTTP 500，日志被记为服务端错误。
@@ -294,17 +323,16 @@ evaluation:
 
 ## 8. 接口契约（已注册路由共 70 条）
 
-> 计数口径 = `backend/internal/router/router.go` 实际注册数。
+> 计数口径 = `backend/internal/router/router.go` 实际注册数；§8.15 的 5 条为**契约已冻结、路由待注册**，不计入 70。
 > 下文 §8.1–§8.7 为 Sprint 1 存量，§8.8 为 Sprint 2.1（14 条），§8.9 为 Sprint 2.2 阶段②（4 条），
 > §8.10 为 AI 评析任务链（D3 / R0.2，4 条），§8.11 为提优闭环（教师自评关闭版，11 条），
 > §8.12 为督导抽样队列（R1.2，1 条），§8.13 为报告导出与演示模式（N9/B6，2 条），
-> §8.14 为主任事务与课堂问题登记（2026-10-20，8 条）。
+> §8.14 为主任事务与课堂问题登记（2026-10-20，8 条），§8.15 为 AI 提优契约（2026-10-27 冻结，5 条待注册）。
 
 前缀 `/api/v1`。**字段名与前端 `src/types/` 逐字对齐，本节是前后端联调的唯一事实源。**
 
-> **已实现接口**：Sprint 2.1 见本文 §8.8，Sprint 2.2 阶段②（录音与转写）见 §8.9。
-> **未实现接口**：智能体评分/对话（`/agent/*`，**未注册路由**，请求落 404）与阶段三趋势等见
-> [`Sprint2-3-教学评价与提优-开发计划.md`](./Sprint2-3-教学评价与提优-开发计划.md) §4.2 / §4.4。**未实现即不得在联调中当作可用**。
+> **已实现接口**：Sprint 2.1 见本文 §8.8，Sprint 2.2 阶段②（录音与转写）见 §8.9，S1 单次课 AI 评析见 §8.10。
+> **进行中/未实现接口**：S2 教师级报告、提优建议、趋势、SSE 对话的契约已冻结在 §8.15，**路由注册前不得在联调中当作可用**。
 
 ### 8.1 认证 auth
 
@@ -359,9 +387,9 @@ type TeacherDashboard struct { // 教师
 type SupervisorDashboard struct { // 督导（工作台：聚焦「记录课程并评估」）
     RecentPlans     []PlanItem          `json:"recentPlans"`     // 全部听评课安排（前端按今日/本周/本月分档）
     RecentDrafts    []DraftDTO          `json:"recentDrafts"`    // 最近 3 份草稿（草稿箱区块）
-    PendingSessions []PendingSessionItem `json:"pendingSessions"` // 待评估授课记录（含手动新增，最新在前）
+    PendingSessions []PendingSessionItem `json:"pendingSessions"` // 待 AI 评析的授课记录（无 agent 评价行，最新在前）
 }
-type PendingSessionItem struct { // 手动新增/尚未评价的授课记录（status=scheduled|recorded）
+type PendingSessionItem struct { // 尚无 AI 评析的授课记录；status 仅表示授课生命周期（scheduled|recorded|evaluated）
     SessionID   uint64 `json:"sessionId"`
     CourseID    uint64 `json:"courseId"`
     CourseCode  string `json:"courseCode"`
@@ -375,8 +403,13 @@ type PendingSessionItem struct { // 手动新增/尚未评价的授课记录（s
 }
 ```
 
+> **2026-10-27 状态口径（D-1）**：`teaching_sessions.status='evaluated'` 的含义是**AI 已评析**（S1 完成），由 AI 任务写入；
+> 督导是否已评**不再看** `status`，而是由 `evaluations` 中 `evaluator_type='supervisor'` 的行推导（DTO 字段 `supervisorEvaluated`）。
+> 因此督导工作台的 `pendingSessions` 改为「尚无 AI 评析的授课记录」，前端文案应为「待 AI 评析」；
+> 督导人工待办只看 `GET /supervision/ai-tasks?pending=1`。督导覆盖率不再作为业务指标（见 §8.6）。
+
 > **变更说明（工作台精简）**：督导工作台已移除 `courseCount/planCount/completedCount/coverageRate/byDepartment`
-> 等与听评课核心任务无关的统计；覆盖率仍由 `GET /supervision/coverage` 提供。
+> 等与听评课核心任务无关的统计；`GET /supervision/coverage` 自 2026-10-27 起**标记为 deprecated**（保留兼容，不再作为业务指标或验收项）。
 
 ### 8.3 字典 dict（新增，供前端筛选下拉）
 
@@ -512,7 +545,7 @@ type ResourceDTO struct {
 
 | 方法 路径 | 权限 | 说明 |
 |-----------|------|------|
-| GET `/supervision/coverage` | supervisor | 覆盖率统计 |
+| GET `/supervision/coverage` | supervisor | ⚠️ **已废弃**（2026-10-27）：覆盖率不再作为业务指标，保留接口仅兼容历史查询 |
 | GET `/supervision/plans?page&pageSize&status&dateFrom&dateTo` | supervisor | 听评课安排分页 |
 
 ```go
@@ -535,14 +568,15 @@ type PlanItem struct {
     PlannedDate    string  `json:"plannedDate"` // YYYY-MM-DD
     Status         string  `json:"status"`      // planned|completed
     SessionID      *uint64 `json:"sessionId"`   // 关联授课记录；null=尚无，需先创建再评估
-    Evaluated      bool    `json:"evaluated"`   // 关联授课记录是否已督导评价（前端据此暴露/隐藏评估入口）
+    Evaluated      bool    `json:"evaluated"`   // 关联授课记录是否已有督导评价行（evaluator_type='supervisor'；不再看 session.status）
 }
 ```
 
 > **评估入口日期闸门（前端约束）**：`evaluated=false` 且 `plannedDate <= 今天` 才显示「去评估」（无授课记录时先 `POST /sessions` 建档再跳转）；
 > `plannedDate > 今天` 仅预览、不开放评估。工作台「未评」筛选列出 `plannedDate < 今天 && !evaluated`（不含今日，专用于补录）。
 
-**覆盖率口径（唯一）**：分母 = 当前学期 `status='open'` 的课程数；分子 = 这些课程中已有 `status='completed'` 听评课记录（DISTINCT course_id）的数量。分部门同理。当前学期取 `semesters` 常量中最新一项（Sprint 1 固定 `2026-2027-1`，定义在 `internal/service/consts.go`）。
+> ⚠️ **覆盖率已停用（2026-10-27）**：原口径（课程数 / 已完成听评课课程数）不再作为业务指标，也不再出现在工作台与验收项。
+> `GET /supervision/coverage` 保留仅为兼容旧前端/历史查询，**新代码不得依赖**。督导工作量与进度改看 `GET /supervision/ai-tasks`（抽样队列）与 `supervisorEvaluated`。
 
 ### 8.7 运维 healthz
 
@@ -557,9 +591,15 @@ type PlanItem struct {
 > （B8 督导不打分）。因此 `supervisorScores[]` 的各维度与 `totalScore` 恒为 `null`，`compositeScore`/`agentScore` 为 AI 单侧分，
 > `supervisorScore` 在聚合响应中恒为 `null`，`weights` 恒为 `{supervisor:0, agent:1}`。评分口径详见 §6 配置说明。
 
+> 🔴 **2026-10-27 状态口径（D-1）**：`teaching_sessions.status='evaluated'` 表示**AI 已评析**（S1 完成），**只有 AI 任务写该字段**；
+> 督导是否已评由新增 DTO 字段 `supervisorEvaluated`（bool）表示，取值 = 该场次是否存在 `evaluator_type='supervisor'` 的评价行。
+> `PUT /sessions/:id/supervisor-observation` **不再修改 `status`**，只写督导评价行。
+> 前端督导课程页的「去评估 / 查看评估」必须用 `supervisorEvaluated`，**不得再用 `status`**。
+> `GET /courses/:id/sessions` 与 `GET /sessions/:id/evaluation` 均需返回该字段（仅加字段，向后兼容）。
+
 | 方法 路径 | 权限 | 说明 |
 |-----------|------|------|
-| GET `/courses/:id/sessions?semester=&page=&pageSize=` | 登录（数据裁剪） | 课程历史授课记录，含每场双侧评分摘要 |
+| GET `/courses/:id/sessions?semester=&page=&pageSize=` | 登录（数据裁剪） | 课程历史授课记录，含每场 AI 评分摘要 + `supervisorEvaluated` |
 | POST `/sessions` | teacher（本人课程）/ supervisor（代录） | 创建授课记录（B1；`classId` 必填且须归属该课程，否则 40002，例外：经听评课计划快捷建课 `planId` 非空时可省略；日期不得晚于今天，`uk_session` 唯一；落 `created_by`） |
 | DELETE `/sessions/:id` | 该课程任课教师本人 / supervisor | 删课并级联清理录音文件/转写/评价/清单关联（D6，service 层） |
 | GET `/sessions/:id` | 登录（数据裁剪） | 单场次基本信息 |
@@ -749,6 +789,12 @@ type TranscriptSegment struct {
 > AI 引擎未配置时任务记 `failed`（`errorMessage="AI 评析引擎未配置"`），页面照常可用（熔断验收）。
 > AI 产出写入 `evaluations`（`evaluator_type='agent'`），是本轮**唯一计分来源**（§6）。
 
+> **单次课 AI 报告 = `evaluations` 的 agent 行**（不新建 `session_ai_reports`）：五维分 + 四段评语
+> （`comment/highlights/improvements/suggestions`）+ `evidence` + `ai_confidence` + 模型/提示词版本，即 S1 产物。
+> 教师/督导通过 `GET /sessions/:id/evaluation` 的 `agentScore` 或 `GET /sessions/:id/ai-observation` 的 `observation` 读取。
+> **S1 成功后把 `teaching_sessions.status` 置 `evaluated`，含义是“AI 已评析”**；S1 `done` 同时入队教师级报告任务（§8.15）。
+> 重新上传/重评：同一 `uk_eval(session_id,'agent',0)` 行覆盖，不新增行；督导评价行不受影响。
+
 | 方法 路径 | 权限 | 说明 |
 |-----------|------|------|
 | POST `/sessions/:id/ai-observation/analyze` | 登录（数据裁剪） | 入队 AI 评析（幂等：有未完成任务直接返回同一 `taskId`，不重复建） |
@@ -759,8 +805,8 @@ type TranscriptSegment struct {
 ```go
 type AiTaskDTO struct {
     ID           uint64 `json:"id"`
-    Kind         string `json:"kind"`      // session_eval
-    RefType      string `json:"refType"`   // session
+    Kind         string `json:"kind"`      // session_eval | teacher_report
+    RefType      string `json:"refType"`   // session | teacher
     RefID        uint64 `json:"refId"`
     Status       string `json:"status"`    // pending|running|done|failed
     Attempts     int    `json:"attempts"`
@@ -782,8 +828,10 @@ type AiObservationDTO struct {
 }
 ```
 
-- **触发**：转写 `done` 后由 recording service 回调异步入队（`EnqueueSessionEval`），不经 HTTP；
+- **触发**：**上传录音 → ASR 转写 `done` → S1**（文本模型必须等转写完成，不能直接读音频）；由 recording service 回调异步入队（`EnqueueSessionEval`），不经 HTTP；
 - **幂等**：`uk_ai_task(kind,ref_type,ref_id)` 保证同一场次至多一条任务；重新生成 = 复位 `status='pending'`；
+- **S2 联动**：S1 `done` 后入队 `teacher_report`（`ref_type=teacher`，`payload={semester}`），由 §8.15 的去抖 + 快照比对生成/更新教师级报告；
+- **状态**：S1 成功写 `status='evaluated'`（AI 已评）；**不修改**督导评价状态——督导是否已评由 `supervisorEvaluated` 从督导行推导（§8.8）；
 - **重启恢复**：进程启动时 `ResumeStuck` 把遗留的 `pending/running` 任务重排（幂等）；
 - 🔴 **D8 风险脱敏**：`evidence.riskTags` 仅督导可见；`teacher` 角色请求 `ai-observation` 时
   `risks` 恒为空数组且 `observation.evidence.riskTags` 被清空——**高风险标签永不进教师端**；
@@ -951,6 +999,132 @@ type ClassroomIssueConfirmReq struct {
   确认解决即硬删除，未解决回到 `open`（保留 `handleNote`，督导可再次处理）。
 - **状态简化**：教师端仅展示「进行中 / 待教师确认」；处理后的条目必须由教师确认才会消失。
 
+### 8.15 AI 提优：教师级报告 / 提优建议 / 趋势 / 对话（2026-10-27 契约冻结，实施中，5 条）
+
+> **执行基线**：[`2026-10-27-教学提优智能体接入-审查与实施方案.md`](./2026-10-27-教学提优智能体接入-审查与实施方案.md)。
+> **2026-10-27 决策**：单次课报告复用 `evaluations` 的 agent 行（不建表）；教师级报告固定 `course_id=0`，覆盖该教师本学期全部课程；
+> 每次 S1 `done` 都入队教师报告更新，10 分钟去抖 + `source_session_ids` 快照比对（A1→A2 覆盖同一行，A2 包含 a1+a2）；
+> 趋势按场次记录直接出点，不新建表、不做时间衰减。
+> **路由注册前，本节接口不得在联调中当作可用。**
+
+| 方法 路径 | 权限 | 说明 |
+|-----------|------|------|
+| GET `/courses/:id/agent-suggestions?semester=` | 登录（数据裁剪） | 课程 AI 提优建议，按课次倒序；v1 返回数组（不分页，RAG §7 的 `page/pageSize` 取消） |
+| GET `/teachers/:id/score-trend?semester=&courseId=&dimension=` | 登录（数据裁剪） | 综合分 + 五维趋势；`courseId` 可选，缺省=该教师全部课程 |
+| GET `/teachers/:id/ai-report?semester=` | teacher（本人）/ director（本室）/ supervisor | 读教师级 AI 报告；无报告时 `report=null`，`status` 供轮询 |
+| POST `/teachers/:id/ai-report/regenerate` | supervisor / director | 复位为 `pending` 并异步重生成 |
+| POST `/agent/chat` | 登录（课程范围裁剪） | SSE 流式提优对话，无状态 |
+
+```go
+// AgentSuggestionDTO：与 frontend/src/types/agent.ts 的 AgentSuggestion 逐字对齐。
+// summary/highlights/improvements 直接取 evaluations 同名列；evidence 为人类可读字符串。
+type AgentSuggestionDTO struct {
+    ID           uint64  `json:"id"`           // evaluations.id
+    CourseID     uint64  `json:"courseId"`
+    SessionID    uint64  `json:"sessionId"`
+    SessionDate  string  `json:"sessionDate"`  // YYYY-MM-DD
+    Period       string  `json:"period"`
+    Topic        string  `json:"topic"`
+    Summary      string  `json:"summary"`      // evaluations.comment
+    Highlights   string  `json:"highlights"`
+    Improvements string  `json:"improvements"`
+    Evidence     string  `json:"evidence"`     // 见下方渲染规则
+    ModelVersion string  `json:"modelVersion"`
+    Confidence   float64 `json:"confidence"`
+    CreatedAt    string  `json:"createdAt"`
+}
+
+// ScoreTrendSeriesDTO：与 frontend/src/types/teacher.ts 的 ScoreTrendSeries 逐字对齐。
+// value=null 表示该课次无 AI 评价，折线断开，不补 0；points 按 sessionDate 升序。
+type ScoreTrendSeriesDTO struct {
+    Key           string `json:"key"`           // composite|objective|content|interaction|organization|frontier
+    Name          string `json:"name"`
+    IsObservation bool   `json:"isObservation"` // 仅 frontier 为 true
+    Points        []struct {
+        Label string   `json:"label"`           // 「第 N 次课」，按所选范围（课程或教师）编号
+        Date  string   `json:"date"`            // YYYY-MM-DD
+        Value *float64 `json:"value"`
+    } `json:"points"`
+}
+
+// AiReportDTO：教师级综合报告（teacher_ai_reports，teacher_id+semester+course_id=0 唯一）。
+type AiReportDTO struct {
+    TeacherID        uint64   `json:"teacherId"`
+    Semester         string   `json:"semester"`
+    CourseID         uint64   `json:"courseId"`        // 固定 0
+    Summary          string   `json:"summary"`
+    Directions       []string `json:"directions"`
+    Suggestions      []string `json:"suggestions"`
+    Highlights       string   `json:"highlights"`
+    TrendComment     string   `json:"trendComment"`
+    Confidence       *float64 `json:"confidence"`
+    EvaluatedCount   int      `json:"evaluatedCount"`  // 生成时的 AI 已评场次
+    SessionCount     int      `json:"sessionCount"`
+    SourceSessionIDs []uint64 `json:"sourceSessionIds"`
+    ModelVersion     string   `json:"modelVersion"`
+    PromptVersion    string   `json:"promptVersion"`
+    Status           string   `json:"status"`          // pending|running|done|failed
+    ErrorMessage     string   `json:"errorMessage"`
+    GeneratedAt      string   `json:"generatedAt"`
+}
+
+// GET /teachers/:id/ai-report 响应：无报告时 report=null、status="pending"（供前端轮询）。
+type AiReportEnvelope struct {
+    Status       string       `json:"status"`
+    Report       *AiReportDTO `json:"report"`
+    ErrorMessage string       `json:"errorMessage"`
+}
+```
+
+**`evidence` 字符串渲染规则（后端统一，前端不改类型）**
+
+1. 取该场次 agent 评价中**分数最低的非空维度**的第一条 `quote`；
+2. 输出 `「quote」（mm:ss–mm:ss）`，时间取该 quote 的 `start/end`；
+3. 无 quote 时回退 `highlights`；再无则空串。禁止把 evidence JSON 原样返回。
+
+**教师级报告生成规则**
+
+- **输入**：该教师本学期全部 agent 评价行（结构化：五维分、四段评语、置信度、模型/提示词版本）+ 维度趋势序列 + `sample`/flags + 督导评语汇总；**不喂全文转写**。
+- **触发**：每次 S1 `done` 入队 `ai_tasks(kind=teacher_report, ref_type=teacher, ref_id=teacherID, payload={semester})`；
+  worker 每 60s 扫描 `pending` 且 `updated_at` 超过 `agent.reportDebounce`（默认 10m）的任务；
+  比对 `source_session_ids` 与当前已评场次集合，**无变化直接跳过**，有变化才调用 LLM。
+- **A1→A2**：同一 `(teacher_id,semester,0)` 行覆盖更新；`source_session_ids` 记录本次样本，`generated_at` 更新；不保留历史版本（如需审计另立表）。
+- **任务键限制**：`ai_tasks` 的唯一键不含 `semester`；本项目同一教师同一时间只处理**当前学期**，跨学期时 `payload` 覆盖、旧报告保留。若未来需要并行多学期，需扩展任务键（后续）。
+- **失败隔离**：S2 失败只落 `teacher_ai_reports.status='failed'` 与 `ai_tasks`，不影响 S1、督导与页面。
+- **样本不足**：`evaluatedCount < minSampleSize` 时必须在 `summary` 中显式声明，不得给确定性结论。
+
+**趋势规则**
+
+- 数据源 = `evaluations` 的 agent 行（AI 单源），按 `formula_version` 过滤；**不混入督导分**。
+- 序列含 `composite` + 五维；`composite` 用 `pkg/scoring.Aggregate` 的场次级综合分，禁止先按课程平均再平均。
+- 某课次无 agent 评价 → 该点 `value=null`；`dimension` 参数指定时只返回该序列，缺省返回全部。
+
+**SSE 帧格式（S3）**
+
+```
+POST /agent/chat
+Body: { "courseId": 12, "question": "如何提升课堂互动？",
+        "history": [{"role":"user","content":"…"},{"role":"agent","content":"…"}] }
+
+data: {"delta":"针对「学生互动」："}\n\n
+data: {"delta":"你本次课的有效提问比例…"}\n\n
+data: {"done":true,"citations":[{"chunkId":"kb-rubric#3","title":"互动维度锚点","quote":"…"}]}\n\n
+data: [DONE]\n\n
+错误：data: {"error":{"code":50003,"message":"智能体暂时不可用"}}\n\n
+```
+
+- `history` ≤6 轮，服务端截断；最后一条必须是 `user`；无状态，不落库。
+- 上下文 = 课程聚合分 + 维度明细 + 最近 N 场 agent 评价摘要 +（知识库接入后）定向检索片段；**不喂全文转写**。
+- 上游失败返回错误帧而非裸 500；前端用 `fetch` + `ReadableStream` + `AbortController`（axios 不支持流式）。
+- 部署时反向代理需关闭响应缓冲，否则前端会一次性收到全文。
+
+### 8.16 实施状态与后续
+
+- **已实现**：§8.10（S1 单次课评析）、§8.12（督导抽样队列）。
+- **实施中**：§8.15 的 5 条接口、教师级报告生成、知识库（V16）。
+- **已停用**：§8.6 的覆盖率指标（接口保留 deprecated）。
+- 迁移版本：知识库表为 **V16**（RAG 文档中的“V9/V13+”编号已过时）。
+
 ## 9. 中间件规范（`internal/middleware/`）
 
 注册顺序（`router.go` 中唯一生效顺序）：
@@ -1107,7 +1281,7 @@ HTTP 请求
 - **事实源分工**：`database/schema.sql` 只管 Sprint 1 存量表；**Sprint 2 起的新表以 `migrations/` 下的迁移脚本为唯一事实源**，二者不重复维护；
 - **迁移策略**：从 Sprint 2 起引入 `golang-migrate`（`cmd/migrate` + `migrations/` embed）。GORM **不使用 AutoMigrate**（避免双源漂移）；
   新增表 = 新建迁移脚本 + 更新 `internal/model` + 在 PR 说明列明变更。初始化流程见 `scripts/init_db.sh`：`schema.sql → migrate up → seed.sql → cmd/seed`；
-- **迁移清单（V1–V15，逐个对应 `backend/migrations/` 下同名文件）**：
+- **迁移清单（V1–V16，逐个对应 `backend/migrations/` 下同名文件）**：
 
 | 版本 | 文件（`.up/down.sql`） | 内容 |
 |------|------------------------|------|
@@ -1126,7 +1300,7 @@ HTTP 请求
 | V13 | `13_timetable_week_grid` | 课表扩展 `weekday / period_start / period_end / classroom / remark` + 周网格唯一键 |
 | V14 | `14_schedule_events` | `schedule_events`（主任事务：会议 / 公开课 / 讲座 / 其他） |
 | V15 | `15_classroom_issues` | `classroom_issues`（课堂问题登记与处理闭环） |
-| V16+ | `knowledge_documents` / `knowledge_chunks` | RAG 知识库表，**顺延后续排期**（见 10.16 计划 §3.2） |
+| V16 | `16_knowledge_base` | `knowledge_documents` / `knowledge_chunks`（RAG 知识库；2026-10-27 起实施，DDL 见 RAG §4.2） |
 
 - 🔴 **迁移文件命名**：`<版本>_<名称>.up.sql` / `.down.sql`（如 `2_teaching_sessions_and_evaluations.up.sql`）。
   Flyway 风格 `V2__xxx.up.sql` **不被 golang-migrate 识别**，会让 `migrate up` 报 `first .: file does not exist`——禁止使用；
@@ -1283,5 +1457,6 @@ curl -s $BASE/supervision/coverage -H "Authorization: Bearer $TOK_S"
 |------|------|------|
 | v2.0 | 2026-09 | 均衡覆盖三次 Sprint；注明当前处于 Sprint 2；新增 Sprint 2.1 接口契约（§8.8）、错误码 HTTP 映射与回归说明、`golang-migrate` 迁移规范、文档同步要求（页首）|
 | v3.0 | 2026-10-07 | 文档整合：修正阶段状态（阶段② 部分实现、智能体评分未接入）；补齐 §5 目录树、§6 配置（transcription/evaluation/cors.allowAnyOrigin）、§13 迁移 V1–V6；§8 接口计数按 `router.go` 校正为 36 条并同步路由示意与中间件表；并入录音转写实现记录与遗留（§16）；删除对已删文档的引用并去重接口契约 |
+| v3.1 | 2026-10-27 | 智能体接入状态纠偏：S1 单次课 AI 评析已实现；新增 §8.15 AI 提优契约（教师级报告 / 提优建议 / 趋势 / SSE 对话，5 条待注册）；`status='evaluated'` 明确为“AI 已评”，督导状态改由 `supervisorEvaluated` 推导；督导覆盖率标记 deprecated；知识库迁移定为 V16；Sprint 3 智能体部分改为“进行中” |
 
 *文档分工见页首「单一事实源」表：接口契约以本文 §8 为准；页面/路由/组件见 [`frontend_AGENTS.md`](./frontend_AGENTS.md)；DDL 见 `backend/database/schema.sql` + `backend/migrations/`；评分体系/权限/DoD 见 [`Sprint2-3-教学评价与提优-开发计划.md`](./Sprint2-3-教学评价与提优-开发计划.md)；建库/种子/备份见 [`MySQL数据库创建指导.md`](./MySQL数据库创建指导.md)。接口契约变更须先改本文 §8，再同步 `internal/dto/` 与前端 `src/types/`。*
