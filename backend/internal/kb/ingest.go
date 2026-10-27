@@ -79,7 +79,7 @@ func (i *Ingester) Ingest(ctx context.Context, src Source) (*IngestResult, error
 	docKey := BuildDocKey(src.Collection, src.CourseID, src.Subject, rel)
 	fallbackTitle := strings.TrimSuffix(filepath.Base(src.Path), filepath.Ext(src.Path))
 	embeddingModel := embeddingModelOf(i.Embedder)
-	embeddingDim := embeddingDimOf(i.Embedder, i.Store)
+	embeddingDim := embeddingDimOf(i.Embedder)
 	if embeddingModel == "" || embeddingDim <= 0 {
 		return nil, errors.New("kb: embedder 未提供 model/dim 元数据，无法写入向量模型版本")
 	}
@@ -251,17 +251,18 @@ func sourceFormatOfPath(path string) string {
 	}
 }
 
-// embeddingModelOf / embeddingDimOf 从接口读取元数据；如果实现不是具体客户端，走保守默认。
+// embeddingModelOf / embeddingDimOf 从可选的元数据接口读取；真实客户端实现 Model()/Dim()。
+// 用接口断言而不是具体类型，方便测试替身与后续替换实现。
 func embeddingModelOf(e agent.Embedder) string {
-	if c, ok := e.(*agent.EmbeddingClient); ok {
-		return c.Model()
+	if m, ok := e.(interface{ Model() string }); ok {
+		return m.Model()
 	}
 	return ""
 }
 
-func embeddingDimOf(e agent.Embedder, _ *Store) int {
-	if c, ok := e.(*agent.EmbeddingClient); ok {
-		return c.Dim()
+func embeddingDimOf(e agent.Embedder) int {
+	if d, ok := e.(interface{ Dim() int }); ok {
+		return d.Dim()
 	}
 	return 0
 }
