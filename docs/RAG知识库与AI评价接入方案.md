@@ -1,7 +1,9 @@
 # RAG 知识库与 AI 评价接入方案
 
 > 指导性文档：只说明**策略**与**执行方法**。所有待评审项已裁定，本版为执行依据。
-> 改造基线：`evaluations` 表结构已为 agent 侧预留，`pkg/scoring` 双侧融合与三档聚合已实现；缺的是 AI 产出写入通道、教师级报告表、知识库与 LLM 接入。
+> **改造基线（2026-10-27 复核）**：`evaluations` 的 agent 行、`ai_tasks`、`teacher_ai_reports` 表与 **S1 单次课评析链路**均已实现（`3d4a6b9`）；
+> 缺的是 S2 教师级报告生成、提优读接口（建议/趋势）、S3 对话、知识库与前端真数据。执行顺序与人工步骤见
+> [`2026-10-27-教学提优智能体接入-审查与实施方案.md`](./2026-10-27-教学提优智能体接入-审查与实施方案.md)。
 
 ---
 
@@ -13,15 +15,20 @@
 | 2 | 外部模型 | **全部走 API 调用**（百炼）。嵌入与对话共用同一套凭据体系 |
 | 3 | 逐维置信度/证据 | **JSON 内嵌** `evaluations.evidence`，不新增维度级表 |
 | 4 | 说话人分离 | **关闭**，先跑通业务。`interaction` 维度由**教师提问与发起对话等文本线索**判定（§6.5） |
-| 5 | C 类报告 | 仅**教师级**；S1 完成后**异步 + 去抖 + 快照比对**触发生成 |
+| 5 | C 类报告 | 仅**教师级**（`teacher_id+semester+course_id=0`，覆盖该教师本学期**全部课程**）；每次 S1 `done` 入队，**10 分钟去抖 + 快照比对**；A1 在 a1 后生成，a2 后覆盖为 A2（A2 基于 a1+a2） |
 | 6 | 对话 | **无状态**，前端携带最近 N 轮 `history`，不建对话表 |
-| 7 | 知识库 | 由开发者用 **CLI 离线构建**；格式 md/txt/docx/pdf；内容见 §5.1 |
+| 7 | 知识库 | 由开发者用 **CLI 离线构建**；格式 md/txt/docx/pdf；`kb-rubric` 只放**项目五维锚点**，TQF/ICAP 等英文框架放 `kb-strategy`（见 §5.1） |
 | 8 | S1 输入 | **不传入督导评分**，AI 独立评价，`alignedCount` 才具备一致性含义 |
 | 9 | 任务表 | **新增 `ai_tasks`**，S1/S2 可观测、可重试 |
+| 10 | 单次课报告 | 复用 `evaluations` 的 agent 行（五维 + 四段评语 + 证据 + 置信度），**不新建 `session_ai_reports`** |
+| 11 | 触发点 | **上传 → ASR 转写 `done` → S1**；文本模型不能直接读音频，不存在“上传即评估” |
+| 12 | 督导状态 | `teaching_sessions.status='evaluated'` = **AI 已评**；督导是否已评由 `supervisorEvaluated` 从督导评价行推导，**不新增数据库列** |
+| 13 | 趋势 | 按场次记录直接出点（AI 单源、`formula_version` 过滤、缺失点为 `null`），**不建表、不做时间衰减** |
+| 14 | 覆盖率 | **停用**：`/supervision/coverage` 保留 deprecated，不再作为业务指标或验收项 |
 
 **四条贯穿全局的硬约束**：
 
-1. **AI 全链路与督导主流程解耦**：任何失败只落 `ai_tasks.status='failed'`，不影响转写、评分与页面可用性。
+1. **AI 全链路与督导主流程解耦**：任何失败只落 `ai_tasks.status='failed'`，不影响转写、评分与页面可用性；AI 只写自己的产出与 `status='evaluated'`（含义=AI 已评），**不代替督导评价**，督导状态由 `supervisorEvaluated` 推导。
 2. **不做同步调用**：S1/S2 一律异步，绝不出现在上传请求的响应路径上。
 3. **三样东西必须版本化落库**：`formula_version`（计分口径）、`prompt_version`（提示词）、`embedding_model`（向量模型）。任一变更都会让历史数据不可比。
 4. **证据可追溯**：每个非空维度分必须附带能在转写中定位的引用；定位失败的维度降置信度或置 NULL。
@@ -74,8 +81,8 @@
 # backend/.env.local（不入库，已由 .gitignore 覆盖）
 export AIJIAOXUE_AGENT_API_KEY="sk-xxxxxxxx"                                # 与 ASR 可复用同一 Key
 export AIJIAOXUE_AGENT_WORKSPACE_ID="ws-xxxxxxxx"
-export AIJIAOXUE_AGENT_LLM_MODEL="<控制台模型列表中的对话模型名>"
-export AIJIAOXUE_EMBEDDING_MODEL="text-embedding-v4"
+export AIJIAOXUE_AGENT_LLM_MODEL="deepseek-v4.1-flash-1017"                 # 2026-10-27 选定
+export AIJIAOXUE_EMBEDDING_MODEL="qwen3.7-text-embedding-flash"            # 2026-10-27 选定
 export AIJIAOXUE_EMBEDDING_DIM="1024"
 ```
 
@@ -97,8 +104,8 @@ Content-Type: application/json
 
 ```jsonc
 {
-  "model": "text-embedding-v4",
-  "input": ["待嵌入文本1", "待嵌入文本2"],   // 批量上限见下表
+  "model": "qwen3.7-text-embedding-flash",
+  "input": ["待嵌入文本1", "待嵌入文本2"],   // 批量上限 20（本项目 batchSize=20）
   "dimensions": 1024,                       // 须与落库的 embedding_dim 一致
   "encoding_format": "float"
 }
@@ -113,10 +120,12 @@ Content-Type: application/json
 | `text-embedding-v4`（Qwen3-Embedding 系列） | 2048/1536/**1024**/768/512/256/128/64 | 8,192 | 10 | 0.0005 元（Batch 0.00025） |
 | `text-embedding-v3` | **1024**/768/512/256/128/64 | 8,192 | 10 | 0.0005 元 |
 | `qwen3.7-text-embedding` | 2560/2048/1536/**1024**/768/512/256 | 128,000 | 20 | 0.0005 元 |
-| `qwen3.7-text-embedding-flash` | **1024**/768/512/256 | 128,000 | 20 | **0.000125 元** |
+| `qwen3.7-text-embedding-flash` | **1024**/768/512/256 | 131,072 | 20 | **0.000125 元** |
 
-**选型结论**：默认 `text-embedding-v4` + `dimensions=1024`。若知识库体量大且追求最低成本，可换 `qwen3.7-text-embedding-flash`。
+> **选型结论（2026-10-27 用户拍板）**：对话模型 **`deepseek-v4.1-flash-1017`**；向量模型 **`qwen3.7-text-embedding-flash` + `dimensions=1024` + `batchSize=20`**。
+> 官方模型页已确认该向量模型在华北 2（北京）可用：1024 默认维、最大输入 131072 Token、批量上限 20、0.125 元/百万输入 Token。控制台仍需确认已开通。
 > 🔴 **一旦选定模型与维度，不得中途更换**：旧向量与新向量不在同一空间，混用等于返回随机结果。更换必须**全量重建**并同步更新 `embedding_model` / `embedding_dim`。
+> 🔴 **不要把 `text-embedding-v4` 的 1024 维向量与 flash 的 1024 维混用**：维度相同不代表同一向量空间，`embedding_model` 必须一并过滤。
 
 来源：[通用文本向量同步接口 API 详情](https://help.aliyun.com/zh/model-studio/text-embedding-synchronous-api)
 
@@ -184,9 +193,8 @@ curl -s -X POST "https://$AIJIAOXUE_AGENT_WORKSPACE_ID.cn-beijing.maas.aliyuncs.
 
 ## 4. 数据模型
 
-> **迁移编号**：V7 = 列宽修正（阶段一已实施）；V8 = AI 评价与任务；V9 = 知识库。
-> 阶段一只需要列宽修正，故 AI 表与知识库表顺延一位。
-> ⚠️ **2026-10-16 重构调整**：V8（`ai_tasks` 等）与重构计划对齐复用；知识库表（`knowledge_documents/chunks`）顺延至 V13+，本轮不建；V9–V12 为重构新表（反思/清单/通知/课表），详见 10.16 计划 §3.2。
+> **迁移编号（2026-10-27 校正）**：V7 = 列宽修正（已实施）；V8 = AI 评价与任务（已实施）；V9–V15 已被重构新表占用；
+> **知识库表为 V16**（本文早期写的 V9/V13+ 已过时）。
 
 ### 4.1 V8 迁移：AI 评价与任务
 
@@ -340,13 +348,17 @@ CREATE TABLE `knowledge_chunks` (
 
 | 集合 | 收录内容 | 主要消费者 |
 |---|---|---|
-| `kb-rubric` | **听评课标准**、**输出模板与提示词**、五维定义与评分锚点 | S1（评分口径）、S2、S3 |
-| `kb-standard` | **国家课程标准** | S1（对照 `objective`/`content`）、S3 |
+| `kb-rubric` | **项目五维定义与 1–5 分行为锚点**、**输出模板与提示词**、听评课流程 | S1（评分口径）、S2、S3 |
+| `kb-standard` | **国家课程标准 / 教育部政策文件**（如一流本科课程建设实施意见） | S1（对照 `objective`/`content`）、S3 |
 | `kb-textbook` | **学科权威教材**（按 `subject` 过滤） | S1（内容准确性）、S3 |
-| `kb-strategy` | **通用教学/管理策略** | S2、S3 |
+| `kb-strategy` | **通用教学/管理策略**：TQF、ICAP、Formative Feedback 等英文框架与教学法材料 | S2、S3 |
 | `kb-case` | **优秀案例**（含优秀课堂实例、优秀评语范例） | S2、S3 |
 
 > **S1 不检索 `kb-case` / `kb-strategy`**：评分需要的是"标准"，不是"范例"，混入会让打分向案例靠拢而失去一致性。
+
+> 🔴 **五维锚点必须与项目一致**：`kb-rubric` 只能使用 `pkg/scoring` 冻结的五维（objective/content/interaction/organization/frontier）、1–5 标度与 `frontier` 观测项（权重 0）。
+> `knowledge/TQF评分标准.docx` 是 **7 维 0–4** 的外部框架，**禁止**直接放入 `kb-rubric`；它属于 `kb-strategy`，只用于 S2/S3 的建议生成。
+> 如确需用 TQF 校准五维，先单独产出「TQF → 五维映射表」并评审，再决定是否入库。
 
 ### 5.2 文档摄取流程（CLI，不做 Web 上传）
 
@@ -354,9 +366,9 @@ CREATE TABLE `knowledge_chunks` (
 
 ```bash
 cd backend
-go run ./cmd/kb ingest --dir ./kb-src --collection kb-rubric    # 摄取目录
+go run ./cmd/kb ingest --dir ./kb-src/kb-rubric --collection kb-rubric    # 摄取目录
 go run ./cmd/kb list   --collection kb-textbook                # 查看已入库文档与切片数
-go run ./cmd/kb rebuild --collection kb-textbook               # 换嵌入模型后全量重建
+go run ./cmd/kb rebuild --dir ./kb-src/kb-textbook --collection kb-textbook  # 换模型后清空集合重建
 ```
 
 **摄取流水线**：
@@ -418,8 +430,12 @@ go run ./cmd/kb rebuild --collection kb-textbook               # 换嵌入模型
 | 场景 | 触发 | 输入上下文 | 检索集合 | 落库 | 流式 |
 |---|---|---|---|---|---|
 | **S1 单次课评价** | 转写 `done` | ①脱敏转写全文（含句级时间戳）②课程元信息（课程名/课次/教师/日期/节次/主题）③**不含督导评分** | `kb-rubric` + `kb-standard` + `kb-textbook`(本学科) | `evaluations`(agent 行) | 否 |
-| **S2 教师级报告** | S1 `done`（去抖） | ①本学期**各场次结构化评价摘要**（不喂全文转写）②维度趋势序列 ③样本量与 flags ④督导评语汇总 ⑤定向检索的弱项原文片段 | `kb-rubric` + `kb-strategy` + `kb-case` | `teacher_ai_reports` | 否 |
+| **S2 教师级报告** | 每次 S1 `done` 入队（10m 去抖 + 快照） | ①本学期**各场次结构化评价摘要**（不喂全文转写）②维度趋势序列 ③样本量与 flags ④督导评语汇总 ⑤定向检索的弱项原文片段 | `kb-rubric` + `kb-strategy` + `kb-case` | `teacher_ai_reports`（`course_id=0`，覆盖） | 否 |
 | **S3 提优对话** | 教师提问 | ①最近 N 轮 `history` ②该课程聚合分与维度明细 ③该课程各场次 AI 建议摘要 | `kb-rubric` + `kb-textbook` + `kb-strategy` + `kb-case` | 无（无状态） | **是** |
+
+> **触发链路**：上传 → ASR 转写 `done` → S1 → S2。文本模型不能直接读音频，“上传完成即评估”实际指**转写完成后评估**。
+> **单次课报告 = S1 的 agent 行**：五维分 + 四段评语 + 证据 + 置信度，不新建表；S1 成功同时把 `teaching_sessions.status` 置 `evaluated`（含义=AI 已评）。
+> **A1→A2**：a1 完成 → A1（source=[a1]）；a2 完成 → 再次入队，去抖窗口到期后比对快照，覆盖为 A2（source=[a1,a2]）；同一 `(teacher,semester,0)` 行，不保留历史版本。
 
 > **S1 与 S2 合并的收益点**：S1 一次调用同时产出「五维分 + 置信度 + 证据 + 四段评语」，保证**分数与评语依据自洽**（分开调用会出现"评语说互动不错、互动却给 2 分"）。
 > **S2 绝不喂全文转写**：N 次课转写达数十万 Token，既超上下文又昂贵且噪声大。S2 的输入是 S1 的结构化产出 + **定向检索**的少量原文片段。
@@ -509,11 +525,17 @@ Body: { "courseId": 12, "question": "如何提升课堂互动？",
 
 | 方法 路径 | 权限 | 说明 |
 |---|---|---|
-| `GET /sessions/:id/evaluation` | 登录（裁剪） | **扩展现有接口**：`agentScore` 增加 `evidence` 结构化字段（仅加字段，向后兼容） |
-| `GET /teachers/:id/ai-report?semester=` | teacher(仅本人)/director(本室)/supervisor | 读 C 类报告；无报告返回 `null` + `status` 供轮询 |
+| `GET /sessions/:id/evaluation` | 登录（裁剪） | **扩展现有接口**：`agentScore` 增加 `evidence` 结构化字段；响应增加 `supervisorEvaluated`（督导是否已评，由督导行推导） |
+| `GET /teachers/:id/ai-report?semester=` | teacher(仅本人)/director(本室)/supervisor | 读教师级报告；无报告返回 `report=null` + `status` 供轮询 |
 | `POST /teachers/:id/ai-report/regenerate` | supervisor/director | 手动重生成（异步，返回 `pending`） |
-| `GET /courses/:id/agent-suggestions?semester=&page=&pageSize=` | 登录（裁剪） | 供 `AgentSuggestionList`，按课次倒序 |
+| `GET /courses/:id/agent-suggestions?semester=` | 登录（裁剪） | 供 `AgentSuggestionList`，按课次倒序；**v1 返回数组**（RAG 原分页参数取消，前端签名为准） |
+| `GET /teachers/:id/score-trend?semester=&courseId=&dimension=` | 登录（裁剪） | 综合分 + 五维趋势；`courseId` 可选，缺失点为 `null` |
 | `POST /agent/chat` | 登录（裁剪） | SSE 流式对话 |
+
+> 🔴 **`supervisorEvaluated` 与 `status` 的分工**：`status='evaluated'` = AI 已评，**只有 AI 任务写**；督导已评由 `supervisorEvaluated` 表示。
+> 督导观察 `PUT /sessions/:id/supervisor-observation` 只写督导评价行，不改 `status`。
+> 督导课程页「去评估/查看评估」、听评课计划 `evaluated`、督导队列 `reviewed` 均以督导评价行为准，不再看 `status`。
+> 督导覆盖率 `GET /supervision/coverage` 已停用（deprecated），不计入验收。
 
 **`AgentSuggestion` 契约**（前端 `types/agent.ts` 已定型，后端直接对齐）：
 
@@ -533,14 +555,14 @@ agent:
   enabled: false
   apiKey: ""            # 仅环境变量 AIJIAOXUE_AGENT_API_KEY
   workspaceId: ""
-  llmModel: ""          # 必填，模型名配置化
+  llmModel: "deepseek-v4.1-flash-1017"   # 2026-10-27 选定；仍走配置，不硬编码
   timeout: "3m"         # 单次评价的超时
   maxConcurrency: 2     # 并发闸门
   reportDebounce: "10m" # S2 去抖窗口
 embedding:
-  model: "text-embedding-v4"
+  model: "qwen3.7-text-embedding-flash"
   dim: 1024
-  batchSize: 10         # 对齐模型批量上限
+  batchSize: 20         # 对齐该模型批量上限
   topK: 8
   minScore: 0.35
 ```
@@ -561,8 +583,8 @@ embedding:
 **规则**：
 
 1. **全部异步**：S1/S2 只在后台 worker 执行，绝不出现在 HTTP 响应路径上。
-2. **去抖**：同一教师 `reportDebounce` 窗口内多次上传只触发一次 S2。
-3. **快照比对**：S2 执行前比对 `source_session_ids` 与当前已评价场次集合，无变化直接跳过。
+2. **去抖**：同一教师 `reportDebounce`（默认 10m）窗口内多次 S1 完成只触发一次 S2 **调用**；去抖只合并调用，不丢样本——窗口结束后仍按全部已评场次生成。
+3. **快照比对**：S2 执行前比对 `source_session_ids` 与当前已评场次集合，无变化直接跳过；a2 到来后快照变化，A1 覆盖为 A2（含 a1+a2）。
 4. **幂等**：`ai_tasks.uk_ai_task` 保证同一目标同一类任务至多一条；「重新生成」= 复位 `status='pending'`。
 5. **失败可重试**：`attempts` 达上限后置 `failed`，由督导/主任在页面点「重新生成」复位。
 6. **重启恢复**：进程启动时把遗留的 `running` 任务复位为 `pending` 重新入队（沿用转写链路的 `RequeueStuck` 范式）。
@@ -570,6 +592,10 @@ embedding:
 ---
 
 ## 9. 执行计划
+
+> **实施状态（2026-10-27）**：阶段 0 已完成（契约见 `backend_AGENTS.md` §8.10 / §8.15，`score-trend` 已补）；阶段 1 已完成；
+> 阶段 2 的 2.1–2.5 已完成，2.6（S2）/2.7（提优接口）未完成；阶段 3（知识库）/阶段 4（对话与前端）未开始。
+> 实际执行顺序以 [`2026-10-27-教学提优智能体接入-审查与实施方案.md`](./2026-10-27-教学提优智能体接入-审查与实施方案.md) §5 为准。
 
 ### 阶段 0：契约冻结（无代码）
 
@@ -605,11 +631,11 @@ embedding:
 
 | # | 任务 | 验收 |
 |---|---|---|
-| 3.1 | V9 迁移：`knowledge_documents` + `knowledge_chunks` | 向量与 `embedding_model/dim` 一并落库 |
-| 3.2 | `internal/agent/embedder`：Embedder 接口 + 百炼实现 + 失败降级 | 单测：失败时降级为无知识库仍返回 |
+| 3.1 | **V16 迁移（已完成 2026-10-27）**：`knowledge_documents` + `knowledge_chunks` | 向量与 `embedding_model/dim` 一并落库 |
+| 3.2 | `internal/agent/embedder`（**基础能力已完成**；失败降级待接入）：Embedder 接口 + 百炼实现 | 单测：批量/维度/归一化；S1 失败降级待做 |
 | 3.3 | `internal/agent/retriever`：缓存、余弦、元数据过滤、阈值 | 单测：top-k 命中 + 模型过滤 + 阈值丢弃 |
-| 3.4 | `cmd/kb`：ingest / list / rebuild（md+txt+docx 解析，PDF 预处理） | 摄取一个真实文档并检索命中 |
-| 3.5 | `kb-rubric` 冷启动：导入听评课标准、五维锚点、输出模板与提示词 | 检索"互动维度锚点"能命中 |
+| 3.4 | **`cmd/kb`（已完成 2026-10-27）**：ingest / list / rebuild（md+txt+docx 解析，PDF 预处理） | 已摄取 kb-rubric 2 文档/42 chunks；检索命中待 3.3 |
+| 3.5 | **`kb-rubric` 冷启动（文档已落地）**：五维锚点、输出模板；TQF 等外部框架进 kb-strategy | 离线余弦验证“互动维度锚点”Top1=0.6165；正式检索待 3.3 |
 | 3.6 | S1/S2/S3 接入检索与 `citedChunks` 回传 | 证据里可见知识库引用 |
 
 ### 阶段 4：对话与前端

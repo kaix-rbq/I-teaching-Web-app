@@ -240,6 +240,9 @@ ORDER BY r.uploaded_at DESC;       -- 期望 3 行
 
 ### S5.1 督导覆盖率（口径：当前学期 open 课程为分母）
 
+> ⚠️ **2026-10-27 起停用**：覆盖率不再作为业务指标或验收项；`GET /supervision/coverage` 仅保留兼容历史查询。
+> 本节 SQL 与对账值只用于旧数据排查，不得再写入 DoD 或 `verify.sh` 的新断言。
+
 ```sql
 -- 总体：期望 total=6, supervised=3, rate=0.5000
 SELECT

@@ -137,7 +137,12 @@ func (c *Client) AnalyzeSession(ctx context.Context, in EvalInput) (*Result, err
 	if promptVersion == "" {
 		promptVersion = "v1"
 	}
-	return ParseS1Response(cr.Choices[0].Message.Content, in.Transcript, promptVersion, c.cfg.LLMModel)
+	res, err := ParseS1Response(cr.Choices[0].Message.Content, in.Transcript, promptVersion, c.cfg.LLMModel)
+	if err != nil {
+		return nil, err
+	}
+	res.Evidence.CitedChunks = filterCitedChunks(res.Evidence.CitedChunks, in.Knowledge)
+	return res, nil
 }
 
 func truncate(s string, n int) string {

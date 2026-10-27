@@ -6,13 +6,13 @@
 
 ---
 
-> ## 🚦 当前阶段：Sprint 2（阶段① 已交付 / 阶段② 前端已接入真实接口）
+> ## 🚦 当前阶段：Sprint 2/3（阶段② 智能体接入进行中 / 阶段③ 智能体部分实施中）
 >
 > | 阶段 | 主题 | 状态 |
 > |------|------|------|
 > | **阶段① （Sprint 2.1）** | 评价闭环：授课记录 · 督导评分 · 结构化评语 · 三级聚合 · 主任教师画像 · 教师质量档案/提优页 | **已交付** —— 路由、页面、组件与接口层均已落地（`frontend/src/router/index.ts`、`frontend/src/views/`、`frontend/src/api/session.ts`、`frontend/src/api/teacher.ts`） |
-> | **阶段② （Sprint 2.2）** | 智能体接入：课堂录音 · 异步转写 · 综合分融合 · 督导页「智能体参考」面板 | **前端已接入真实接口** —— 录音上传/播放（`components/session/AudioPlayer.vue`）、转写三态（`components/evaluation/TranscriptViewer.vue` + `GET /sessions/:id/transcript`）、`agentScore` 双源参考（`EvaluationCompare`）均可用；**真实 AI 评分推理管线未实现**（agent 评价行当前由后端 seed 提供） |
-> | **阶段③ （Sprint 3）** | 帮教师：智能体提优建议 · 对话（SSE） · 趋势视图 · 申诉复核 · 质量报告导出 | **仅前端演示** —— 提优建议/趋势/对话由 `frontend/src/mocks/teacherImprove.ts` 驱动（`frontend/src/api/agent.ts` 不发网络请求）；申诉复核、报告导出未实现 |
+> | **阶段② （Sprint 2.2）** | 智能体接入：课堂录音 · 异步转写 · AI 单源评分 · 督导页「智能体参考」面板 | **前端已接入真实接口，后端 S1 已实现** —— 录音上传/播放、转写三态、`agentScore` + `evidence` 面板均可用；`agentScore` 由 `evaluations` 的 agent 行提供，S1 已在转写完成后真实调用模型（真实 Key 待配置，端到端待验收） |
+> | **阶段③ （Sprint 3）** | 帮教师：智能体提优建议 · 对话（SSE） · 趋势视图 · 教师级 AI 报告 · 申诉复核 · 质量报告导出 | **智能体部分实施中** —— 建议/趋势/对话/教师级报告后端契约已冻结（`backend_AGENTS.md` §8.15），前端仍用 `frontend/src/mocks/teacherImprove.ts` 演示数据；申诉复核、报告导出未实现 |
 >
 > **本手册覆盖全部三个 Sprint，是前端「技术栈 / 目录 / 路由 / 页面规格 / 组件 / 设计令牌 / 编码规范 / DoD」的唯一事实源。** Sprint 1 的基础平台已交付，Sprint 2/3 的功能与设计事实源是
 > **[`Sprint2-3-教学评价与提优-开发计划.md`](./Sprint2-3-教学评价与提优-开发计划.md)**（下称「开发计划」）。
@@ -61,8 +61,8 @@
 | 进阶 | 主题 | 说明 | 迭代 |
 |------|------|------|------|
 | 进阶 1 | **查课程** | 全量课程信息透明可查 | Sprint 1（已交付） |
-| 进阶 2 | **看课堂** | AI 听评课与课堂质量评估（面向督导，兼顾主任/教师查看） | Sprint 2（阶段① 已交付；阶段② 录音/转写/双源参考已接入，真实 AI 推理管线未实现） |
-| 进阶 3 | **帮教师** | 教学改进建议、趋势与对话（面向教师） | Sprint 3（AI 建议/趋势/对话为前端演示数据，真实接口未实现） |
+| 进阶 2 | **看课堂** | AI 听评课与课堂质量评估（面向督导，兼顾主任/教师查看） | Sprint 2（阶段① 已交付；阶段② 录音/转写/双源参考已接入，S1 已实现，真实 Key 待配置） |
+| 进阶 3 | **帮教师** | 教学改进建议、趋势与对话（面向教师） | Sprint 3（智能体部分实施中；建议/趋势/对话/AI 报告契约已冻结，前端暂为演示数据） |
 
 **核心架构：评分源可插拔。** `supervisor`（督导）与 `agent`（智能体）只是 `evaluations.evaluator_type` 的两个取值，
 向同一张表写同样的结构，聚合层只认该表、不关心分数从哪来。这决定了前端的两个基本事实：
@@ -103,16 +103,17 @@
 - `CourseDetailView` 概要卡 + 三个 Tab（基本信息 / 开课信息 / 课程资源）（S2.x / S4.1 / S4.2）；
 - `CourseFormView` 新增/编辑复用 + 校验（S3.1）；
 - `ResourceList` / `ResourceUploader` 资源列表、上传（进度/类型/大小校验）、下载、删除（S4.1 / S4.2）；
-- `SupervisionView` 督导覆盖率 + 听评课安排（S5.1）；
+- `SupervisionView` 听评课安排（S5.1）；~~督导覆盖率~~已停用（2026-10-27）；
 - `ProfileView` 个人中心（只读，低优先级）。
 
-### 2.2 Sprint 2（课堂评价闭环 + 智能体接入）—— 阶段①已交付 / 阶段②前端已接入
+### 2.2 Sprint 2（课堂评价闭环 + 智能体接入）—— 阶段①已交付 / 阶段②智能体接入进行中
 
 **目标**：把「课程」下沉到「一次课」，建立**督导评分 → 场次级 → 课程级 → 教师级**的评价数据链；再叠加智能体评分，形成综合分与提优视图。
 **它同时服务两个用户**：督导（录入评分）与主任/教师（查看评分）——**主任端与教师端的数字必须逐位一致**，由后端单一聚合函数保证，前端不得各自造口径。
 
-> **实现状态（以代码为准）**：阶段① 全部页面与接口层已落地；阶段② 的课堂录音上传/播放与异步转写三态、`agentScore` 双源参考面板均已接真实接口（`frontend/src/views/SessionEvaluationView.vue:177-206,234`；`frontend/src/api/session.ts:58-69`；`backend/internal/router/router.go:84,102-103,120`）。
-> 仍为**演示数据**的只有阶段③的提优建议 / 趋势 / 对话（`frontend/src/api/agent.ts` → `frontend/src/mocks/teacherImprove.ts`）；**真实 AI 评分推理管线未实现**（`GET /sessions/:id/evaluation` 的 `agentScore` 来自 `evaluations` 表 `evaluator_type='agent'` 行，当前由 seed 提供，见 `backend/database/seed.sql:149-167`）。
+> **实现状态（以代码为准）**：阶段① 全部页面与接口层已落地；阶段② 的课堂录音上传/播放与异步转写三态、`agentScore` + `evidence` 面板均已接真实接口（`frontend/src/views/SessionEvaluationView.vue:177-206,234`；`frontend/src/api/session.ts:58-69`；`backend/internal/router/router.go:84,102-103,120`）。
+> **后端 S1 单次课 AI 评析已实现**（`3d4a6b9`，2026-10-17）：转写 `done` 后异步调用模型并写 `evaluations` 的 agent 行；本机尚未配置真实 Key，端到端待验收。
+> 仍为**演示数据**的只有阶段③的提优建议 / 趋势 / 对话（`frontend/src/api/agent.ts` → `frontend/src/mocks/teacherImprove.ts`），其后端契约见 `backend_AGENTS.md` §8.15。
 
 **用户故事**：
 
@@ -144,12 +145,15 @@
 
 - `AudioPlayer` 课堂录音播放（含上传入口）—— 已实现（`components/session/AudioPlayer.vue`；上传 `POST /sessions/:id/recording`）；
 - `TranscriptViewer` 转写查看器：**异步任务三态**（`pending/running → done → failed`）+ 状态轮询 + 失败重试 —— 已实现（轮询在 `SessionEvaluationView` 内联 `setTimeout`，见 §7.10）；
-- `EvaluationCompare` 「智能体参考」对比面板：标注「AI 参考」、展示低置信度维度与 `evidence` 转写引用 —— 已接入 `GET /sessions/:id/evaluation` 的 `agentScore`（后端 seed 提供数据，无真实 AI 推理管线）；
+- `EvaluationCompare` 「智能体参考」对比面板：标注「AI 参考」、展示低置信度维度与 `evidence` 转写引用 —— 已接入 `GET /sessions/:id/evaluation` 的 `agentScore`（后端 S1 真实产出；`evidence` 已在 `EvaluationDTO` 暴露并可直接渲染）；
 - 综合分在现有页面上自动生效（前端不改口径，仅展示 `flags` 与 `sample`）—— 已实现。
 
-### 2.3 Sprint 3（帮教师 / 提优）—— 后续排期
+### 2.3 Sprint 3（帮教师 / 提优）—— 智能体部分实施中
 
 **目标**：把「分数」变成「可行动的改进」：教师能看到智能体建议、能看到自己是否在进步、能就课堂改进与智能体对话。
+
+> **状态（2026-10-27）**：后端契约已冻结（`backend_AGENTS.md` §8.15）；前端仍由 `src/mocks/teacherImprove.ts` 驱动，待 P6 切真实接口。
+> 教师级 AI 报告（S2）新增展示位；申诉复核与报告导出仍待排期。
 
 **用户故事**：
 
@@ -159,12 +163,14 @@
 | S8.2 | 教师 | 与智能体就课堂改进对话 | C |
 | S8.3 | 教师 | 查看本人各维度分数的历史趋势 | S |
 | S8.4 | 教师 | 对评分提出申诉，督导复核 | S |
+| S8.5 | 教师 | 查看教师级 AI 综合报告（本学期全部课程） | M |
 
 **前端交付物**：
 
 - `ScoreTrendChart` 趋势折线组件：按维度切换（含 `frontier`），数据源 `GET /teachers/:id/score-trend`（T3.2）；
 - 智能体提优建议列表：在 `CourseImproveView` 按时间倒序展示并标注对应课次（T3.1）；
 - 智能体对话（SSE 流式）：`POST /agent/chat`，断流可重连、失败不阻塞页面（T3.3）；
+- 教师级 AI 综合报告：`GET /teachers/:id/ai-report`，在「我的质量档案」展示 `summary/directions/suggestions`（T3.7）；
 - 教师申诉 / 督导复核界面：申诉记录留痕、状态可追溯（T3.4）；
 - 质量报告导出入口（T3.6）。
 
@@ -635,7 +641,7 @@ ScheduleTable 听评课安排：课程名称 | 授课教师 | 督导人 | 计划
 
 - **改造要点（T1.15）**：原「督导总览」的统计卡行与 `CoverageCard` **移除**；v1.2 起督导工作台也不再渲染覆盖率与统计卡（覆盖率由 `GET /supervision/coverage` 单独提供），本页只保留**完整分页列表 + 筛选**；
 - **本页是听评课计划的后备完整列表**：v1.2 起已从督导侧边栏摘除（督导菜单为「工作台 / 课程列表 / 草稿箱 / 个人中心」），督导的听评课核心动作收口到工作台待评课队列与课程列表；本页保留以保证历史计划仍可访问、可筛选；
-- 覆盖率 = 已完成听评课课程数 / 全校开设课程数，由后端计算，前端只展示；
+- 覆盖率 = 已完成听评课课程数 / 全校开设课程数，由后端计算，前端只展示；**2026-10-27 起该指标已停用**（接口 deprecated，任何页面不得再以它作为业务指标或验收项）；
 - 覆盖率可视化用自绘 SVG/CSS 进度环（**不引入图表库**，见 §4）。
 
 ### 7.8 TeacherListView 教师画像页（S6.4，T1.12；方向：本室/全校）
@@ -832,7 +838,7 @@ FilterBar：按课程名称查询（keyword）+ 重置
 
 | 组件 | Props（概要） | 职责 | 对应故事 | 阶段 |
 |------|--------------|------|---------|------|
-| CoverageCard | `overall: CoverageStat\|null, loading?` | 覆盖率环形（+ 分组条形） | S5.1 | S1（v1.2 起督导工作台不再使用） |
+| CoverageCard | `overall: CoverageStat\|null, loading?` | 覆盖率环形（+ 分组条形） | S5.1 | S1（v1.2 起督导工作台不再使用；2026-10-27 指标停用，不再接线） |
 | ScheduleTable | `plans, loading?` + `@view` | 听评课安排表 | S5.1 / S6.7 | S1 |
 | EvaluationQueue | `plans: SupervisionPlan[], loading?` + `@create/@evaluate` | 待评课队列（今日/本周/本月/未评四档 + 日期闸门 + 状态徽章 + 行内直达动作） | S6.7 | v1.2 |
 
@@ -913,7 +919,7 @@ FilterBar：按课程名称查询（keyword）+ 重置
 
 1. **四芒星徽标 `AiBadge`**：`--gradient-ai` 渐变填充 + 「AI 参考」/「AI 建议」/「AI 生成」文字；
 2. **浅紫虚线卡片**：统一 class `.ai-panel`（`frontend/src/styles/base.scss:105-120`）= `--color-ai-bg` 浅底 + 1px `rgba(139,92,246,.45)` 虚线描边 + `--radius-ai` / `--shadow-ai` + 顶部 2px 渐变饰条——「虚线」隐喻「参考、未定案」，与人类督导的实线卡片形成语法对比；**禁止页面各自手写**（用法示例：`components/evaluation/EvaluationCompare.vue:50,59`）；
-3. **可追溯性露出（部分待后端补字段）**：AI 评分卡当前露出 `aiConfidence`（置信度进度条 + 低置信标签，见 `EvaluationCompare.vue`）；`evidence`（转写引用）**当前未在 `EvaluationDTO` 暴露**（`backend/internal/dto/evaluation.go` 无该字段，仅 DB/model 有 `evidence` 列），故智能体评价对照面板暂无法渲染证据；阶段③ mock 的 AI 建议卡（`AgentSuggestion`）已有 `evidence` 字段。**低置信分当前仍展示并标注警示，不做隐藏**（红线见 §9.6-4）。
+3. **可追溯性露出（已具备）**：AI 评分卡露出 `aiConfidence`（置信度进度条 + 低置信标签，见 `EvaluationCompare.vue`）；`evidence`（转写引用）**已在 `EvaluationDTO` 暴露**（`backend/internal/dto/evaluation.go` 的 `EvidenceDTO`，DB/model 同名列），智能体评价对照面板可直接渲染「分数→转写原文」。阶段③建议卡（`AgentSuggestion`）的 `evidence` 为后端渲染的字符串。**低置信分仍展示并标注警示，不做隐藏**（红线见 §9.6-4）。
 
 > **与督导角色色的区分**：督导紫 `#722ED1` 只出现在 `RoleTag` / 头像（指「人」）；AI 渐变紫只出现在智能体产出内容上（指「机器产出」），两个场景不相交。
 > **不做清单**：❌ 玻璃拟态 / 大面积渐变 / 发光特效堆「AI 感」；❌ 第二套 UI 库或图表库；❌ 评分色阶作装饰色。
@@ -1039,7 +1045,7 @@ FilterBar：按课程名称查询（keyword）+ 重置
 1. **缺失 ≠ 0**：`null` 分一律渲染 `—`（或灰底占位），**禁止显示 0、禁止用 0 参与前端排序**；
 2. **frontier 不是计分维度**：`isObservation: true` / `weight: 0` 的维度单独以「亮点标记」样式展示，不得混入综合分的加权说明；
 3. **必须暴露样本量**：任何展示综合分的位置都要能看到 `evaluatedCount`；`sampleSufficient === false` 时紧邻综合分标注「样本不足（n=x）」；
-4. **AI 必须显形**：智能体分数一律带「AI 参考」标签；低置信度维度（`aiConfidence < 0.4`）单独提示，**分数仍展示、不得静默隐藏**；`evidence`（转写引用）**当前未在 `EvaluationDTO` 暴露**（DB/model 有 `evidence` 列），故「无证据不采信」暂无法在前端执行——后端补字段后再启用；
+4. **AI 必须显形**：智能体分数一律带「AI 参考」标签；低置信度维度（`aiConfidence < 0.4`）单独提示，**分数仍展示、不得静默隐藏**；`evidence`（转写引用）**已在 `EvaluationDTO` 暴露**，后端保证每个非空维度至少 1 条可定位引用；前端按「无证据不采信」展示：无引用的维度只显示分数并标「无引用」，不得伪造证据；
 5. **口径提示不隐藏**：`flags` 含 `disjoint` / `formula_mixed` / `no_data` 时，页面需有可见提示条，**不得静默**；
 6. **伦理标注常驻**：教师画像列表 / 教师画像详情 / 我的质量档案 / 教学提优页顶部固定展示「仅用于教学支持，不作为考核依据」。
 
@@ -1144,7 +1150,7 @@ interface PageResult<T> { list: T[]; total: number; page: number; pageSize: numb
 > **逐字对齐后端 `internal/dto/evaluation.go`**，字段名即后端 JSON tag；缺失侧一律 `null`。
 
 ```ts
-type SessionStatus = 'scheduled' | 'recorded' | 'evaluated';
+type SessionStatus = 'scheduled' | 'recorded' | 'evaluated'; // evaluated = AI 已评（2026-10-27 口径；督导状态用 supervisorEvaluated）
 type EvaluatorType = 'supervisor' | 'agent';
 
 /** 课程历史授课记录行（GET /courses/:id/sessions） */
@@ -1153,7 +1159,8 @@ interface SessionListItem {
   sessionDate: string;               // YYYY-MM-DD
   period: string;                    // 如 "3-4 节"
   topic: string;
-  status: SessionStatus;
+  status: SessionStatus;             // evaluated = AI 已评析（2026-10-27 口径）
+  supervisorEvaluated: boolean;      // 督导是否已评（有 supervisor 评价行），取代 status 判断
   supervisorScore: number | null;    // 单次总分（仅展示/排序）
   agentScore: number | null;
   evaluationCount: number;
@@ -1194,13 +1201,28 @@ interface EvaluationDTO {
   highlights: string;                // 亮点
   improvements: string;              // 待改进
   suggestions: string;               // 建议 / 智能体提优建议
+  evidence: EvidenceDTO | null;      // 仅 agent 行；督导行 null
   createdAt: string;
   updatedAt: string;
+}
+
+/** evaluations.evidence 的结构化投影（schemaVersion 1） */
+interface EvidenceDTO {
+  schemaVersion: number;
+  citedChunks: string[];             // 如 kb-rubric#3
+  dimensions: Record<string, {
+    confidence: number;
+    quotes: { start: number; end: number; quote: string }[];
+  }>;
+  notObservable: string[];           // 无法评价的维度
+  promptVersion: string;
+  riskTags?: string[];               // 仅督导可见（教师端后端清空）
 }
 
 /** GET /sessions/:id/evaluation 聚合响应（当堂课评估页） */
 interface SessionEvaluation {
   session: SessionDetail;
+  supervisorEvaluated: boolean;       // 督导是否已评（2026-10-27 新增）
   supervisorScores: EvaluationDTO[];  // 一次课可多督导
   agentScore: EvaluationDTO | null;   // 后端 evaluator_type='agent' 行；无则为 null
 }
@@ -1363,7 +1385,7 @@ interface TeacherEvaluationTimelineItem {
 | 督导 supervision | §8.6 | `api/supervision.ts` | ✅ 已接入 |
 | 授课记录与评价聚合 | §8.8 | `api/session.ts`、`api/teacher.ts`、`api/draft.ts` | ✅ 已接入 |
 | 课堂录音与转写 | §8.9 | `api/session.ts` | ✅ **已实现**（阶段②；`POST recording` / `GET transcript` / `POST transcript/retry` / `GET recordings/:id/stream`） |
-| 智能体对话 / 趋势 | 开发计划 §4.4（**后端未实现**） | `api/agent.ts` | ◐ 由 `mocks/teacherImprove.ts` 演示数据驱动，不发网络请求 |
+| 智能体提优（建议/趋势/报告/对话） | §8.15（**契约已冻结，实现中**） | `api/agent.ts` | ◐ 由 `mocks/teacherImprove.ts` 演示数据驱动，不发网络请求 |
 
 **前端侧仅有的三条补充约定**（其余全部见后端 §8）：
 
@@ -1392,7 +1414,7 @@ interface TeacherEvaluationTimelineItem {
 | POST | `/sessions/:id/transcript/retry` | 转写失败「重试」 |
 | GET | `/recordings/:id/stream` | `AudioPlayer`（经 `playbackUrl`，仅督导） |
 
-**阶段③后端未实现、前端不发请求的接口**（`api/agent.ts` 返回演示数据）：`GET /teachers/:id/score-trend?semester=&dimension=`、`POST /agent/chat`（SSE）。后端就绪前**不返回 `501`**——请求根本不会发出；后端就绪后仅替换 `api/agent.ts` 实现，页面与组件无需改动。
+**阶段③智能体接口：契约已冻结（`backend_AGENTS.md` §8.15），实现中；前端暂不发请求**（`api/agent.ts` 返回演示数据）：`GET /teachers/:id/score-trend`、`GET /courses/:id/agent-suggestions`、`GET /teachers/:id/ai-report`、`POST /agent/chat`（SSE）。路由注册前**请求不会发出**；就绪后仅替换 `api/agent.ts` 实现，页面与组件无需改动。
 
 ### 10.5 错误码（新增部分）
 
@@ -1415,7 +1437,7 @@ interface TeacherEvaluationTimelineItem {
 - 鉴权头：`Authorization: Bearer <token>`，token 存 `localStorage`（key：`aijiaoxue_token`，用户信息 key：`aijiaoxue_user`）；
 - 聚合接口**必须透传 `semester`**（开发计划 §2.5.6：跨学期平均会抹平改进），前端默认当前学期；
 - **没有 mock/real 接口切换开关**：`frontend/.env.development` 只有 `VITE_API_BASE_URL` 与 `VITE_PROXY_TARGET`，代码中不存在 `VITE_USE_MOCK`。
-  > `frontend/src/mocks/` 当前仅含 `teacherImprove.ts`，被 `frontend/src/api/agent.ts` 直接 import，为**阶段③ AI 区块**（提优建议 / 趋势 / 对话）提供演示数据（后端 `GET /teachers/:id/score-trend`、`POST /agent/chat` 未实现）。其余接口全部直连真实后端。后端就绪后删除该 mock 并令 `api/agent.ts` 改走真实请求即可，页面与组件无需改动。
+  > `frontend/src/mocks/` 当前仅含 `teacherImprove.ts`，被 `frontend/src/api/agent.ts` 直接 import，为**阶段③ AI 区块**（提优建议 / 趋势 / 对话）提供演示数据（后端对应契约见 `backend_AGENTS.md` §8.15，实现中）。其余接口全部直连真实后端。后端就绪后删除该 mock 并令 `api/agent.ts` 改走真实请求即可，页面与组件无需改动。
 
 ## 11. 状态管理与数据流
 
@@ -1496,7 +1518,7 @@ views ──调用──> api/*（唯一请求出口）
 | S3.1 | 主任可新增课程（校验生效）；可从列表/详情进入编辑，保存后数据刷新 |
 | S4.1 | 教师在课程详情可见资源列表与各班学生人次、汇总人次 |
 | S4.2 | 教师可上传资源（类型/大小校验 + 进度），可删除（二次确认），列表实时更新 |
-| S5.1 | 督导在工作台/督导总览可见覆盖率（总体 + 分教研室）与听评课安排列表 |
+| S5.1 | 督导可查看听评课安排列表；~~覆盖率~~（2026-10-27 起停用，不作为验收项） |
 
 ### 14.3 Sprint 2 阶段①（评价闭环）
 
@@ -1517,7 +1539,7 @@ views ──调用──> api/*（唯一请求出口）
 | 任务/故事 | 前端验收要点 |
 |-----------|-------------|
 | T2.7 / S7.1 | ✅ **已实现**：音频播放器 + 转写查看器三态（pending/running/done/failed）可用；失败可重试；轮询在离开页面后停止（内联 `setTimeout` + `onUnmounted` 清理） |
-| T2.8 / S7.2 | 「智能体参考」面板标注「AI 参考」；低置信度维度有提示；`objective` 为 `null` 时显示空而非 0。**前端已接真实 `GET /sessions/:id/evaluation` 的 `agentScore`；真实 AI 评分推理管线未实现，agent 评价行当前由后端 seed 提供** |
+| T2.8 / S7.2 | 「智能体参考」面板标注「AI 参考」；低置信度维度有提示；`objective` 为 `null` 时显示空而非 0。**前端已接真实 `GET /sessions/:id/evaluation` 的 `agentScore`；后端 S1 已实现并真实产出 agent 行（真实 Key 待配置）** |
 | T2.9 / S7.3 | 综合分随智能体评价接入更新（后端聚合已支持双源）；`disjoint` 场景有显式提示，不静默 |
 | 隐私 | ✅ **已实现**：教师端看不到音频播放器（`playbackUrl` 为空即不渲染）；转写文本已脱敏 |
 
@@ -1525,9 +1547,9 @@ views ──调用──> api/*（唯一请求出口）
 
 | 任务/故事 | 前端验收要点 |
 |-----------|-------------|
-| T3.1 / S8.1 | 教师端可见智能体提优建议，且与课堂记录对应、按时间倒序（**当前由 `mocks/teacherImprove.ts` 演示数据驱动，真实接口未实现**） |
-| T3.2 / S8.3 | 趋势折线可按维度切换（**当前演示数据驱动，真实接口 `GET /teachers/:id/score-trend` 未实现**） |
-| T3.3 / S8.2 | SSE 流式输出；中断可恢复；失败不阻塞页面（**当前用 `setTimeout` 分包模拟流式，真实 SSE `POST /agent/chat` 未实现**） |
+| T3.1 / S8.1 | 教师端可见智能体提优建议，且与课堂记录对应、按时间倒序（**当前由 `mocks/teacherImprove.ts` 演示数据驱动；接口契约 `GET /courses/:id/agent-suggestions` 已冻结，待实现**） |
+| T3.2 / S8.3 | 趋势折线可按维度切换（**当前演示数据驱动；`GET /teachers/:id/score-trend` 契约已冻结，待实现**） |
+| T3.3 / S8.2 | SSE 流式输出；中断可恢复；失败不阻塞页面（**当前用 `setTimeout` 分包模拟；`POST /agent/chat` 契约已冻结，待实现**） |
 | T3.4 / S8.4 | 教师可提交申诉、督导可复核，状态可追溯（**未实现**：无对应路由/页面/接口） |
 
 ---
@@ -1540,6 +1562,6 @@ views ──调用──> api/*（唯一请求出口）
 | v2.0 | 2026-09 | 覆盖三个 Sprint：新增当前阶段横幅与三 Sprint 对等章节；补全 Sprint 2/3 页面、路由变更表、组件与目录（§5–§8）；接口层修正（`/teacher-scores` 与 `/teachers` 分离、`GET /courses/:id/sessions`、`/sessions/...`、两个 `evaluation-summary`、`evaluatedCount`、`40002` = HTTP 400）；新增评分展示规范（§9.6）；新增「文档同步要求（强制）」（§13）；补充阶段①②③验收标准（§14） |
 | v2.1 | 2026-09-22 | 交付「教学提优」页（任务五、六）：§7.11 补全七大区块与数据源；新增 `ScoreSummaryPanel` / `AgentSuggestionList` / `AgentChat` 组件规格，`ScoreTrendChart` Props 更新（§8.4）；更新 mock 约定（§10）——阶段③智能体区块真实接口留空，由 `src/mocks/teacherImprove.ts` 演示数据驱动；「我的课程」入口改跳 `/courses/:id/improve` |
 | v1.3 | 2026-10-06 | 督导课程复盘与教师授课记录：督导侧边栏恢复「课程列表」（`mine=1` 只列本人负责评估的课程）并新增 `/supervision/courses/:id`（§7.5A）；待评课队列清除已评估记录（§7.3）；`TranscriptViewer` 预览 + 居中弹窗展开（§7.10）；教师「授课快照」改跳当堂课评价页并展示督导 + AI 评价与转写入口（§7.10）；`GET /courses` 增 `mine` 参数 |
-| v1.4 | 2026-10-07 | 文档整合：并入原《前端设计-new》（该文件已删除），修正阶段状态/技术栈/权限矩阵/目录/组件/契约，补齐 ProfileQualityView 与 DraftBoxView 规格。要点：① 阶段横幅与 §2 改为「阶段① 已交付 / 阶段② 前端已接入 / 阶段③ 演示数据」；② §4 移除 ECharts、取消 `VITE_USE_MOCK`、版本对齐 `frontend/package.json`；③ §3.1 补 `/me/quality`、`/drafts`、`/supervision/courses/:id` 与路由级权限真值；④ §5 目录树、§8 组件清单按代码全量校正（移除不存在的 `ScoreSummaryPanel` 与 `useTranscriptionPolling.ts`，补齐 `AiBadge`/`QualityBadge`/`AnchorScale`/`ScoreDimensionsCard`/`ScoreHeatmap`/`QualityCompass`/`EvaluationQueue`/`TeacherScoreCard`/`EvaluationTimeline`）；⑤ §7.2/7.3/7.7-7.11 页面规格校正，新增 §7.13 我的质量档案、§7.14 草稿箱；⑥ §9 折叠原《前端设计-new》仍有效内容（核心叙事、三视觉签名、AI 虚线卡约定）并按 `tokens.scss` 全量对齐令牌；⑦ §10 类型补 `RecordingDTO`/`TranscriptDTO`/`PendingSessionItem`，契约折叠为指向 `backend_AGENTS.md` §8 的索引并修正「录音转写已实现」；⑧ §11/§13/§14 校正轮询实现、文档集与 DoD，删除已废弃文档引用 |
+| v1.5 | 2026-10-27 | 智能体接入状态纠偏：阶段② 改为“S1 已实现、端到端待验收”；阶段③ 智能体部分改为“实施中”；`evidence` 已由 `EvaluationDTO` 暴露；新增 `supervisorEvaluated`（督导是否已评，取代 `status` 判断）；教师级 AI 报告（S8.5）进入范围；覆盖率指标停用（接口 deprecated） |
 
 > **版本维护约定**：本手册的版本号随任一强制同步项（§13）的变更递增，并在上表登记。修改本文件时，请一并核对 [`Sprint2-3-教学评价与提优-开发计划.md`](./Sprint2-3-教学评价与提优-开发计划.md) 是否需同步更新。

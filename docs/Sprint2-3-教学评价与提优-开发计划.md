@@ -9,10 +9,12 @@
 > - **建库 / 种子 / 备份** → [`docs/MySQL数据库创建指导.md`](./MySQL数据库创建指导.md)
 > - **种子数据** → [`backend/database/seed.sql`](../backend/database/seed.sql)
 >
-> **版本**：v1.4（2026-10-07 合并任务清单、DDL/接口/页面规格改为指向单一事实源，见文末「更新记录」）
+> **版本**：v1.5（2026-10-27 补记智能体接入状态与 S2/S3 契约索引；旧口径仍以 10.16 重构计划为准）
 > **使用方式**：本文件只描述**要开发什么、按什么规范做**。§10 汇总了必须遵守的硬性约定，变更任一条需先更新本文档再改代码（契约先行）。
 >
 > ⛔ **本文档已冻结归档（重构前状态）**：2026-10-16 重构起，迭代范围 / 评分口径 / 权限 / 接口 / 任务以 [`2026-10-16-教学提优重构开发计划.md`](./2026-10-16-教学提优重构开发计划.md) 为准，本文件 §2 / §4 / §5 / §7 / §8 / §10 中的旧约定（督导建课、五维必填、双源融合、草稿箱、音频不可听、无通知）不再执行，仅供考古。
+>
+> 🔴 **2026-10-27 状态补记（仅状态，不改旧口径）**：智能体接入**已在进行中**——S1 单次课 AI 评析已实现（`3d4a6b9`）；S2 教师级报告、提优建议、趋势、SSE 对话按 [`backend_AGENTS.md`](./backend_AGENTS.md) §8.15 实施；`status='evaluated'` 表示“AI 已评”，督导状态改由 `supervisorEvaluated` 推导；督导覆盖率停用。执行基线见 [`2026-10-27-教学提优智能体接入-审查与实施方案.md`](./2026-10-27-教学提优智能体接入-审查与实施方案.md)。
 
 ---
 
@@ -23,8 +25,8 @@
 | 阶段 | 主题 | 核心内容 | 是否依赖智能体 | 当前状态 |
 |------|------|---------|--------------|---------|
 | **阶段一**（Sprint 2.1） | 评价闭环 | 授课记录 · 督导评分 · 结构化评语 · 三级聚合 · 教师画像 · 教师提优页（只读督导分） | ❌ 不依赖 | ✅ **已实现** |
-| **阶段二**（Sprint 2.2） | 智能体接入 | 课堂录音 · 异步转写 · 智能体评分 · 综合分（双侧融合）· 督导页智能体参考面板 | ✅ | 🟡 **部分实现** |
-| **阶段三**（Sprint 3） | 帮教师 | 智能体提优建议 · 对话（SSE）· 趋势视图 · 申诉复核 · 质量报告导出 | ✅ | ❌ **未实现** |
+| **阶段二**（Sprint 2.2） | 智能体接入 | 课堂录音 · 异步转写 · **S1 单次课 AI 评析** · AI 单源计分 · 督导页智能体参考面板 | ✅ | 🟢 **进行中**（S1 已实现；真实 Key 待配置） |
+| **阶段三**（Sprint 3） | 帮教师 | 智能体提优建议 · 对话（SSE）· 趋势视图 · **教师级 AI 报告** · 申诉复核 · 质量报告导出 | ✅ | 🟡 **智能体部分实施中**（契约见 `backend_AGENTS.md` §8.15） |
 
 **阶段二的实现边界（逐项对照代码，不得按"已完成"整体对待）**：
 
@@ -36,10 +38,12 @@
 | 转写脱敏（学生姓名替换） | ✅ | `backend/internal/service/desensitize.go:147`；调用点 `service/recording.go:296` |
 | 播放审计（谁听了谁的课） | ✅ | `backend/internal/repository/recording.go:82`；调用点 `service/recording.go:184` |
 | 前端播放器 / 转写查看器 / 双源对照面板 | ✅ | `frontend/src/views/SessionEvaluationView.vue:499,517,523` |
-| **智能体评分写入 `evaluations` 的 agent 行** | ❌ **未接入** | `repository/recording.go:79` `UpsertAgentEvaluation` **无任何调用方** |
+| **S1 单次课 AI 评析写入 `evaluations` 的 agent 行** | ✅ **已实现**（`3d4a6b9`） | `internal/agent/{client,eval,prompt}.go`；`internal/service/aitask.go`；转写完成回调 `internal/service/recording.go:429` |
+| S2 教师级 AI 报告 / S3 提优读接口与对话 | 🟡 **实施中（契约已冻结）** | `backend_AGENTS.md` §8.15；`TeacherAiReportRepository` 仅有读方法 |
 
-> 🔴 **阶段二的真实缺口**：智能体评分无写入通道 → 运行期除种子数据外 `evaluations` 只有 `supervisor` 行。聚合侧已支持 `agent` 侧（§2.5.4），但线上综合分实际仍为督导单侧。
-> 🔴 `router.go` 中**没有任何 `/agent/*` 路由**，`50002`（`NotImplemented`）虽在 `pkg/errcode` 定义并映射 HTTP 501，但**无调用方**（详见 §4.4）。
+> 🔴 **2026-10-27 状态更新**：S1 已真实接入，AI 是唯一计分来源；`teaching_sessions.status='evaluated'` 表示“AI 已评”，督导是否已评改用 `supervisorEvaluated`（由督导评价行推导）。
+> 🔴 **S2/S3 尚未实现**：`/teachers/:id/ai-report`、`/courses/:id/agent-suggestions`、`/teachers/:id/score-trend`、`/agent/chat` 均未注册路由；不得在联调中当作可用（契约见 `backend_AGENTS.md` §8.15）。
+> 🔴 **覆盖率停用**：`GET /supervision/coverage` 自 2026-10-27 起 deprecated，不再作为业务指标与验收项。
 
 > **核心架构：评分源可插拔**
 > `supervisor` 与 `agent` 只是 `evaluations.evaluator_type` 的两个取值，向同一张表写同样的结构；聚合层只认该表，不关心分数从哪来。
@@ -457,16 +461,25 @@ GROUP BY teacher_id;
   - **转写异步**：`GET /sessions/:id/transcript` 返回 `{recording, transcript}`，用 `transcript.status` 轮询；`failed` 可 `POST /sessions/:id/transcript/retry`；
   - **脱敏**：转写文本中的学生姓名按称谓正则 + `transcription.studentNames` 词典替换（§5.2-4）。
 
-### 4.4 智能体接口（阶段二起，**未实现**）
+### 4.4 智能体接口（阶段二/三，**S1 已实现；S2/S3 契约已冻结、待实现**）
+
+> 事实源：`backend_AGENTS.md` §8.10（S1 已实现）与 §8.15（S2/S3 契约，5 条待注册）。
+> 本节只保留排期视角，字段与权限以上述两节为准。
 
 | 方法 路径 | 权限 | 说明 | 状态 |
 |-----------|------|------|------|
-| `POST /agent/transcribe` | 内部 | 触发转写任务（异步） | ❌ 未实现；实际由上传录音后入队（§8.9） |
-| `POST /agent/evaluate` | 内部 | 触发智能体评分（写 `evaluations` 的 agent 行） | ❌ 未实现；`repository/recording.go:79` `UpsertAgentEvaluation` 已就绪但**无调用方** |
-| `POST /agent/chat` | 登录 | 阶段三：SSE 流式对话 | ❌ 未实现；前端 `frontend/src/api/agent.ts` 返回 `src/mocks/teacherImprove.ts` 的演示数据 |
+| `POST /sessions/:id/ai-observation/analyze` | 登录（裁剪） | 入队 S1 单次课 AI 评析 | ✅ 已实现 |
+| `GET /sessions/:id/ai-observation` / `GET /ai-tasks/:id` | 登录 | AI 观察详情 / 任务状态 | ✅ 已实现 |
+| （无独立 `/agent/evaluate`） | — | S1 由转写 `done` 回调异步入队 `ai_tasks(kind=session_eval)`，**不需要**同步触发接口 | ✅ 已实现 |
+| `GET /teachers/:id/ai-report?semester=` | teacher 本人 / director 本室 / supervisor | 读教师级 AI 报告（`course_id=0`） | 🟡 待实现 |
+| `POST /teachers/:id/ai-report/regenerate` | supervisor / director | 手动重生成 | 🟡 待实现 |
+| `GET /courses/:id/agent-suggestions?semester=` | 登录（裁剪） | 课程 AI 提优建议，按课次倒序，v1 返回数组 | 🟡 待实现 |
+| `GET /teachers/:id/score-trend?semester=&courseId=&dimension=` | 登录（裁剪） | 综合分 + 五维趋势 | 🟡 待实现 |
+| `POST /agent/chat` | 登录 | SSE 流式对话（无状态） | 🟡 待实现 |
 
-> 🔴 **诚实说明（修正早期版本的错误描述）**：`backend/internal/router/router.go` 中**没有任何 `/agent/*` 路由**，因此请求会落到 gin 默认 **404**；`50002` 虽在 `pkg/errcode` 定义并映射 HTTP 501，但**无任何调用方**。"未实现前统一返回 501 / 50002"的说法不成立——**不得在联调中把它们当作可用接口**。
-> 🔴 **硬约束（不变，`service/recording.go:237` 已实现）**：智能体接口**必须与主链路解耦**：调用失败只记录日志并保留 `transcripts.status='failed'`，**不得影响督导评分与主流程**。
+> 🔴 **触发链路**：上传 → ASR 转写 `done` → S1（写 `evaluations` agent 行 + `status='evaluated'`）→ 入队 S2；
+> S2 10 分钟去抖 + `source_session_ids` 快照比对，A1→A2 覆盖同一行。文本模型不能直接读音频，**不存在“上传即评估”**。
+> 🔴 **硬约束（不变）**：智能体失败只落 `ai_tasks.status='failed'` / `teacher_ai_reports.status='failed'`，**不得影响转写、督导与页面可用性**。
 
 ---
 
@@ -640,22 +653,23 @@ GROUP BY teacher_id;
 | T2.3 | 异步转写任务框架（worker + 状态机 + 重试） | 成员三 | T2.2 | 任务失败不影响主流程；`failed` 可重试 | ✅ |
 | T2.4 | ASR 适配层（Qwen-Audio 接入，接口先行、实现可后补） | 成员三 | T2.3 | 未配置引擎时返回 50003 而非崩溃 | ✅ |
 | T2.5 | 转写脱敏（学生姓名 NER 替换） | 成员三 | T2.3 | 单测覆盖姓名替换 | ✅ |
-| T2.6 | 智能体评分服务（写 `evaluations` 的 agent 行） | 成员三 | T2.4 | 无法观测的维度写 `NULL` | ❌ **未完成**：`repository/recording.go:79` `UpsertAgentEvaluation` 无调用方；无 `/agent/*` 路由 |
+| T2.6 | 智能体评分服务（写 `evaluations` 的 agent 行） | 成员三 | T2.4 | 无法观测的维度写 `NULL` | ✅ **已实现**（`3d4a6b9`）：`internal/agent/*` + `service/aitask.go`；转写 `done` 回调入队 |
 | T2.7 | 前端：音频播放器 + 转写查看器（含轮询） | 成员二 | T2.3 | 转写中/失败/完成三态 | ✅ |
-| T2.8 | 前端：评估页「智能体参考」对比面板 | 成员二 | T2.6 | 标注"AI 参考"；低置信度维度有提示 | ✅ 面板已交付（`EvaluationCompare.vue`）；真实数据待 T2.6 |
-| T2.9 | 综合分生效：聚合 SQL 纳入 agent 侧 + `flags` 全量返回 | 成员三 | T2.6 | §2.5.5 缺失矩阵全部有单测 | ✅ 聚合侧已实现；无 agent 写入通道（取决于 T2.6） |
+| T2.8 | 前端：评估页「智能体参考」对比面板 | 成员二 | T2.6 | 标注"AI 参考"；低置信度维度有提示 | ✅ 面板已交付（`EvaluationCompare.vue`）；真实数据由 S1 产出（Key 待配置） |
+| T2.9 | 综合分生效：聚合 SQL 纳入 agent 侧 + `flags` 全量返回 | 成员三 | T2.6 | §2.5.5 缺失矩阵全部有单测 | ✅ 聚合侧已实现；按 10-16 重构改为 **AI 单源计分** |
 | T2.10 | 审计日志（谁听了谁的课） | 成员三 | T2.2 | 播放接口写入审计 | ✅ `recording_playback_logs`（`service/recording.go:184`） |
 
 ### 7.3 阶段三（Sprint 3）—— 帮教师
 
 | 编号 | 任务 | 负责 | 依赖 | 验收 | 状态 |
 |------|------|------|------|------|------|
-| T3.1 | 智能体提优建议生成与展示 | 成员三/二 | T2.6 | 教师端可见，按时间倒序 | ❌ 未完成：督导评语展示已有（`EvaluationTimeline` / `CommentPanel`），**AI 建议为 mock**（`frontend/src/mocks/teacherImprove.ts`） |
-| T3.2 | 趋势接口 + 趋势折线组件 | 成员三/二 | T1.7 | §3.4 种子数据应呈上升趋势 | ❌ 未完成：组件与 mock 已就绪（`ScoreTrendChart.vue`），接口未实现 |
-| T3.3 | 智能体对话（SSE 流式） | 成员三/二 | T2.6 | 断流可重连；失败不阻塞页面 | ❌ 未完成：`api/agent.ts` 用定时分包模拟流式 |
+| T3.1 | 智能体提优建议生成与展示 | 成员三/二 | T2.6 | 教师端可见，按时间倒序 | 🟡 **实施中**：契约 `GET /courses/:id/agent-suggestions`（§8.15）；前端仍 mock |
+| T3.2 | 趋势接口 + 趋势折线组件 | 成员三/二 | T1.7 | §3.4 种子数据应呈上升趋势 | 🟡 **实施中**：契约 `GET /teachers/:id/score-trend`；组件已就绪，接口未实现 |
+| T3.3 | 智能体对话（SSE 流式） | 成员三/二 | T2.6 | 断流可重连；失败不阻塞页面 | 🟡 **实施中**：契约 `POST /agent/chat`；前端仍用定时分包 mock |
 | T3.4 | 教师申诉 / 督导复核流程 | 成员三/二 | T1.6 | 申诉记录留痕，状态可追溯 | ❌ 未完成 |
 | T3.5 | 督导间评分校准（示范课基线偏移） | 成员三 | T2.9 | 校准前后分数可对比 | ❌ 未完成 |
 | T3.6 | 质量报告导出 | 成员三 | T1.7 | 导出内容与页面数字一致 | ❌ 未完成 |
+| T3.7 | 教师级 AI 综合报告（S2） | 成员三/二 | T2.6 | 每次 S1 后 10 分钟去抖更新；A1→A2 覆盖同一行 | 🟡 **待实现**：仅表与读 repo，契约 §8.15 |
 
 ---
 
@@ -679,7 +693,8 @@ GROUP BY teacher_id;
 
 ### 8.2 阶段二
 
-> ⚠️ **前置缺口**：T2.6 智能体评分未接入。下表「维度可空」「综合分」两条当前**只在种子数据（`seed.sql` 的 agent 行）下成立**，不得据此判定阶段二完成——阶段二完成的标志是 T2.6 落地（有真实写入通道）。
+> ⚠️ **2026-10-27 状态**：T2.6 已实现（S1 写 agent 行，Key 待配置）。10-16 重构后计分改为 **AI 单源**（督导纯评语、五维 NULL），
+> 下表涉及“双侧融合/督导侧兜底”的措辞已被 [`2026-10-16-教学提优重构开发计划.md`](./2026-10-16-教学提优重构开发计划.md) §6 取代，仅保留作历史验收参考。
 
 | 项 | 标准 |
 |----|------|
@@ -746,7 +761,7 @@ GROUP BY teacher_id;
 | 18 | 教师评分列表路由为 `GET /teacher-scores`；`GET /teachers` 永远是教师字典 | §4.2 |
 | 19 | 新增错误码必须同步 `pkg/errcode` 的 code / 文案 / **HTTP 映射**三处，并补表驱动单测 | §4 |
 | 20 | JSON 列（如 `evaluations.evidence`）的 Go 字段必须用指针，禁止以零值 `''` 写入 | §3.3-3 |
-| 21 | 智能体评分未接入（T2.6）：不得把 `/agent/*`、`score-trend` 当作可用接口，也不得用 `50002` 描述其真实行为（实为 404） | §4.4 |
+| 21 | S1 已实现（`3d4a6b9`）；S2/S3（`ai-report` / `agent-suggestions` / `score-trend` / `agent/chat`）尚未注册，契约见 `backend_AGENTS.md` §8.15，不得当作可用 | §4.4 |
 
 ### 10.1 遗留待观察项（不阻塞开发，阶段三复盘）
 
@@ -756,7 +771,7 @@ GROUP BY teacher_id;
 | 智能体评分效力 | α=0.5 是未经校准的等权假设，积累 ≥50 条双侧样本后应重新评估 |
 | 样本量阈值 | `minSampleSize=3` 为经验值，首个学期结束后按实际分布调整 |
 | 非对齐聚合算法 | 当前采用「综合均值」并默认数据双侧对齐；部分场次仅单侧评价时的通用算法待单独立项（§2.5.2） |
-| 智能体评分接入 | T2.6 未完成，阶段二不能判定为交付（§1.1 / §8.2）；`50003` 目前只覆盖转写链路 |
+| 智能体评分接入 | S1 已实现（`3d4a6b9`）；真实 Key 未配置，端到端待验收；S2/S3 实施中（契约见 `backend_AGENTS.md` §8.15） |
 
 ---
 
@@ -766,5 +781,6 @@ GROUP BY teacher_id;
 |------|------|------|
 | 2026-09 | v1.0 → v1.3 | 阶段一联调修订：综合均值口径、五维必填、`evaluatedCount` 样本量、`/teacher-scores` 路由、golang-migrate 命名、错误码 HTTP 映射 |
 | 2026-10-07 | v1.4 | ① 并入原按模块分发的《Sprint2-3 任务清单》（该文件随本次合并删除，其按模块视角无额外信息）并为 §7.1/§7.2/§7.3 增加**状态**列；② §3 DDL、§4 接口契约、§6 页面与路由改为指向单一事实源（`backend/database/schema.sql` + `backend/migrations/`、`backend_AGENTS.md` §8、`frontend_AGENTS.md` §6/§7），只保留 SQL/契约之外的口径约定与实现陷阱；③ 修正阶段状态（阶段①已实现 / 阶段②**部分实现**：智能体评分未接入 / 阶段③未实现）与审计表名（`audit_logs` → `recording_playback_logs`）、页面名（「教师管理」→「教师画像」）；④ 修正 §4.4「未实现前统一返回 501/50002」的失实描述为真实行为（无 `/agent/*` 路由 → 404；`50002` 无调用方）；⑤ 补入遗漏路由 `/me/quality`、`/drafts` 与挂链现状 |
+| 2026-10-27 | v1.5 | 状态补记：S1 已实现（`3d4a6b9`）；S2/S3 契约冻结在 `backend_AGENTS.md` §8.15（ai-report / agent-suggestions / score-trend / agent/chat）；`status='evaluated'` 改为“AI 已评”，督导状态用 `supervisorEvaluated`；覆盖率停用；T2.6/T3.1/T3.2/T3.3 状态更正，新增 T3.7 教师级 AI 报告 |
 
-*文档版本：v1.4（2026-10-07）*
+*文档版本：v1.5（2026-10-27）*

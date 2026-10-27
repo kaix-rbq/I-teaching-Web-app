@@ -24,6 +24,8 @@ const s1SystemPrompt = `你是高校课堂教学质量评价助手，仅依据�
 
 每个给出分数的维度必须附至少 1 条能在转写原文中逐字定位的引用（score 为 null 时 quotes 可为空）。
 引用格式为 {"start": 起始秒, "end": 结束秒, "quote": "转写中的原文片段"}。
+【知识库参考片段】只用于评分口径参考，不能当作本次课堂事实；课堂证据仍必须来自转写原文。
+只能引用 user prompt 中实际给出的 chunk id（如 kb-rubric#13），不得编造 citedChunks。
 若发现需要督导重点关注的高风险情况，写入 riskTags 数组（字符串），无则留空。
 
 只输出一个 JSON 对象，不要输出任何解释或 Markdown 代码块，结构如下：
@@ -55,7 +57,11 @@ func buildUserPrompt(in EvalInput) string {
 	if in.Topic != "" {
 		fmt.Fprintf(&b, "本次课主题：%s\n", in.Topic)
 	}
-	b.WriteString("\n【脱敏转写文本】\n")
+	b.WriteString("\n")
+	if writeKnowledgeContext(&b, in.Knowledge) {
+		b.WriteString("\n")
+	}
+	b.WriteString("【脱敏转写文本】\n")
 	if len(in.Segments) > 0 {
 		for _, s := range in.Segments {
 			fmt.Fprintf(&b, "[%.1f-%.1f] %s\n", s.Start, s.End, s.Text)
@@ -64,4 +70,30 @@ func buildUserPrompt(in EvalInput) string {
 		b.WriteString(in.Transcript)
 	}
 	return b.String()
+}
+
+// writeKnowledgeContext 按检索结果顺序写入知识库片段；无有效片段时不写标题。
+func writeKnowledgeContext(b *strings.Builder, knowledge []RetrievedChunk) bool {
+	var body strings.Builder
+	for _, k := range knowledge {
+		chunkID := strings.TrimSpace(k.ChunkID)
+		heading := strings.TrimSpace(k.Heading)
+		content := strings.TrimSpace(k.Content)
+		if chunkID == "" || content == "" {
+			continue
+		}
+		if heading != "" {
+			fmt.Fprintf(&body, "[%s] %s\n", chunkID, heading)
+		} else {
+			fmt.Fprintf(&body, "[%s]\n", chunkID)
+		}
+		body.WriteString(content)
+		body.WriteString("\n")
+	}
+	if body.Len() == 0 {
+		return false
+	}
+	b.WriteString("【知识库参考片段】\n")
+	b.WriteString(body.String())
+	return true
 }

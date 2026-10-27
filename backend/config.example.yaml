@@ -60,6 +60,16 @@ agent:
   maxConcurrency: 2 # 并发闸门
   promptVersion: "v1" # 写入 evidence.promptVersion，变更提示词时必须递增
 
+# 知识库向量化（RAG §5；与 agent 共用百炼凭据）
+# 🔴 模型选定后不得中途更换：向量空间不同，换模型必须 kb rebuild。
+embedding:
+  enabled: false
+  model: "qwen3.7-text-embedding-flash" # 北京可用，默认 1024 维
+  dim: 1024
+  batchSize: 20 # 该模型批量上限
+  topK: 8
+  minScore: 0.35
+
 # 演示模式（B6/N7）：一键载入示例转写/AI 报告。
 # 🔴 仅本地/dev 开启，生产必须 false（会清空 transcripts/recordings/清单/反思/站内信）。
 # 环境变量覆盖：AIJIAOXUE_DEMO_ENABLED=true
