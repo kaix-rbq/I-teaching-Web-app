@@ -38,6 +38,107 @@ ITmanage/
 
 ---
 
+## 生产部署与人工验收（P7.5）
+
+### 1. 环境变量与功能开关
+
+生产环境的密钥只通过环境变量注入，不写入仓库：
+
+```bash
+export AIJIAOXUE_AGENT_API_KEY="<百炼 API Key>"
+export AIJIAOXUE_AGENT_WORKSPACE_ID="<百炼业务空间 ID>"
+export AIJIAOXUE_AGENT_LLM_MODEL="<对话模型名>"
+export AIJIAOXUE_EMBEDDING_MODEL="<向量模型名>"
+# 可选：S2 去抖窗口与报告生成开关
+export AIJIAOXUE_AGENT_REPORT_DEBOUNCE="10m"
+export AIJIAOXUE_AGENT_REPORT_ENABLED="true"
+```
+
+`backend/config.yaml` 中的对应开关：
+
+| 开关 | 作用 |
+|------|------|
+| `agent.enabled` | 是否启用 S1 单次课评析、S2 教师级报告、S3 对话共用的智能体客户端；关闭后 AI 任务会失败/熔断，但页面与督导主流程仍可用 |
+| `agent.reportEnabled` | 是否启动 S2 教师级报告生成 worker；设为 `false` 时**只停止生成**，`GET /teachers/:id/ai-report` 仍可读，返回 `status=pending`、`report=null` |
+| `embedding.enabled` | 是否启用知识库向量检索；关闭后 S1/S3 自动降级为无 KB 运行 |
+
+> `config.yaml` 与 `.env.local` 均不入库。生产环境不要把 Key 写入前端构建变量或 README。
+
+### 2. SSE 反向代理（必须关闭缓冲）
+
+`POST /api/v1/agent/chat` 是 `text/event-stream`。Nginx 默认缓冲会把整个响应攒齐后再下发，表现为浏览器一次性看到全文、失去流式效果。生产反向代理至少包含：
+
+```nginx
+server {
+    listen 80;
+    server_name _;
+
+    location /api/ {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+
+        # 🔴 SSE 必需：关闭缓冲/缓存，并把连接头交给上游保持长连接
+        proxy_set_header Connection "";
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 300s;
+    }
+}
+```
+
+Vite 本地开发（`npm run dev`）自带代理，不需要这段 Nginx 配置；不要把 `proxy_buffering` 的问题误判为前端 SSE 解析失败。部署后可用 `curl -N` 验证帧是否逐条到达。
+
+### 3. 人工验收清单（只列步骤，不代替真实结果）
+
+#### 3.1 P7.2 真实录音端到端
+
+1. 配置真实 `AIJIAOXUE_AGENT_API_KEY`、`AIJIAOXUE_AGENT_WORKSPACE_ID`、`AIJIAOXUE_AGENT_LLM_MODEL` 与 ASR 配置。
+2. 启动服务，新建一条授课记录并上传真实课堂音频。
+3. 等待 ASR 转写 `done`。
+4. 查询 `ai_tasks`，确认该场次 S1 任务为 `done`。
+5. 查询 `evaluations`，确认存在 `evaluator_type='agent'` 行，且五维分与 `evidence` 可定位。
+6. 查询 `teacher_ai_reports`，确认 A1 已生成。
+
+#### 3.2 P7.3 A1→A2 覆盖
+
+1. 为该教师再上传第二条真实录音，等待 S1 `done`。
+2. 等待 `agent.reportDebounce`（默认 10 分钟）去抖窗口结束。
+3. 确认 `teacher_ai_reports` 仍是同一行：`(teacher_id, semester, course_id=0)`。
+4. 确认 `source_session_ids` 包含两次课次，`generated_at` 已更新。
+
+#### 3.3 P7.5 成本核对
+
+1. 登录百炼控制台，按日期/模型查看用量。
+2. 与 `ai_tasks` 中成功完成的 S1/S2 次数对账。
+3. 记录调用次数与费用；不要在 README 写真实账单金额。
+
+只读 SQL 示例：
+
+```sql
+SELECT id, kind, status, attempts, error_message, created_at, updated_at
+FROM ai_tasks
+ORDER BY id DESC;
+
+SELECT id, session_id, evaluator_type, ai_model_version, ai_confidence
+FROM evaluations
+WHERE evaluator_type = 'agent'
+ORDER BY id DESC;
+
+SELECT teacher_id, semester, course_id, status,
+       JSON_EXTRACT(sample, '$.evaluatedCount') AS evaluated_count,
+       JSON_EXTRACT(sample, '$.sessionCount')   AS session_count,
+       source_session_ids, generated_at
+FROM teacher_ai_reports
+ORDER BY generated_at DESC;
+```
+
+> 以上 P7.2 / P7.3 / P7.5 需要真实音频、有效 Key 或百炼控制台权限；自动化代理不得用 mock 数据伪造端到端结果。
+
+---
+
 ## For Developers
 
 > 本章是团队日常开发的操作规范：**启动/终止命令 → 验证方式 → 扩展功能的工作流 → 出错处置**。
@@ -370,7 +471,7 @@ mysql:
 | `GET /resources/:id/download` | 已实现（文档标注「可选」） | 前端资源下载为真实功能，非占位 |
 | `courses.objective` / `courses.major` | **未实现** | 前端详情页「培养目标 / 适用专业」在 Sprint 1 DDL 中无对应列，页面已做空值降级；若需启用须按 §6.3 新增列 |
 
-> 前端 `src/mocks/teacherImprove.ts` 仍然保留：`frontend/src/api/agent.ts` 在真实智能体接口就绪前用它返回演示数据（智能体相关函数不发网络请求）；**不存在 `VITE_USE_MOCK` 开关**，其余页面数据全部来自后端 API（开发期经 Vite proxy）。接口 id 统一使用后端 `uint64` 对应的 `number` 类型。
+> P6 起 `frontend/src/api/agent.ts` 的提优建议、分数趋势、教师级 AI 报告已接真实后端；`src/mocks/teacherImprove.ts` 已删除，**不存在 `VITE_USE_MOCK` 开关**，页面数据全部来自后端 API（开发期经 Vite proxy）。接口 id 统一使用后端 `uint64` 对应的 `number` 类型。
 > 另：`SupervisorDashboard` 现已只保留 `recentPlans` / `recentDrafts` / `pendingSessions`，原有课程数、覆盖率、`byDepartment` 等统计字段已移除（督导核心任务是「记录课程并评估」）。
 
 ### 10. 附录 C：Windows 首次环境搭建（Git Bash + 原生 MySQL）
