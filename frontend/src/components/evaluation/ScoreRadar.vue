@@ -4,10 +4,12 @@ import { computed } from 'vue'
 export interface RadarItem {
   key: string
   name: string
-  /** 原始分（默认 1-5）；null = 该维度无可展示分数，该轴断开不补 0 */
+  /** AI 主序列原始分（默认 1-5）；null = 该维度无 AI 分数，该轴断开不补 0 */
   score: number | null
   /** 画像链路：AI 分（null = 智能体未评此维度）；携带时图例以「AI」显形 */
   agentScore?: number | null
+  /** 督导评分（1-5）；携带该字段即启用督导辅助序列，null = 该维度无督导分 */
+  supervisorScore?: number | null
   /** 观测项：仅作亮点，不计入加权 */
   isObservation?: boolean
 }
@@ -59,11 +61,9 @@ function ringPoints(radius: number): string {
     .join(' ')
 }
 
-interface Vertex {
+interface SeriesVertex {
   item: RadarItem
   value: { x: number; y: number } | null
-  label: { x: number; y: number }
-  outer: { x: number; y: number }
 }
 
 function ratioOf(value: number | null | undefined): number | null {
@@ -71,32 +71,60 @@ function ratioOf(value: number | null | undefined): number | null {
   return Math.max(0, Math.min(1, value / props.max))
 }
 
-const vertices = computed<Vertex[]>(() =>
-  axes.value.map((axis) => {
-    const ratio = ratioOf(axis.item.score)
+function verticesOf(series: 'ai' | 'supervisor'): SeriesVertex[] {
+  return axes.value.map((axis) => {
+    const raw = series === 'ai' ? axis.item.score : axis.item.supervisorScore
+    const ratio = ratioOf(raw)
     return {
       item: axis.item,
-      value: ratio === null ? null : pointAt(axis.angle, RADIUS * ratio),
-      label: pointAt(axis.angle, LABEL_RADIUS),
-      outer: pointAt(axis.angle, RADIUS)
+      value: ratio === null ? null : pointAt(axis.angle, RADIUS * ratio)
     }
   })
-)
+}
 
-const polygon = computed(() => {
-  const filled = vertices.value.filter((vertex) => vertex.value !== null)
+function polygonOf(vertices: SeriesVertex[]): { points: string; canFill: boolean } {
+  const filled = vertices.filter((vertex) => vertex.value !== null)
   return {
     points: filled
       .map((vertex) => `${vertex.value!.x.toFixed(1)},${vertex.value!.y.toFixed(1)}`)
       .join(' '),
     canFill: filled.length >= 3
   }
-})
+}
 
-const hasScore = computed(() => vertices.value.some((vertex) => vertex.value !== null))
+const aiVertices = computed(() => verticesOf('ai'))
+const supervisorVertices = computed(() => verticesOf('supervisor'))
+const aiPolygon = computed(() => polygonOf(aiVertices.value))
+const supervisorPolygon = computed(() => polygonOf(supervisorVertices.value))
 
-/** 仅画像链路（tone=ai）展示「AI」图例；评分表单 / 课程提优图不显示图例 */
-const hasAgentLegend = computed(() => props.tone === 'ai')
+const labels = computed(() =>
+  axes.value.map((axis) => ({
+    item: axis.item,
+    label: pointAt(axis.angle, LABEL_RADIUS),
+    outer: pointAt(axis.angle, RADIUS)
+  }))
+)
+
+const hasSupervisorSeries = computed(() =>
+  props.items.some((item) => item.supervisorScore !== undefined)
+)
+
+/** AI 缺失但督导有分时，督导多边形仍可显示。 */
+const hasScore = computed(
+  () =>
+    aiVertices.value.some((vertex) => vertex.value !== null) ||
+    supervisorVertices.value.some((vertex) => vertex.value !== null)
+)
+
+const showLegend = computed(() => props.tone === 'ai' || hasSupervisorSeries.value)
+
+/** 双轨时按「AI / 督导」顺序同时显示数值，单轨保持原样。 */
+function valueText(item: RadarItem): string {
+  if (hasSupervisorSeries.value) {
+    return `${item.score ?? '—'} / ${item.supervisorScore ?? '—'}`
+  }
+  return item.score === null ? '—' : String(item.score)
+}
 </script>
 
 <template>
@@ -108,7 +136,12 @@ const hasAgentLegend = computed(() => props.tone === 'ai')
     </div>
 
     <template v-else>
-      <svg class="score-radar__svg" :viewBox="`0 0 ${SIZE} ${SIZE}`">
+      <svg
+        class="score-radar__svg"
+        :viewBox="`0 0 ${SIZE} ${SIZE}`"
+        role="img"
+        aria-label="五维评分雷达图"
+      >
         <polygon
           v-for="(radius, index) in rings"
           :key="index"
@@ -116,7 +149,7 @@ const hasAgentLegend = computed(() => props.tone === 'ai')
           class="score-radar__ring"
         />
         <line
-          v-for="vertex in vertices"
+          v-for="vertex in labels"
           :key="`axis-${vertex.item.key}`"
           :x1="CENTER"
           :y1="CENTER"
@@ -124,8 +157,26 @@ const hasAgentLegend = computed(() => props.tone === 'ai')
           :y2="vertex.outer.y"
           class="score-radar__axis"
         />
-        <polygon v-if="polygon.canFill" :points="polygon.points" class="score-radar__area" />
-        <template v-for="vertex in vertices" :key="`dot-${vertex.item.key}`">
+
+        <!-- 督导辅助序列在下层，AI 主序列在上层，避免遮挡 -->
+        <polygon
+          v-if="supervisorPolygon.canFill"
+          :points="supervisorPolygon.points"
+          class="score-radar__area score-radar__area--supervisor"
+        />
+        <polygon v-if="aiPolygon.canFill" :points="aiPolygon.points" class="score-radar__area" />
+
+        <template v-for="vertex in supervisorVertices" :key="`sup-dot-${vertex.item.key}`">
+          <circle
+            v-if="vertex.value"
+            :cx="vertex.value.x"
+            :cy="vertex.value.y"
+            :r="vertex.item.isObservation ? 4 : 3"
+            class="score-radar__dot score-radar__dot--supervisor"
+            :class="{ 'score-radar__dot--observation': vertex.item.isObservation }"
+          />
+        </template>
+        <template v-for="vertex in aiVertices" :key="`dot-${vertex.item.key}`">
           <circle
             v-if="vertex.value"
             :cx="vertex.value.x"
@@ -135,8 +186,9 @@ const hasAgentLegend = computed(() => props.tone === 'ai')
             :class="{ 'score-radar__dot--observation': vertex.item.isObservation }"
           />
         </template>
+
         <text
-          v-for="vertex in vertices"
+          v-for="vertex in labels"
           :key="`label-${vertex.item.key}`"
           :x="vertex.label.x"
           :y="vertex.label.y"
@@ -147,7 +199,7 @@ const hasAgentLegend = computed(() => props.tone === 'ai')
           {{ vertex.item.name }}
         </text>
         <text
-          v-for="vertex in vertices"
+          v-for="vertex in labels"
           :key="`value-${vertex.item.key}`"
           :x="vertex.label.x"
           :y="vertex.label.y + 13"
@@ -155,14 +207,18 @@ const hasAgentLegend = computed(() => props.tone === 'ai')
           text-anchor="middle"
           dominant-baseline="middle"
         >
-          {{ vertex.item.score === null ? '—' : vertex.item.score }}
+          {{ valueText(vertex.item) }}
         </text>
       </svg>
 
-      <div v-if="hasAgentLegend" class="score-radar__legend">
+      <div v-if="showLegend" class="score-radar__legend">
         <span class="score-radar__legend-item">
-          <i class="score-radar__swatch" />AI 评价
+          <i class="score-radar__swatch" />AI 评价（紫）
         </span>
+        <span v-if="hasSupervisorSeries" class="score-radar__legend-item">
+          <i class="score-radar__swatch score-radar__swatch--supervisor" />督导评分（蓝/青）
+        </span>
+        <span v-if="hasSupervisorSeries" class="score-radar__legend-hint">数值：AI / 督导</span>
       </div>
     </template>
   </div>
@@ -171,6 +227,7 @@ const hasAgentLegend = computed(() => props.tone === 'ai')
 <style scoped lang="scss">
 .score-radar {
   --radar-ink: var(--color-primary);
+  --radar-supervisor: var(--color-teacher);
 
   display: flex;
   flex-direction: column;
@@ -204,6 +261,12 @@ const hasAgentLegend = computed(() => props.tone === 'ai')
     stroke: var(--radar-ink);
     stroke-width: 2;
     stroke-linejoin: round;
+
+    &--supervisor {
+      fill: color-mix(in srgb, var(--radar-supervisor) 12%, transparent);
+      stroke: var(--radar-supervisor);
+      stroke-dasharray: 5 3;
+    }
   }
 
   &__dot {
@@ -211,6 +274,10 @@ const hasAgentLegend = computed(() => props.tone === 'ai')
 
     &--observation {
       fill: var(--color-warning);
+    }
+
+    &--supervisor {
+      fill: var(--radar-supervisor);
     }
   }
 
@@ -228,7 +295,7 @@ const hasAgentLegend = computed(() => props.tone === 'ai')
   &__legend {
     display: flex;
     flex-wrap: wrap;
-    gap: var(--spacing-3);
+    gap: var(--spacing-2) var(--spacing-3);
     align-items: center;
     justify-content: center;
     margin-top: var(--spacing-2);
@@ -240,6 +307,10 @@ const hasAgentLegend = computed(() => props.tone === 'ai')
       align-items: center;
       gap: 6px;
     }
+
+    &-hint {
+      color: var(--color-text-tertiary);
+    }
   }
 
   &__swatch {
@@ -247,6 +318,11 @@ const hasAgentLegend = computed(() => props.tone === 'ai')
     width: 18px;
     height: 0;
     border-top: 2px solid var(--radar-ink);
+
+    &--supervisor {
+      border-top-color: var(--radar-supervisor);
+      border-top-style: dashed;
+    }
   }
 
   &__empty {

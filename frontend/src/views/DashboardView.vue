@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import dayjs from 'dayjs'
 import { Collection, Plus, UserFilled } from '@element-plus/icons-vue'
@@ -11,12 +11,9 @@ import ClassroomIssueBoard from '@/components/classroom/ClassroomIssueBoard.vue'
 import { fetchDashboardApi } from '@/api/dashboard'
 import { fetchTeacherScoresApi } from '@/api/teacher'
 import { fetchSamplingTasksApi } from '@/api/supervision'
-import { createSessionApi, fetchSessionDetailApi } from '@/api/session'
-import { fetchCoursesApi, fetchCourseDetailApi } from '@/api/course'
-import { fetchMyTimetableApi } from '@/api/dict'
-import type { TimetableItem } from '@/types/dict'
+import { fetchSessionDetailApi } from '@/api/session'
+import { fetchCourseDetailApi } from '@/api/course'
 import { useAuthStore } from '@/stores/auth'
-import { useDictStore } from '@/stores/dict'
 import { useSemester } from '@/composables/useSemester'
 import { EVALUATION_DIMENSIONS } from '@/constants'
 import type { DashboardData, SamplingTask, SupervisionPlan } from '@/types/supervision'
@@ -32,121 +29,13 @@ import type { TeacherScoreItem } from '@/types/teacher'
  */
 const router = useRouter()
 const auth = useAuthStore()
-const dict = useDictStore()
 const { semester } = useSemester()
 
 const loading = ref(true)
 const error = ref(false)
 const data = ref<DashboardData | null>(null)
-const creatingPlanId = ref<number | null>(null)
 
 const WEEK_LABELS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
-
-/* 督导：新增授课记录（替代教务系统录入环节） */
-const createVisible = ref(false)
-const createSubmitting = ref(false)
-const courses = ref<Course[]>([])
-const coursesLoading = ref(false)
-/* 课表下拉：选定教师后按课表收敛课程/班级；课表为空时回退到课程库 */
-const timetable = ref<TimetableItem[]>([])
-const timetableLoading = ref(false)
-const createForm = reactive<{
-  teacherId: number | ''
-  courseId: number | ''
-  classId: number | ''
-  sessionDate: string
-  period: string
-  topic: string
-}>({
-  teacherId: '',
-  courseId: '',
-  classId: '',
-  sessionDate: '',
-  period: '',
-  topic: ''
-})
-
-/** 选定授课教师后，课程下拉只呈现该教师的课程（授课教师由课程决定，保证一致） */
-const filteredCourses = computed(() => {
-  if (createForm.teacherId === '') return courses.value
-  if (timetable.value.length) {
-    const seen = new Map<number, { id: number; name: string; code: string }>()
-    for (const row of timetable.value) {
-      if (!seen.has(row.courseId)) {
-        seen.set(row.courseId, { id: row.courseId, name: row.courseName, code: row.courseCode })
-      }
-    }
-    return [...seen.values()]
-  }
-  return courses.value.filter((course) => course.teacherId === createForm.teacherId)
-})
-
-/** 选定课程后，班级下拉只呈现该课在课表中的班级（后端建课要求 classId 必填） */
-const courseClasses = ref<Array<{ id: number; className: string }>>([])
-const courseClassesLoading = ref(false)
-const classOptions = computed(() => {
-  if (createForm.courseId === '') return []
-  const fromTimetable = timetable.value
-    .filter((row) => row.courseId === createForm.courseId)
-    .map((row) => ({ id: row.classId, name: row.className }))
-  /* 课表未维护该课时回退到课程开课班级，保证对话框不被卡死 */
-  if (fromTimetable.length) return fromTimetable
-  return courseClasses.value.map((c) => ({ id: c.id, name: c.className }))
-})
-
-async function loadCourseClasses(courseId: number | ''): Promise<void> {
-  courseClasses.value = []
-  if (courseId === '') return
-  courseClassesLoading.value = true
-  try {
-    const detail = await fetchCourseDetailApi(courseId)
-    courseClasses.value = (detail.classes ?? []).map((c) => ({ id: c.id, className: c.className }))
-  } catch {
-    courseClasses.value = []
-  } finally {
-    courseClassesLoading.value = false
-  }
-}
-
-async function loadTimetable(teacherId: number | ''): Promise<void> {
-  timetable.value = []
-  if (teacherId === '') return
-  timetableLoading.value = true
-  try {
-    timetable.value = await fetchMyTimetableApi({ teacherId }) ?? []
-  } catch {
-    timetable.value = []
-  } finally {
-    timetableLoading.value = false
-  }
-}
-
-watch(
-  () => createForm.teacherId,
-  (teacherId) => {
-    if (
-      createForm.courseId !== '' &&
-      !filteredCourses.value.some((course) => course.id === createForm.courseId)
-    ) {
-      createForm.courseId = ''
-    }
-    createForm.classId = ''
-    void loadTimetable(teacherId)
-  }
-)
-
-watch(
-  () => createForm.courseId,
-  (courseId) => {
-    createForm.classId = ''
-    /* 课表无该课班级时回退拉取课程开课班级 */
-    if (!timetable.value.some((row) => row.courseId === courseId)) {
-      void loadCourseClasses(courseId)
-    } else {
-      courseClasses.value = []
-    }
-  }
-)
 
 /* 主任：本室教师评分（质量热力数据源） */
 const teacherScores = ref<TeacherScoreItem[]>([])
@@ -305,41 +194,30 @@ const focusPeriod = computed(() => focusSession.value?.period || '节次待定')
 const focusStatus = computed(() => {
   if (!focusPlan.value) return '今天没有待评安排。'
   if (focusIsFuture.value) return '授课日期未到，评估入口在当天开放。'
-  if (focusPlan.value.sessionId === null) return '尚未建档，点击后创建授课记录并进入评估。'
-  return '已有授课记录，可以直接进入评估。'
+  if (focusPlan.value.sessionId === null) {
+    return '教师尚未创建本场授课记录；教师下课后刷新，系统会自动关联并可直接评估。'
+  }
+  return '已关联教师授课记录，可以直接进入评估。'
 })
 
 const focusActionLabel = computed(() => {
   if (!focusPlan.value) return '暂无任务'
-  return focusIsFuture.value ? '未到授课日' : '去评估'
+  if (focusIsFuture.value) return '未到授课日'
+  if (focusPlan.value.sessionId === null) return '等待教师建档'
+  return '去评估'
 })
+
+const focusCanEvaluate = computed(
+  () => Boolean(focusPlan.value && !focusIsFuture.value && focusPlan.value.sessionId !== null)
+)
 
 function handleFocus(): void {
   if (!focusPlan.value || focusIsFuture.value) return
   if (focusPlan.value.sessionId === null) {
-    void handleQueueCreate(focusPlan.value)
+    ElMessage.info('教师尚未创建本场授课记录，请等待教师下课后刷新')
     return
   }
   void router.push({ name: 'session-evaluation', params: { id: focusPlan.value.sessionId } })
-}
-
-/** 今日待评课：一键创建授课记录并直达评估页（避免多级点击）。 */
-async function handleQueueCreate(plan: SupervisionPlan): Promise<void> {
-  creatingPlanId.value = plan.id
-  try {
-    const session = await createSessionApi({
-      courseId: plan.courseId,
-      sessionDate: plan.plannedDate,
-      period: '待定',
-      planId: plan.id
-    })
-    ElMessage.success('授课记录已创建，开始评估')
-    void router.push({ name: 'session-evaluation', params: { id: session.id } })
-  } catch {
-    // 错误提示由 api/http.ts 拦截器统一处理
-  } finally {
-    creatingPlanId.value = null
-  }
 }
 
 /** 已评估记录的复盘入口：课程列表 → 课程综合评分 → 历史授课记录。 */
@@ -356,71 +234,6 @@ function handleQueueEvaluate(plan: SupervisionPlan): void {
 /** 待 AI 评析授课记录：直达评估页。 */
 function goPendingEvaluate(sessionId: number): void {
   void router.push({ name: 'session-evaluation', params: { id: sessionId } })
-}
-
-async function ensureCourses(): Promise<void> {
-  if (courses.value.length) return
-  coursesLoading.value = true
-  try {
-    const page = await fetchCoursesApi({ page: 1, pageSize: 100 })
-    courses.value = page.list ?? []
-  } catch {
-    courses.value = []
-  } finally {
-    coursesLoading.value = false
-  }
-}
-
-async function openCreateSession(): Promise<void> {
-  createForm.teacherId = ''
-  createForm.courseId = ''
-  createForm.classId = ''
-  createForm.sessionDate = ''
-  createForm.period = ''
-  createForm.topic = ''
-  timetable.value = []
-  createVisible.value = true
-  await Promise.all([dict.load(), ensureCourses()])
-}
-
-function disabledFuture(date: Date): boolean {
-  return date.getTime() > Date.now()
-}
-
-async function submitCreateSession(): Promise<void> {
-  if (createForm.courseId === '') {
-    ElMessage.error('请选择课程')
-    return
-  }
-  if (createForm.classId === '') {
-    ElMessage.error('请选择班级')
-    return
-  }
-  if (!createForm.sessionDate) {
-    ElMessage.error('请选择授课日期')
-    return
-  }
-  if (!createForm.period.trim()) {
-    ElMessage.error('请填写节次')
-    return
-  }
-  createSubmitting.value = true
-  try {
-    await createSessionApi({
-      courseId: createForm.courseId,
-      classId: createForm.classId,
-      sessionDate: createForm.sessionDate,
-      period: createForm.period.trim(),
-      topic: createForm.topic.trim()
-    })
-    ElMessage.success('授课记录已创建，可在「待 AI 评析」中查看进度')
-    createVisible.value = false
-    await loadData()
-  } catch {
-    // 错误提示由 api/http.ts 拦截器统一处理
-  } finally {
-    createSubmitting.value = false
-  }
 }
 
 /* 督导：抽样任务队列（B2/T1，R1.2）——每满 5 条 AI 终评抽 1 条待人工复评 */
@@ -553,8 +366,7 @@ onMounted(reloadQuality)
                 <el-button
                   type="primary"
                   size="large"
-                  :disabled="!focusPlan || focusIsFuture"
-                  :loading="creatingPlanId !== null"
+                  :disabled="!focusCanEvaluate"
                   @click="handleFocus"
                 >
                   {{ focusActionLabel }}
@@ -577,7 +389,6 @@ onMounted(reloadQuality)
               :plans="otherUpcoming"
               :loading="loading"
               empty-text="接下来暂无待评安排"
-              @create="handleQueueCreate"
               @evaluate="handleQueueEvaluate"
             />
 
@@ -590,7 +401,6 @@ onMounted(reloadQuality)
                 :plans="pastPlans"
                 :loading="loading"
                 empty-text="没有需要补录的课次"
-                @create="handleQueueCreate"
                 @evaluate="handleQueueEvaluate"
               />
             </div>
@@ -618,7 +428,6 @@ onMounted(reloadQuality)
 
               <div class="quick-links quick-links--tight">
                 <button type="button" class="text-action" @click="goSupervisorCourses">课程列表</button>
-                <button type="button" class="text-action" @click="openCreateSession">新增授课记录</button>
               </div>
             </section>
           </aside>
@@ -661,92 +470,6 @@ onMounted(reloadQuality)
         <ClassroomIssueBoard class="dashboard__issues" />
       </template>
     </template>
-
-    <!-- 新增授课记录（督导，替代教务系统录入环节） -->
-    <el-dialog v-model="createVisible" title="新增授课记录" width="520px">
-      <el-form label-width="88px">
-        <el-form-item label="授课教师" required>
-          <el-select
-            v-model="createForm.teacherId"
-            placeholder="请选择授课教师"
-            filterable
-            class="dashboard__dialog-field"
-          >
-            <el-option
-              v-for="teacher in dict.teachers"
-              :key="teacher.id"
-              :label="teacher.name"
-              :value="teacher.id"
-            />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="课程" required>
-          <el-select
-            v-model="createForm.courseId"
-            placeholder="请选择课程"
-            filterable
-            :loading="coursesLoading"
-            class="dashboard__dialog-field"
-          >
-            <el-option
-              v-for="course in filteredCourses"
-              :key="course.id"
-              :label="`${course.name}（${course.code}）`"
-              :value="course.id"
-            />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="班级" required>
-          <el-select
-            v-model="createForm.classId"
-            placeholder="请选择班级"
-            filterable
-            :loading="timetableLoading || courseClassesLoading"
-            :disabled="createForm.courseId === ''"
-            class="dashboard__dialog-field"
-          >
-            <el-option
-              v-for="cls in classOptions"
-              :key="cls.id"
-              :label="cls.name"
-              :value="cls.id"
-            />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="授课日期" required>
-          <el-date-picker
-            v-model="createForm.sessionDate"
-            type="date"
-            placeholder="不得晚于今天"
-            value-format="YYYY-MM-DD"
-            :disabled-date="disabledFuture"
-            class="dashboard__dialog-field"
-          />
-        </el-form-item>
-        <el-form-item label="节次" required>
-          <el-input
-            v-model="createForm.period"
-            placeholder="如 3-4 节"
-            maxlength="32"
-            class="dashboard__dialog-field"
-          />
-        </el-form-item>
-        <el-form-item label="主题">
-          <el-input
-            v-model="createForm.topic"
-            placeholder="本次课主题（选填）"
-            maxlength="128"
-            class="dashboard__dialog-field"
-          />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="createVisible = false">取消</el-button>
-        <el-button type="primary" :loading="createSubmitting" @click="submitCreateSession">
-          创建
-        </el-button>
-      </template>
-    </el-dialog>
   </div>
 </template>
 
@@ -777,9 +500,6 @@ onMounted(reloadQuality)
     color: var(--color-text-tertiary);
   }
 
-  &__dialog-field {
-    width: 100%;
-  }
 }
 
 /* ===== 主任：决策带（与教师首页同一块「黑板」） ===== */

@@ -107,7 +107,7 @@ const WAVE_BARS = [10, 18, 26, 18, 10, 22, 14]
       </div>
 
       <p class="transcript-viewer__privacy">
-        转写已自动脱敏，学生一律以「学生X」显示；教师不可回放录音。
+        转写已自动脱敏，学生一律以「学生X」显示；课堂录音仅本人与教学督导可回放。
       </p>
     </template>
 
@@ -138,7 +138,7 @@ const WAVE_BARS = [10, 18, 26, 18, 10, 22, 14]
         <p v-else class="transcript-viewer__content">{{ transcript.content || '暂无转写内容' }}</p>
       </div>
       <p class="transcript-viewer__privacy">
-        转写已自动脱敏，学生一律以「学生X」显示；教师不可回放录音。
+        转写已自动脱敏，学生一律以「学生X」显示；课堂录音仅本人与教学督导可回放。
       </p>
     </el-dialog>
   </div>

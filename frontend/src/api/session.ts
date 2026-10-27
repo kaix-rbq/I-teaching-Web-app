@@ -45,7 +45,7 @@ export function fetchSessionEvaluationApi(id: number | string): Promise<SessionE
   return request<SessionEvaluation>({ url: `/sessions/${id}/evaluation`, method: 'get' })
 }
 
-/** 提交/覆盖督导评分与评语（PUT 幂等，五维必填）——已废弃（返回 50002），保留以兼容旧调用 */
+/** 提交/覆盖督导评分与评语（PUT 幂等，五维必填，督导评分主入口） */
 export function submitSupervisorEvaluationApi(
   id: number | string,
   payload: SupervisorEvaluationPayload

@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import AiBadge from '@/components/common/AiBadge.vue'
 import { formatDateTime } from '@/utils/format'
 import type { AiReportEnvelope } from '@/types/agent'
+
+type ReportTabKey = 'highlights' | 'trend' | 'directions' | 'suggestions'
 
 const props = withDefaults(
   defineProps<{
@@ -44,6 +46,56 @@ const confidencePercent = computed(() => {
   if (confidence.value === null) return '—'
   return `${Math.round(Math.max(0, Math.min(1, confidence.value)) * 100)}%`
 })
+
+const TABS: Array<{ key: ReportTabKey; label: string }> = [
+  { key: 'highlights', label: '亮点' },
+  { key: 'trend', label: '趋势解读' },
+  { key: 'directions', label: '可提优方向' },
+  { key: 'suggestions', label: '提优建议' }
+]
+
+const activeTab = ref<ReportTabKey>('highlights')
+const tablist = ref<HTMLElement | null>(null)
+const uid = `ai-report-tabs-${Math.random().toString(36).slice(2, 8)}`
+const activeTabId = computed(() => `${uid}-tab-${activeTab.value}`)
+const activePanelId = computed(() => `${uid}-panel-${activeTab.value}`)
+
+function selectTab(key: ReportTabKey): void {
+  activeTab.value = key
+}
+
+function focusTab(index: number): void {
+  const buttons = tablist.value?.querySelectorAll<HTMLButtonElement>('[role="tab"]')
+  buttons?.[index]?.focus()
+}
+
+function onTabKeydown(event: KeyboardEvent, index: number): void {
+  let next = index
+  if (event.key === 'ArrowRight') next = (index + 1) % TABS.length
+  else if (event.key === 'ArrowLeft') next = (index - 1 + TABS.length) % TABS.length
+  else if (event.key === 'Home') next = 0
+  else if (event.key === 'End') next = TABS.length - 1
+  else return
+  event.preventDefault()
+  activeTab.value = TABS[next].key
+  focusTab(next)
+}
+
+const activeEmpty = computed(() => {
+  if (!report.value) return true
+  switch (activeTab.value) {
+    case 'highlights':
+      return !report.value.highlights.trim()
+    case 'trend':
+      return !report.value.trendComment.trim()
+    case 'directions':
+      return report.value.directions.length === 0
+    case 'suggestions':
+      return report.value.suggestions.length === 0
+    default:
+      return true
+  }
+})
 </script>
 
 <template>
@@ -80,36 +132,70 @@ const confidencePercent = computed(() => {
       <el-tag v-if="running" type="warning" size="small" effect="light" round>更新中</el-tag>
     </header>
 
-    <p class="ai-report-card__summary">{{ report.summary || '暂无总结' }}</p>
+    <!-- 固定摘要：切换标签不移动，保持一眼可见 -->
+    <p class="ai-report-card__summary">
+      {{ report.summary || '本次暂无该项内容' }}
+    </p>
 
-    <div v-if="report.highlights" class="ai-report-card__block">
-      <h4 class="ai-report-card__label">亮点</h4>
-      <p class="ai-report-card__text">{{ report.highlights }}</p>
+    <div class="ai-report-card__metrics">
+      <span>已评 {{ report.evaluatedCount }} / {{ report.sessionCount }} 场</span>
+      <span>置信度 {{ confidencePercent }}</span>
+      <span v-if="lowConfidence" class="ai-report-card__warning">低置信，仅供参考</span>
     </div>
 
-    <div v-if="report.trendComment" class="ai-report-card__block">
-      <h4 class="ai-report-card__label">趋势解读</h4>
-      <p class="ai-report-card__text">{{ report.trendComment }}</p>
+    <div class="ai-report-card__tabs-wrap">
+      <div
+        ref="tablist"
+        class="ai-report-card__tabs"
+        role="tablist"
+        aria-label="AI 综合总结内容"
+      >
+        <button
+          v-for="(tab, index) in TABS"
+          :id="`${uid}-tab-${tab.key}`"
+          :key="tab.key"
+          type="button"
+          role="tab"
+          class="ai-report-card__tab"
+          :class="{ 'ai-report-card__tab--active': activeTab === tab.key }"
+          :aria-selected="activeTab === tab.key"
+          :aria-controls="`${uid}-panel-${tab.key}`"
+          :tabindex="activeTab === tab.key ? 0 : -1"
+          @click="selectTab(tab.key)"
+          @keydown="onTabKeydown($event, index)"
+        >
+          {{ tab.label }}
+        </button>
+      </div>
     </div>
 
-    <div v-if="report.directions.length" class="ai-report-card__block">
-      <h4 class="ai-report-card__label">可提优方向</h4>
-      <ol class="ai-report-card__list">
+    <div
+      :id="activePanelId"
+      class="ai-report-card__panel"
+      role="tabpanel"
+      :aria-labelledby="activeTabId"
+      tabindex="0"
+    >
+      <p v-if="activeEmpty" class="ai-report-card__empty">本次暂无该项内容</p>
+
+      <p v-else-if="activeTab === 'highlights'" class="ai-report-card__text">
+        {{ report.highlights }}
+      </p>
+
+      <p v-else-if="activeTab === 'trend'" class="ai-report-card__text">
+        {{ report.trendComment }}
+      </p>
+
+      <ol v-else-if="activeTab === 'directions'" class="ai-report-card__list">
         <li v-for="(item, index) in report.directions" :key="`direction-${index}`">{{ item }}</li>
       </ol>
-    </div>
 
-    <div v-if="report.suggestions.length" class="ai-report-card__block">
-      <h4 class="ai-report-card__label">提优建议</h4>
-      <ol class="ai-report-card__list">
+      <ol v-else class="ai-report-card__list">
         <li v-for="(item, index) in report.suggestions" :key="`suggestion-${index}`">{{ item }}</li>
       </ol>
     </div>
 
     <footer class="ai-report-card__foot">
-      <span>已评 {{ report.evaluatedCount }} / {{ report.sessionCount }} 场</span>
-      <span>置信度 {{ confidencePercent }}</span>
-      <span v-if="lowConfidence" class="ai-report-card__warning">低置信，仅供参考</span>
       <span>生成于 {{ formatDateTime(report.generatedAt) }}</span>
       <span class="ai-report-card__meta">
         {{ report.modelVersion || '未知模型' }} · {{ report.promptVersion || '未知提示词版本' }}
@@ -151,20 +237,83 @@ const confidencePercent = computed(() => {
     color: var(--color-text-secondary);
   }
 
-  &__block {
-    margin-top: var(--spacing-4);
+  &__metrics {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--spacing-2) var(--spacing-4);
+    align-items: baseline;
+    margin-top: var(--spacing-3);
+    font-size: var(--font-size-xs);
+    color: var(--color-text-tertiary);
   }
 
-  &__label {
-    margin-bottom: var(--spacing-2);
+  &__warning {
+    color: var(--color-warning);
+  }
+
+  &__tabs-wrap {
+    margin-top: var(--spacing-4);
+    border-bottom: 1px solid var(--color-divider);
+  }
+
+  /* 移动端不换行，保持横向滚动；键盘焦点使用原生 focus-visible */
+  &__tabs {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: var(--spacing-1);
+    overflow-x: auto;
+    scrollbar-width: thin;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  &__tab {
+    flex: 0 0 auto;
+    padding: var(--spacing-2) var(--spacing-3);
     font-size: var(--font-size-sm);
     color: var(--color-text-tertiary);
+    cursor: pointer;
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    transition:
+      color var(--duration-fast) var(--ease-out-soft),
+      border-color var(--duration-fast) var(--ease-out-soft);
+
+    &:hover {
+      color: var(--color-text-secondary);
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--color-primary);
+      outline-offset: -2px;
+    }
+
+    &--active {
+      font-weight: 600;
+      color: var(--color-ai-deep);
+      border-bottom-color: var(--color-ai);
+    }
+  }
+
+  &__panel {
+    min-height: 88px;
+    padding-top: var(--spacing-3);
+
+    &:focus-visible {
+      outline: 2px solid var(--color-primary);
+      outline-offset: 2px;
+    }
   }
 
   &__text {
     font-size: var(--font-size-sm);
     line-height: 1.7;
     color: var(--color-text-secondary);
+  }
+
+  &__empty {
+    font-size: var(--font-size-sm);
+    color: var(--color-text-tertiary);
   }
 
   &__list {
@@ -184,15 +333,11 @@ const confidencePercent = computed(() => {
     flex-wrap: wrap;
     gap: var(--spacing-2) var(--spacing-4);
     align-items: baseline;
-    padding-top: var(--spacing-4);
-    margin-top: var(--spacing-4);
+    padding-top: var(--spacing-3);
+    margin-top: var(--spacing-3);
     font-size: var(--font-size-xs);
     color: var(--color-text-tertiary);
     border-top: 1px dashed var(--color-divider);
-  }
-
-  &__warning {
-    color: var(--color-warning);
   }
 
   &__meta {
