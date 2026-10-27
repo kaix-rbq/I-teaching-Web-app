@@ -1,17 +1,20 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import dayjs from 'dayjs'
 import PageHeader from '@/components/common/PageHeader.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import AiScoreHero from '@/components/evaluation/AiScoreHero.vue'
 import ScoreDimensionsCard from '@/components/evaluation/ScoreDimensionsCard.vue'
+import TeacherAiReportCard from '@/components/evaluation/TeacherAiReportCard.vue'
+import { fetchTeacherAiReportApi } from '@/api/agent'
 import { fetchTeacherEvaluationsApi, fetchTeacherSummaryApi } from '@/api/teacher'
 import { fetchCourseSessionsApi } from '@/api/session'
 import { useAuthStore } from '@/stores/auth'
 import { useSemester } from '@/composables/useSemester'
 import { scoreTone, scoreToneColor } from '@/utils/format'
 import type { TeacherSummary, TeacherTimelineItem } from '@/types/teacher'
+import type { AiReportEnvelope } from '@/types/agent'
 import type { EvaluationDTO, SessionListItem } from '@/types/evaluation'
 
 /**
@@ -30,6 +33,13 @@ const timeline = ref<TeacherTimelineItem[]>([])
 const courseSessions = ref<Array<SessionListItem & { courseId: number; courseName: string; courseCode: string }>>([])
 const loading = ref(true)
 const error = ref(false)
+
+const aiReport = ref<AiReportEnvelope | null>(null)
+const aiReportLoading = ref(false)
+const aiReportError = ref(false)
+let aiReportTimer: ReturnType<typeof setTimeout> | null = null
+let aiReportSeq = 0
+let aiReportDisposed = false
 
 const latestAiEvaluation = computed<EvaluationDTO | null>(
   () => timeline.value.find((item) => item.agentEvaluation)?.agentEvaluation ?? null
@@ -116,9 +126,48 @@ function goSessionRecord(sessionId: number): void {
   void router.push({ name: 'session-evaluation', params: { id: sessionId } })
 }
 
+function clearAiReportTimer(): void {
+  if (aiReportTimer) {
+    clearTimeout(aiReportTimer)
+    aiReportTimer = null
+  }
+}
+
+/**
+ * AI 综合总结独立加载：报告接口失败只影响该卡片，不阻断 summary/时间线主内容。
+ * 生成中每 30 秒刷新一次，重复调用会先清理旧 timer，避免叠加。
+ */
+async function loadAiReport(): Promise<void> {
+  const id = auth.user?.id
+  if (!id || aiReportDisposed) return
+  const seq = ++aiReportSeq
+  clearAiReportTimer()
+  aiReportLoading.value = true
+  aiReportError.value = false
+  try {
+    const data = await fetchTeacherAiReportApi(id, {
+      semester: semester.value || undefined
+    })
+    if (seq !== aiReportSeq || aiReportDisposed) return
+    aiReport.value = data
+    if (data.status === 'pending' || data.status === 'running') {
+      aiReportTimer = setTimeout(() => {
+        void loadAiReport()
+      }, 30_000)
+    }
+  } catch {
+    if (seq !== aiReportSeq || aiReportDisposed) return
+    aiReportError.value = true
+    aiReport.value = null
+  } finally {
+    if (seq === aiReportSeq) aiReportLoading.value = false
+  }
+}
+
 async function load(): Promise<void> {
   const id = auth.user?.id
   if (!id) return
+  void loadAiReport()
   loading.value = true
   error.value = false
   try {
@@ -173,6 +222,12 @@ onMounted(() => {
 watch(semester, () => {
   void load()
 })
+
+onUnmounted(() => {
+  aiReportDisposed = true
+  aiReportSeq += 1
+  clearAiReportTimer()
+})
 </script>
 
 <template>
@@ -197,6 +252,15 @@ watch(semester, () => {
         :semester="semester"
         :recent-evaluation="latestAiEvaluation"
       />
+
+      <section class="ledger-section" aria-label="AI 综合总结">
+        <TeacherAiReportCard
+          :envelope="aiReport"
+          :loading="aiReportLoading"
+          :error="aiReportError"
+          @reload="loadAiReport"
+        />
+      </section>
 
       <section class="ledger-section" aria-label="五维评分">
         <ScoreDimensionsCard :summary="summary" />

@@ -79,6 +79,7 @@ declare module 'vue' {
     ScoreTrendChart: typeof import('./components/evaluation/ScoreTrendChart.vue')['default']
     SessionTable: typeof import('./components/session/SessionTable.vue')['default']
     StatCard: typeof import('./components/common/StatCard.vue')['default']
+    TeacherAiReportCard: typeof import('./components/evaluation/TeacherAiReportCard.vue')['default']
     TeacherScoreCard: typeof import('./components/teacher/TeacherScoreCard.vue')['default']
     TeacherScorePanel: typeof import('./components/teacher/TeacherScorePanel.vue')['default']
     TeacherScoreTable: typeof import('./components/teacher/TeacherScoreTable.vue')['default']

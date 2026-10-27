@@ -61,6 +61,8 @@ const loading = ref(true)
 const error = ref(false)
 const commentLoading = ref(false)
 const improveLoading = ref(false)
+const suggestionsError = ref(false)
+const trendError = ref(false)
 const semester = ref('')
 const trendDimension = ref('composite')
 const chatVisible = ref(false)
@@ -182,19 +184,33 @@ async function loadScores(): Promise<void> {
 
 async function loadImprove(): Promise<void> {
   improveLoading.value = true
+  suggestionsError.value = false
+  trendError.value = false
   try {
-    const [suggestionResult, trendResult] = await Promise.all([
-      fetchAgentSuggestionsApi(courseId.value).catch(() => [] as AgentSuggestion[]),
+    const [suggestionResult, trendResult] = await Promise.allSettled([
+      fetchAgentSuggestionsApi(courseId.value, semester.value || undefined),
       fetchScoreTrendApi({
         teacherId: auth.user?.id,
         courseId: courseId.value,
         semester: semester.value || undefined
-      }).catch(() => [] as ScoreTrendSeries[])
+      })
     ])
-    suggestions.value = suggestionResult
-    trend.value = trendResult
-    if (!trendResult.some((series) => series.key === trendDimension.value)) {
-      trendDimension.value = trendResult[0]?.key ?? 'composite'
+
+    if (suggestionResult.status === 'fulfilled') {
+      suggestions.value = suggestionResult.value
+    } else {
+      suggestions.value = []
+      suggestionsError.value = true
+    }
+
+    if (trendResult.status === 'fulfilled') {
+      trend.value = trendResult.value
+      if (!trendResult.value.some((series) => series.key === trendDimension.value)) {
+        trendDimension.value = trendResult.value[0]?.key ?? 'composite'
+      }
+    } else {
+      trend.value = []
+      trendError.value = true
     }
   } finally {
     improveLoading.value = false
@@ -427,7 +443,12 @@ onMounted(async () => {
             与 AI 助手对话 →
           </el-button>
         </div>
-        <AgentSuggestionList :items="suggestions" :loading="improveLoading" />
+        <AgentSuggestionList
+          :items="suggestions"
+          :loading="improveLoading"
+          :error="suggestionsError"
+          @reload="loadImprove"
+        />
       </section>
 
       <!-- 5. 分数趋势 -->
@@ -443,7 +464,12 @@ onMounted(async () => {
             </el-radio-button>
           </el-radio-group>
         </div>
+        <div v-if="trendError" class="course-improve__data-error">
+          <span>分数趋势加载失败</span>
+          <el-button size="small" @click="loadImprove">重新加载</el-button>
+        </div>
         <ScoreTrendChart
+          v-else
           :points="activeTrendPoints"
           :dimension-name="activeTrend?.name"
           :loading="improveLoading"
@@ -810,6 +836,20 @@ onMounted(async () => {
     align-items: center;
     justify-content: space-between;
     margin-bottom: var(--spacing-4);
+  }
+
+  &__data-error {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--spacing-3);
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--spacing-4);
+    font-size: var(--font-size-sm);
+    color: var(--color-text-tertiary);
+    background-color: var(--color-bg-page);
+    border: 1px dashed var(--color-divider);
+    border-radius: var(--radius-md);
   }
 
   &__resource-list {

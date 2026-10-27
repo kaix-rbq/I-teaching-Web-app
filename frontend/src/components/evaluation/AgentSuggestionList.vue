@@ -11,11 +11,15 @@ withDefaults(
   defineProps<{
     items: AgentSuggestion[]
     loading?: boolean
+    error?: boolean
   }>(),
   {
-    loading: false
+    loading: false,
+    error: false
   }
 )
+
+const emit = defineEmits<{ (e: 'reload'): void }>()
 
 const LOW_CONFIDENCE = 0.4
 
@@ -31,6 +35,11 @@ function isLowConfidence(item: AgentSuggestion): boolean {
 <template>
   <div class="agent-suggestions">
     <el-skeleton v-if="loading" :rows="4" animated />
+
+    <div v-else-if="error" class="agent-suggestions__error">
+      <span>提优建议加载失败</span>
+      <el-button size="small" @click="emit('reload')">重新加载</el-button>
+    </div>
 
     <template v-else>
       <p class="agent-suggestions__notice">
@@ -91,6 +100,20 @@ function isLowConfidence(item: AgentSuggestion): boolean {
 
 <style scoped lang="scss">
 .agent-suggestions {
+  &__error {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--spacing-3);
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--spacing-4);
+    font-size: var(--font-size-sm);
+    color: var(--color-text-tertiary);
+    background-color: var(--color-bg-page);
+    border: 1px dashed var(--color-divider);
+    border-radius: var(--radius-md);
+  }
+
   &__notice {
     display: flex;
     align-items: center;
