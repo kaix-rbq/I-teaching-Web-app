@@ -368,7 +368,7 @@ CREATE TABLE `knowledge_chunks` (
 cd backend
 go run ./cmd/kb ingest --dir ./kb-src/kb-rubric --collection kb-rubric    # 摄取目录
 go run ./cmd/kb list   --collection kb-textbook                # 查看已入库文档与切片数
-go run ./cmd/kb rebuild --collection kb-textbook               # 换嵌入模型后全量重建
+go run ./cmd/kb rebuild --dir ./kb-src/kb-textbook --collection kb-textbook  # 换模型后清空集合重建
 ```
 
 **摄取流水线**：
@@ -631,11 +631,11 @@ embedding:
 
 | # | 任务 | 验收 |
 |---|---|---|
-| 3.1 | V9 迁移：`knowledge_documents` + `knowledge_chunks` | 向量与 `embedding_model/dim` 一并落库 |
-| 3.2 | `internal/agent/embedder`：Embedder 接口 + 百炼实现 + 失败降级 | 单测：失败时降级为无知识库仍返回 |
+| 3.1 | **V16 迁移（已完成 2026-10-27）**：`knowledge_documents` + `knowledge_chunks` | 向量与 `embedding_model/dim` 一并落库 |
+| 3.2 | `internal/agent/embedder`（**基础能力已完成**；失败降级待接入）：Embedder 接口 + 百炼实现 | 单测：批量/维度/归一化；S1 失败降级待做 |
 | 3.3 | `internal/agent/retriever`：缓存、余弦、元数据过滤、阈值 | 单测：top-k 命中 + 模型过滤 + 阈值丢弃 |
-| 3.4 | `cmd/kb`：ingest / list / rebuild（md+txt+docx 解析，PDF 预处理） | 摄取一个真实文档并检索命中 |
-| 3.5 | `kb-rubric` 冷启动：导入听评课标准、五维锚点、输出模板与提示词 | 检索"互动维度锚点"能命中 |
+| 3.4 | **`cmd/kb`（已完成 2026-10-27）**：ingest / list / rebuild（md+txt+docx 解析，PDF 预处理） | 已摄取 kb-rubric 2 文档/42 chunks；检索命中待 3.3 |
+| 3.5 | **`kb-rubric` 冷启动（文档已落地）**：五维锚点、输出模板；TQF 等外部框架进 kb-strategy | 离线余弦验证“互动维度锚点”Top1=0.6165；正式检索待 3.3 |
 | 3.6 | S1/S2/S3 接入检索与 `citedChunks` 回传 | 证据里可见知识库引用 |
 
 ### 阶段 4：对话与前端
