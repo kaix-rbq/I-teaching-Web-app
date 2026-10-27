@@ -10,7 +10,7 @@ export interface SupervisionPlan {
   status: SupervisionStatus
   /** 关联授课记录（null = 尚未创建，需先创建再评估） */
   sessionId: number | null
-  /** 关联授课记录是否已完成督导评价（决定是否暴露评估入口） */
+  /** 关联授课记录是否存在督导评价行（决定是否暴露评估入口；AI 已评不算） */
   evaluated: boolean
 }
 
@@ -74,6 +74,6 @@ export interface DashboardData {
   recentResources?: import('./resource').Resource[]
   /** 督导工作台「草稿箱」区块：最近创建的草稿 */
   recentDrafts?: import('./draft').DraftDTO[]
-  /** 督导工作台「待评估授课记录」：手动新增或尚未评价的授课记录 */
+  /** 督导工作台「待 AI 评析」：手动新增或尚无 agent 评价行的授课记录 */
   pendingSessions?: import('./evaluation').PendingSessionItem[]
 }

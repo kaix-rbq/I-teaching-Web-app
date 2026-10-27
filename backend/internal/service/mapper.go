@@ -116,20 +116,21 @@ func toSessionListItems(rows []repository.SessionListRow) []dto.SessionListItem 
 	out := make([]dto.SessionListItem, 0, len(rows))
 	for _, row := range rows {
 		out = append(out, dto.SessionListItem{
-			ID:              row.ID,
-			SessionDate:     row.SessionDate.Format("2006-01-02"),
-			Period:          row.Period,
-			Topic:           row.Topic,
-			Status:          row.Status,
-			SupervisorScore: round2Ptr(row.SupervisorTotal),
-			AgentScore:      round2Ptr(row.AgentTotal),
-			EvaluationCount: row.EvaluationCount,
+			ID:                  row.ID,
+			SessionDate:         row.SessionDate.Format("2006-01-02"),
+			Period:              row.Period,
+			Topic:               row.Topic,
+			Status:              row.Status,
+			SupervisorEvaluated: row.SupervisorEvaluated,
+			SupervisorScore:     round2Ptr(row.SupervisorTotal),
+			AgentScore:          round2Ptr(row.AgentTotal),
+			EvaluationCount:     row.EvaluationCount,
 		})
 	}
 	return out
 }
 
-// toPendingSessionItems 映射「待评估授课记录」列表。
+// toPendingSessionItems 映射「待 AI 评析授课记录」列表。
 func toPendingSessionItems(rows []repository.PendingSessionRow) []dto.PendingSessionItem {
 	out := make([]dto.PendingSessionItem, 0, len(rows))
 	for _, row := range rows {

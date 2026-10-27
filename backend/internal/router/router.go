@@ -58,6 +58,7 @@ func New(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) (*gin.Engine, se
 	scheduleEventSvc := service.NewScheduleEventService(scheduleEventRepo)
 	classroomIssueSvc := service.NewClassroomIssueService(classroomIssueRepo)
 	teacherScoreSvc := service.NewTeacherScoreService(userRepo, courseRepo, evaluationRepo, cfg.Evaluation, improvementRepo)
+	agentImproveSvc := service.NewAgentImproveService(userRepo, courseRepo, evaluationRepo, cfg.Evaluation)
 	// ⚠️ 不能写 Transcriber(asr.NewClient(...))：把 nil 的 *asr.Client 装进接口会得到
 	// 非 nil 接口（holds-nil-pointer），service 里的 `s.transcriber == nil` 判断会失效，
 	// 调用时直接空指针 panic。必须显式判空后再赋值。
@@ -95,6 +96,7 @@ func New(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) (*gin.Engine, se
 	dictH := handler.NewDictHandler(dictSvc)
 	sessionH := handler.NewSessionHandler(sessionSvc, recordingSvc)
 	teacherScoreH := handler.NewTeacherScoreHandler(teacherScoreSvc)
+	agentImproveH := handler.NewAgentImproveHandler(agentImproveSvc)
 	recordingH := handler.NewRecordingHandler(recordingSvc)
 	aiTaskH := handler.NewAiTaskHandler(aiTaskSvc)
 	improvementH := handler.NewImprovementHandler(improvementSvc)
@@ -145,6 +147,9 @@ func New(db *gorm.DB, cfg *config.Config, jwt *jwtutil.Manager) (*gin.Engine, se
 	authed.GET("/teachers/:id/evaluation-summary", teacherScoreH.TeacherSummary)
 	authed.GET("/teachers/:id/evaluations", teacherScoreH.TeacherEvaluations)
 	authed.GET("/teachers/:id/report", teacherScoreH.Report)
+	// §8.15 P2 提优读接口：数据裁剪在 service 层（teacher 本人 / director 本室 / supervisor 全校）。
+	authed.GET("/courses/:id/agent-suggestions", agentImproveH.Suggestions)
+	authed.GET("/teachers/:id/score-trend", agentImproveH.ScoreTrend)
 
 	// —— AI 观察（D3 / R0.2）：详情与入队；数据裁剪在 service 层（D8 教师侧风险脱敏）——
 	authed.GET("/sessions/:id/ai-observation", aiTaskH.Observation)

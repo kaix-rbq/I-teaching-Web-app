@@ -22,7 +22,10 @@ export interface SessionListItem {
   /** 节次，如 "3-4 节" */
   period: string
   topic: string
+  /** evaluated = AI 已评析（2026-10-27 口径） */
   status: SessionStatus
+  /** 督导是否已评（存在 supervisor 评价行）；督导页按钮/徽章以此为准，不得用 status */
+  supervisorEvaluated: boolean
   /** 单次总分（仅展示/排序；无评价为 null，不得显示 0） */
   supervisorScore: number | null
   agentScore: number | null
@@ -104,13 +107,15 @@ export interface EvidenceDTO {
 /** GET /sessions/:id/evaluation 聚合响应（当堂课评估页） */
 export interface SessionEvaluation {
   session: SessionDetail
+  /** 督导是否已评（存在 supervisor 评价行）；与 status（AI 已评）解耦 */
+  supervisorEvaluated: boolean
   /** 一次课可多督导 */
   supervisorScores: EvaluationDTO[]
   /** 阶段一恒为 null */
   agentScore: EvaluationDTO | null
 }
 
-/** 督导工作台「待评估授课记录」行（含课程/教师上下文） */
+/** 督导工作台「待 AI 评析」行（尚无 agent 评价行，含课程/教师上下文） */
 export interface PendingSessionItem {
   sessionId: number
   courseId: number

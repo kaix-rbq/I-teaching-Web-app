@@ -72,6 +72,39 @@ type AgentSessionRow struct {
 	SupervisorNote string    `gorm:"column:supervisor_note"`
 }
 
+// AgentSuggestionRow 是课程 AI 提优建议行（GET /courses/:id/agent-suggestions）：
+// 仅 evaluator_type='agent' 的评价行；evidence 原样取出，由 service 渲染为人类可读字符串。
+type AgentSuggestionRow struct {
+	ID             uint64    `gorm:"column:id"`
+	SessionID      uint64    `gorm:"column:session_id"`
+	CourseID       uint64    `gorm:"column:course_id"`
+	SessionDate    time.Time `gorm:"column:session_date"`
+	Period         string    `gorm:"column:period"`
+	Topic          string    `gorm:"column:topic"`
+	EvaluatorType  string    `gorm:"column:evaluator_type"`
+	Comment        string    `gorm:"column:comment"`
+	Highlights     string    `gorm:"column:highlights"`
+	Improvements   string    `gorm:"column:improvements"`
+	Evidence       *string   `gorm:"column:evidence"`
+	AIModelVersion string    `gorm:"column:ai_model_version"`
+	AIConfidence   *float64  `gorm:"column:ai_confidence"`
+	CreatedAt      time.Time `gorm:"column:created_at"`
+	// 五维原始分（1-5）用于挑选「最低分非空维度」的引用。
+	ObjectiveScore    *uint8 `gorm:"column:objective_score"`
+	ContentScore      *uint8 `gorm:"column:content_score"`
+	InteractionScore  *uint8 `gorm:"column:interaction_score"`
+	OrganizationScore *uint8 `gorm:"column:organization_score"`
+	FrontierScore     *uint8 `gorm:"column:frontier_score"`
+}
+
+// AgentSuggestionFilter 是课程 AI 提优建议的筛选范围。
+// FormulaVersion 非空时只取该口径版本，避免公式混杂时把旧口径建议混进当前列表。
+type AgentSuggestionFilter struct {
+	CourseID       uint64
+	Semester       string
+	FormulaVersion string
+}
+
 // EvaluationRepository 定义课堂评价数据访问。
 type EvaluationRepository interface {
 	Upsert(ctx context.Context, e *model.Evaluation) error
@@ -80,6 +113,8 @@ type EvaluationRepository interface {
 	ListSessionDimRows(ctx context.Context, f SessionDimFilter) ([]SessionDimRow, error)
 	// ListAgentSessions 返回有 AI 终评的场次（抽样分派输入，§4.3），按教师 + 课次倒序。
 	ListAgentSessions(ctx context.Context, semester, formulaVersion string) ([]AgentSessionRow, error)
+	// ListAgentSuggestions 返回课程内 agent 评价行，按课次倒序（GET /courses/:id/agent-suggestions）。
+	ListAgentSuggestions(ctx context.Context, f AgentSuggestionFilter) ([]AgentSuggestionRow, error)
 	// DeleteBySession 删除某场次的全部评价（删课级联用）。
 	DeleteBySession(ctx context.Context, sessionID uint64) error
 }
@@ -176,6 +211,38 @@ func (r *evaluationRepository) ListAgentSessions(ctx context.Context, semester, 
 	var rows []AgentSessionRow
 	err := tx.Order("ts.teacher_id ASC, ts.session_date DESC, ts.id DESC").Scan(&rows).Error
 	return rows, err
+}
+
+// ListAgentSuggestions 返回课程 AI 提优建议（只取 agent 行），按 session_date DESC, evaluations.id DESC。
+// 课程学期通过 courses.semester 过滤；formula_version 口径在 SQL 层隔离。
+func (r *evaluationRepository) ListAgentSuggestions(
+	ctx context.Context, f AgentSuggestionFilter,
+) ([]AgentSuggestionRow, error) {
+	tx := r.db.WithContext(ctx).
+		Table("evaluations AS e").
+		Select(`e.id, e.session_id, ts.course_id, ts.session_date, ts.period, ts.topic,
+			e.evaluator_type, e.comment, e.highlights, e.improvements, e.evidence,
+			e.ai_model_version, e.ai_confidence, e.created_at,
+			e.objective_score, e.content_score, e.interaction_score,
+			e.organization_score, e.frontier_score`).
+		Joins("JOIN teaching_sessions AS ts ON ts.id = e.session_id").
+		Joins("JOIN courses AS c ON c.id = ts.course_id").
+		Where("e.evaluator_type = ?", model.EvaluatorAgent)
+	if f.CourseID > 0 {
+		tx = tx.Where("ts.course_id = ?", f.CourseID)
+	}
+	if f.Semester != "" {
+		tx = tx.Where("c.semester = ?", f.Semester)
+	}
+	if f.FormulaVersion != "" {
+		tx = tx.Where("e.formula_version = ?", f.FormulaVersion)
+	}
+	var rows []AgentSuggestionRow
+	err := tx.Order("ts.session_date DESC, e.id DESC").Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	return rows, nil
 }
 
 // DeleteBySession 删除某场次的全部评价（删课级联用；含督导观察与 AI 行）。

@@ -353,7 +353,7 @@ function handleQueueEvaluate(plan: SupervisionPlan): void {
   void router.push({ name: 'session-evaluation', params: { id: plan.sessionId } })
 }
 
-/** 待评估授课记录：直达评估页。 */
+/** 待 AI 评析授课记录：直达评估页。 */
 function goPendingEvaluate(sessionId: number): void {
   void router.push({ name: 'session-evaluation', params: { id: sessionId } })
 }
@@ -413,7 +413,7 @@ async function submitCreateSession(): Promise<void> {
       period: createForm.period.trim(),
       topic: createForm.topic.trim()
     })
-    ElMessage.success('授课记录已创建，可在「待评估授课记录」中评估')
+    ElMessage.success('授课记录已创建，可在「待 AI 评析」中查看进度')
     createVisible.value = false
     await loadData()
   } catch {
@@ -626,8 +626,8 @@ onMounted(reloadQuality)
 
         <section class="board board--pending">
           <header class="board__head">
-            <h2 class="board__title">待评估授课记录</h2>
-            <span class="board__sub">手动新增或尚未评价的授课记录</span>
+            <h2 class="board__title">待 AI 评析</h2>
+            <span class="board__sub">手动新增或 AI 尚未评析的授课记录</span>
           </header>
 
           <ol v-if="(data?.pendingSessions ?? []).length" class="session-track">
@@ -645,7 +645,7 @@ onMounted(reloadQuality)
                 <p class="session-track__topic">{{ row.topic || '未填写主题' }}</p>
               </div>
               <span class="session-track__teacher">{{ row.teacherName }}</span>
-              <span class="session-track__status">未评估</span>
+              <span class="session-track__status">待 AI 评析</span>
               <button
                 type="button"
                 class="text-action text-action--next"
@@ -655,7 +655,7 @@ onMounted(reloadQuality)
               </button>
             </li>
           </ol>
-          <p v-else class="board__empty">暂无待评估授课记录</p>
+          <p v-else class="board__empty">暂无待 AI 评析的授课记录</p>
         </section>
 
         <ClassroomIssueBoard class="dashboard__issues" />
@@ -1224,7 +1224,7 @@ onMounted(reloadQuality)
   }
 }
 
-/* ===== 待评估授课记录：时间轨行 ===== */
+/* ===== 待 AI 评析：时间轨行 ===== */
 .session-track {
   display: flex;
   flex-direction: column;

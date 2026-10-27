@@ -28,7 +28,8 @@ type PlanRow struct {
 	PlannedDate    time.Time `gorm:"column:planned_date"`
 	Status         string    `gorm:"column:status"`
 	SessionID      *uint64   `gorm:"column:session_id"`
-	// Evaluated：该计划关联的授课记录是否已完成督导评价（决定工作台是否暴露评估入口）。
+	// Evaluated：该计划关联的授课记录是否存在督导评价行（决定工作台是否暴露评估入口）。
+	// 2026-10-27 口径：status='evaluated' 只表示 AI 已评析，不能作为督导已评依据。
 	Evaluated bool `gorm:"column:evaluated"`
 }
 
@@ -135,7 +136,8 @@ func (r *supervisionRepository) ListPlans(ctx context.Context, p PlanListParams)
 			(SELECT ts.id FROM teaching_sessions AS ts
 				WHERE ts.plan_id = sp.id ORDER BY ts.id DESC LIMIT 1) AS session_id,
 			EXISTS(SELECT 1 FROM teaching_sessions AS ts
-				WHERE ts.plan_id = sp.id AND ts.status = 'evaluated') AS evaluated`).
+				JOIN evaluations AS e ON e.session_id = ts.id
+				WHERE ts.plan_id = sp.id AND e.evaluator_type = 'supervisor') AS evaluated`).
 		Order("sp.planned_date ASC, sp.id ASC").
 		Offset((p.Page - 1) * p.PageSize).
 		Limit(p.PageSize).
