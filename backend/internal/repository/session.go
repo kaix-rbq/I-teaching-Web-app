@@ -23,6 +23,9 @@ type SessionListRow struct {
 	SupervisorTotal *float64  `gorm:"column:supervisor_total"`
 	AgentTotal      *float64  `gorm:"column:agent_total"`
 	EvaluationCount int       `gorm:"column:evaluation_count"`
+	// SupervisorEvaluated 是「督导已评」投影：是否存在 evaluator_type='supervisor' 的评价行。
+	// 与 status（= AI 已评析，仅 AI 任务写入）解耦，不新增数据库列。
+	SupervisorEvaluated bool `gorm:"column:supervisor_evaluated"`
 }
 
 // SessionDetailRow 是单场授课记录 + 课程/教师/班级上下文（数据裁剪所需列一并取出）。
@@ -50,7 +53,7 @@ type SessionListParams struct {
 	PageSize int
 }
 
-// PendingSessionRow 是「待评估授课记录」行（含课程/教师上下文，供督导工作台直接展示与跳转）。
+// PendingSessionRow 是「待 AI 评析授课记录」行（含课程/教师上下文，供督导工作台直接展示与跳转）。
 type PendingSessionRow struct {
 	ID          uint64    `gorm:"column:id"`
 	CourseID    uint64    `gorm:"column:course_id"`
@@ -159,7 +162,8 @@ func (r *sessionRepository) ListByCourse(ctx context.Context, p SessionListParam
 		Select(`ts.id, ts.course_id, ts.class_id, ts.teacher_id, ts.session_date, ts.period, ts.topic, ts.status,
 			AVG(CASE WHEN e.evaluator_type = 'supervisor' THEN e.total_score END) AS supervisor_total,
 			AVG(CASE WHEN e.evaluator_type = 'agent'      THEN e.total_score END) AS agent_total,
-			COUNT(e.id) AS evaluation_count`).
+			COUNT(e.id) AS evaluation_count,
+			MAX(CASE WHEN e.evaluator_type = 'supervisor' THEN 1 ELSE 0 END) = 1 AS supervisor_evaluated`).
 		Joins("LEFT JOIN evaluations AS e ON e.session_id = ts.id").
 		Where("ts.course_id = ?", p.CourseID).
 		Group("ts.id").
@@ -173,8 +177,8 @@ func (r *sessionRepository) ListByCourse(ctx context.Context, p SessionListParam
 	return rows, total, nil
 }
 
-// ListPending 返回尚未评估的授课记录（status <> evaluated），最新在前。
-// 供督导工作台「新增授课记录」后直接找到待评估入口。
+// ListPending 返回尚无 AI 评析的授课记录（无 evaluator_type='agent' 评价行），最新在前。
+// 供督导工作台「新增授课记录」后直接找到待 AI 评析入口：督导已评但 AI 未评的场次仍应出现。
 func (r *sessionRepository) ListPending(ctx context.Context, limit int) ([]PendingSessionRow, error) {
 	var rows []PendingSessionRow
 	err := r.db.WithContext(ctx).
@@ -184,7 +188,8 @@ func (r *sessionRepository) ListPending(ctx context.Context, limit int) ([]Pendi
 			ts.teacher_id, u.name AS teacher_name`).
 		Joins("JOIN courses AS c ON c.id = ts.course_id").
 		Joins("JOIN users AS u ON u.id = ts.teacher_id").
-		Where("ts.status <> ?", model.SessionStatusEvaluated).
+		Where(`NOT EXISTS (SELECT 1 FROM evaluations AS e
+			WHERE e.session_id = ts.id AND e.evaluator_type = ?)`, model.EvaluatorAgent).
 		Order("ts.session_date DESC, ts.id DESC").
 		Limit(limit).
 		Scan(&rows).Error

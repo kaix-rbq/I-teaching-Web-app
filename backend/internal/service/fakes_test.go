@@ -367,11 +367,12 @@ func (f *fakeDraftRepo) Delete(ctx context.Context, id, supervisorID uint64) err
 }
 
 type fakeEvalRepo struct {
-	upsert             func(ctx context.Context, e *model.Evaluation) error
-	listBySession      func(ctx context.Context, sessionID uint64) ([]repository.EvaluationRow, error)
-	listBySessionIDs   func(ctx context.Context, sessionIDs []uint64) ([]repository.EvaluationRow, error)
-	listSessionDimRows func(ctx context.Context, flt repository.SessionDimFilter) ([]repository.SessionDimRow, error)
-	listAgentSessions  func(ctx context.Context, semester, formulaVersion string) ([]repository.AgentSessionRow, error)
+	upsert               func(ctx context.Context, e *model.Evaluation) error
+	listBySession        func(ctx context.Context, sessionID uint64) ([]repository.EvaluationRow, error)
+	listBySessionIDs     func(ctx context.Context, sessionIDs []uint64) ([]repository.EvaluationRow, error)
+	listSessionDimRows   func(ctx context.Context, flt repository.SessionDimFilter) ([]repository.SessionDimRow, error)
+	listAgentSessions    func(ctx context.Context, semester, formulaVersion string) ([]repository.AgentSessionRow, error)
+	listAgentSuggestions func(ctx context.Context, flt repository.AgentSuggestionFilter) ([]repository.AgentSuggestionRow, error)
 }
 
 func (f *fakeEvalRepo) Upsert(ctx context.Context, e *model.Evaluation) error {
@@ -402,6 +403,15 @@ func (f *fakeEvalRepo) ListSessionDimRows(
 		return nil, nil
 	}
 	return f.listSessionDimRows(ctx, flt)
+}
+
+func (f *fakeEvalRepo) ListAgentSuggestions(
+	ctx context.Context, flt repository.AgentSuggestionFilter,
+) ([]repository.AgentSuggestionRow, error) {
+	if f.listAgentSuggestions == nil {
+		return nil, nil
+	}
+	return f.listAgentSuggestions(ctx, flt)
 }
 
 func (f *fakeEvalRepo) DeleteBySession(ctx context.Context, sessionID uint64) error { return nil }

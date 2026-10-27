@@ -39,18 +39,20 @@ type SessionDetail struct {
 
 // SessionListItem 是课程历史授课记录行，附双侧评分摘要（无评价侧为 null）。
 type SessionListItem struct {
-	ID              uint64   `json:"id"`
-	SessionDate     string   `json:"sessionDate"`
-	Period          string   `json:"period"`
-	Topic           string   `json:"topic"`
-	Status          string   `json:"status"`
-	SupervisorScore *float64 `json:"supervisorScore"`
-	AgentScore      *float64 `json:"agentScore"`
-	EvaluationCount int      `json:"evaluationCount"`
+	ID          uint64 `json:"id"`
+	SessionDate string `json:"sessionDate"`
+	Period      string `json:"period"`
+	Topic       string `json:"topic"`
+	Status      string `json:"status"`
+	// SupervisorEvaluated 表示该场次是否存在督导评价行；与 status（AI 已评析）解耦。
+	SupervisorEvaluated bool     `json:"supervisorEvaluated"`
+	SupervisorScore     *float64 `json:"supervisorScore"`
+	AgentScore          *float64 `json:"agentScore"`
+	EvaluationCount     int      `json:"evaluationCount"`
 }
 
-// PendingSessionItem 是督导工作台「待评估授课记录」行（手动新增或尚未评价的授课记录）。
-// 新建授课记录 status=scheduled，评价提交后转为 evaluated 并从本列表消失。
+// PendingSessionItem 是督导工作台「待 AI 评析授课记录」行（尚无 agent 评价行的授课记录）。
+// 与督导是否已评无关：督导提交观察后，只要 AI 尚未评析，仍会出现在本列表。
 type PendingSessionItem struct {
 	SessionID   uint64 `json:"sessionId"`
 	CourseID    uint64 `json:"courseId"`
@@ -158,11 +160,13 @@ type EvidenceQuote struct {
 // SessionEvaluation 是 GET /sessions/:id/evaluation 的响应：当堂课评估页聚合。
 // 阶段二将追加 recording / transcript 字段，阶段一保持 null。
 type SessionEvaluation struct {
-	Session          SessionDetail   `json:"session"`
-	SupervisorScores []EvaluationDTO `json:"supervisorScores"`
-	AgentScore       *EvaluationDTO  `json:"agentScore"`
-	Recording        *RecordingDTO   `json:"recording"`
-	Transcript       *TranscriptDTO  `json:"transcript"`
+	Session SessionDetail `json:"session"`
+	// SupervisorEvaluated 表示是否存在督导评价行（len(SupervisorScores)>0 的投影）。
+	SupervisorEvaluated bool            `json:"supervisorEvaluated"`
+	SupervisorScores    []EvaluationDTO `json:"supervisorScores"`
+	AgentScore          *EvaluationDTO  `json:"agentScore"`
+	Recording           *RecordingDTO   `json:"recording"`
+	Transcript          *TranscriptDTO  `json:"transcript"`
 }
 
 type RecordingDTO struct {

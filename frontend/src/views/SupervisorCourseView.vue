@@ -6,7 +6,7 @@ import EmptyState from '@/components/common/EmptyState.vue'
 import { fetchCourseDetailApi, fetchCourseEvaluationSummaryApi } from '@/api/course'
 import { fetchCourseSessionsApi, uploadSessionRecordingApi } from '@/api/session'
 import { useSemester } from '@/composables/useSemester'
-import { getCourseStatusMeta, getSessionStatusMeta, PAGE_SIZES } from '@/constants'
+import { getCourseStatusMeta, PAGE_SIZES } from '@/constants'
 import { scoreTone, scoreToneColor } from '@/utils/format'
 import type { Course, CourseEvaluationSummary } from '@/types/course'
 import type { SessionListItem } from '@/types/evaluation'
@@ -15,7 +15,7 @@ import type { SessionListItem } from '@/types/evaluation'
  * 督导「课程评分与授课记录」页（课程列表 → 具体课程）。
  * 三段式：
  *   1. 抬头：课程名与 AI 评价分一行；
- *   2. 授课记录：时间轨行，未评价去评估、已评价查看记录；
+ *   2. 授课记录：时间轨行，督导未评去评估、督导已评查看/修改；
  *   3. 录音：收进每行的文本链，转写与查看在评估页完成。
  */
 const route = useRoute()
@@ -117,9 +117,26 @@ function asSession(row: unknown): SessionListItem {
   return row as SessionListItem
 }
 
-/** 未评价 → 「去评估」；已评价 → 「查看/修改评估」（评估页可覆盖提交） */
+/**
+ * 督导课程页状态徽章：以 supervisorEvaluated 判断督导是否已评，
+ * status 只用于区分「AI 已评 / 已录音 / 待录音」。data-status 仍沿用原样式类。
+ */
+function sessionBadge(row: SessionListItem): { label: string; dataStatus: string } {
+  if (row.supervisorEvaluated === true) {
+    return { label: '督导已评', dataStatus: 'evaluated' }
+  }
+  if (row.status === 'evaluated') {
+    return { label: '待督导评估', dataStatus: 'recorded' }
+  }
+  if (row.status === 'recorded') {
+    return { label: '待 AI 评析', dataStatus: 'recorded' }
+  }
+  return { label: '待录音', dataStatus: 'scheduled' }
+}
+
+/** 督导已评 → 「查看/修改评估」；否则「去评估」（评估页可覆盖提交） */
 function sessionActionLabel(row: SessionListItem): string {
-  return row.status === 'evaluated' ? '查看/修改评估' : '去评估'
+  return row.supervisorEvaluated === true ? '查看/修改评估' : '去评估'
 }
 
 async function handleRecording(row: SessionListItem, file: File): Promise<boolean> {
@@ -234,9 +251,12 @@ onMounted(() => reload())
                   <span>已评 {{ row.evaluationCount }} 次</span>
                 </p>
               </div>
-              <span class="course-sessions__status" :data-status="row.status">
+              <span
+                class="course-sessions__status"
+                :data-status="sessionBadge(asSession(row)).dataStatus"
+              >
                 <i class="course-sessions__dot" aria-hidden="true" />
-                {{ getSessionStatusMeta(row.status).label }}
+                {{ sessionBadge(asSession(row)).label }}
               </span>
               <button type="button" class="course-sessions__link" @click="goSession(asSession(row))">
                 {{ sessionActionLabel(asSession(row)) }}

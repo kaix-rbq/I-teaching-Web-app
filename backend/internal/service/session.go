@@ -257,6 +257,8 @@ func (s *sessionService) Evaluation(
 			out.AgentScore = &item
 		}
 	}
+	// 督导已评 = 存在督导评价行；不复用 status（status 只表示 AI 已评析）。
+	out.SupervisorEvaluated = len(out.SupervisorScores) > 0
 	return &out, nil
 }
 
