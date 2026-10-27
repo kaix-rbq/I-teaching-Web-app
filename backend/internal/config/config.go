@@ -22,6 +22,7 @@ type Config struct {
 	Evaluation    EvaluationConfig    `mapstructure:"evaluation"`
 	Transcription TranscriptionConfig `mapstructure:"transcription"`
 	Agent         AgentConfig         `mapstructure:"agent"`
+	Embedding     EmbeddingConfig     `mapstructure:"embedding"`
 	Demo          DemoConfig          `mapstructure:"demo"`
 }
 
@@ -158,6 +159,55 @@ func (a AgentConfig) MaskedAPIKey() string {
 	return a.APIKey[:6] + "***" + a.APIKey[len(a.APIKey)-4:]
 }
 
+// EmbeddingConfig 描述知识库向量化参数（RAG 方案 §5）。
+//
+// 安全约定：与 Agent 共用同一套百炼凭据（AIJIAOXUE_AGENT_API_KEY /
+// AIJIAOXUE_AGENT_WORKSPACE_ID），本结构体不保存 Key，避免出现第二份凭据。
+// 模型一旦选定不得随意更换：向量空间不同，历史 chunk 必须 rebuild。
+type EmbeddingConfig struct {
+	Enabled   bool    `mapstructure:"enabled"`
+	Model     string  `mapstructure:"model"`
+	Dim       int     `mapstructure:"dim"`
+	BatchSize int     `mapstructure:"batchSize"`
+	TopK      int     `mapstructure:"topK"`
+	MinScore  float64 `mapstructure:"minScore"`
+}
+
+// EffectiveDim 返回向量维度，缺省 1024。
+func (e EmbeddingConfig) EffectiveDim() int {
+	if e.Dim <= 0 {
+		return 1024
+	}
+	return e.Dim
+}
+
+// EffectiveBatchSize 返回批量大小，缺省 20，且不超过 qwen3.7-text-embedding-flash 的上限 20。
+func (e EmbeddingConfig) EffectiveBatchSize() int {
+	if e.BatchSize <= 0 {
+		return 20
+	}
+	if e.BatchSize > 20 {
+		return 20
+	}
+	return e.BatchSize
+}
+
+// EffectiveTopK 返回检索 topK，缺省 8。
+func (e EmbeddingConfig) EffectiveTopK() int {
+	if e.TopK <= 0 {
+		return 8
+	}
+	return e.TopK
+}
+
+// EffectiveMinScore 返回相似度阈值，缺省 0.35。
+func (e EmbeddingConfig) EffectiveMinScore() float64 {
+	if e.MinScore <= 0 || e.MinScore > 1 {
+		return 0.35
+	}
+	return e.MinScore
+}
+
 // DemoConfig 描述演示模式开关（B6/N7）。仅本地/dev 环境开启，生产必须关闭。
 type DemoConfig struct {
 	Enabled bool `mapstructure:"enabled"`
@@ -248,6 +298,12 @@ func Load(path string) (*Config, error) {
 	v.SetDefault("agent.timeout", "3m")
 	v.SetDefault("agent.maxConcurrency", 2)
 	v.SetDefault("agent.promptVersion", "v1")
+	v.SetDefault("embedding.enabled", false)
+	v.SetDefault("embedding.model", "")
+	v.SetDefault("embedding.dim", 1024)
+	v.SetDefault("embedding.batchSize", 20)
+	v.SetDefault("embedding.topK", 8)
+	v.SetDefault("embedding.minScore", 0.35)
 	v.SetDefault("demo.enabled", false)
 	v.SetDefault("cors.allowAnyOrigin", false)
 
@@ -277,6 +333,9 @@ func Load(path string) (*Config, error) {
 	_ = v.BindEnv("agent.workspaceId", "AIJIAOXUE_AGENT_WORKSPACE_ID")
 	_ = v.BindEnv("agent.llmModel", "AIJIAOXUE_AGENT_LLM_MODEL")
 	_ = v.BindEnv("agent.baseUrl", "AIJIAOXUE_AGENT_BASE_URL")
+	_ = v.BindEnv("embedding.model", "AIJIAOXUE_EMBEDDING_MODEL")
+	_ = v.BindEnv("embedding.dim", "AIJIAOXUE_EMBEDDING_DIM")
+	_ = v.BindEnv("embedding.batchSize", "AIJIAOXUE_EMBEDDING_BATCH_SIZE")
 	_ = v.BindEnv("demo.enabled", "AIJIAOXUE_DEMO_ENABLED")
 
 	if err := v.ReadInConfig(); err != nil {
@@ -323,6 +382,21 @@ func Load(path string) (*Config, error) {
 		}
 		if strings.TrimSpace(cfg.Agent.LLMModel) == "" {
 			return nil, fmt.Errorf("config: 已启用 agent，但 agent.llmModel 未配置")
+		}
+	}
+	// 知识库向量化与 Agent 共用凭据：启用时必须能拿到 Key 与模型，避免摄取到一半才失败。
+	if cfg.Embedding.Enabled {
+		if strings.TrimSpace(cfg.Agent.APIKey) == "" {
+			return nil, fmt.Errorf("config: 已启用 embedding，但环境变量 AIJIAOXUE_AGENT_API_KEY 为空")
+		}
+		if strings.TrimSpace(cfg.Embedding.Model) == "" {
+			return nil, fmt.Errorf("config: 已启用 embedding，但 embedding.model 未配置")
+		}
+		if cfg.Embedding.Dim < 1 || cfg.Embedding.Dim > 8192 {
+			return nil, fmt.Errorf("config: embedding.dim=%d 非法（应为 1–8192）", cfg.Embedding.Dim)
+		}
+		if cfg.Embedding.BatchSize < 1 || cfg.Embedding.BatchSize > 20 {
+			return nil, fmt.Errorf("config: embedding.batchSize=%d 非法（qwen3.7-text-embedding-flash 上限为 20）", cfg.Embedding.BatchSize)
 		}
 	}
 	if cfg.CORS.AllowAnyOrigin {
