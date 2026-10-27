@@ -49,6 +49,36 @@ export interface AgentChatPayload {
   history?: AgentChatHistoryItem[]
 }
 
+export type AiReportStatus = 'pending' | 'running' | 'done' | 'failed'
+
+/** GET /teachers/:id/ai-report 的 report 字段（S2 教师级报告） */
+export interface AiReport {
+  teacherId: number
+  semester: string
+  courseId: number
+  summary: string
+  directions: string[]
+  suggestions: string[]
+  highlights: string
+  trendComment: string
+  confidence: number | null
+  evaluatedCount: number
+  sessionCount: number
+  sourceSessionIds: number[]
+  modelVersion: string
+  promptVersion: string
+  status: AiReportStatus
+  errorMessage: string
+  generatedAt: string
+}
+
+/** GET /teachers/:id/ai-report 响应；无报告时 report=null，status=pending */
+export interface AiReportEnvelope {
+  status: AiReportStatus
+  report: AiReport | null
+  errorMessage: string
+}
+
 /** 流式对话回调；真实实现为 SSE */
 export interface AgentChatHandlers {
   onDelta: (chunk: string) => void

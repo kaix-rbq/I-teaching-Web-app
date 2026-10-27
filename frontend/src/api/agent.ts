@@ -1,13 +1,18 @@
 /**
  * 智能体接口层（Sprint 3 阶段③）。
  *
- * S3 流式对话已接真实 SSE；提优建议/趋势仍由 `src/mocks/teacherImprove.ts`
- * 驱动，待 P6 再切真数据（函数签名保持不变）。
+ * 提优建议、分数趋势、教师级 AI 报告、S3 流式对话均接真实后端；
+ * 不再依赖前端演示数据。
  */
 import { TOKEN_KEY } from '@/constants'
-import type { AgentChatHandlers, AgentChatPayload, AgentSuggestion } from '@/types/agent'
+import { request } from './http'
+import type {
+  AgentChatHandlers,
+  AgentChatPayload,
+  AgentSuggestion,
+  AiReportEnvelope
+} from '@/types/agent'
 import type { ScoreTrendSeries } from '@/types/teacher'
-import { mockAgentSuggestions, mockScoreTrend } from '@/mocks/teacherImprove'
 
 export interface ScoreTrendQuery {
   teacherId?: number | string
@@ -16,17 +21,47 @@ export interface ScoreTrendQuery {
   dimension?: string
 }
 
-/** 智能体提优建议（按时间倒序）。真实接口待后端就绪。 */
+/** 课程 AI 提优建议（按课次倒序，v1 数组）。 */
 export function fetchAgentSuggestionsApi(
-  courseId: number | string
+  courseId: number | string,
+  semester?: string
 ): Promise<AgentSuggestion[]> {
-  return Promise.resolve(mockAgentSuggestions(Number(courseId)))
+  return request<AgentSuggestion[]>({
+    url: `/courses/${courseId}/agent-suggestions`,
+    method: 'get',
+    params: semester ? { semester } : undefined
+  })
 }
 
-/** 各维度历史趋势。真实接口 `GET /teachers/:id/score-trend` 待后端就绪。 */
+/** 教师综合分 + 五维趋势。teacherId 必填。 */
 export function fetchScoreTrendApi(query: ScoreTrendQuery = {}): Promise<ScoreTrendSeries[]> {
-  void query
-  return Promise.resolve(mockScoreTrend())
+  const { teacherId, courseId, semester, dimension } = query
+  if (teacherId === undefined || teacherId === null || teacherId === '') {
+    return Promise.reject(new Error('缺少教师 ID'))
+  }
+  const params: Record<string, string | number> = {}
+  if (semester) params.semester = semester
+  if (courseId !== undefined && courseId !== null && courseId !== '' && Number(courseId) > 0) {
+    params.courseId = Number(courseId)
+  }
+  if (dimension) params.dimension = dimension
+  return request<ScoreTrendSeries[]>({
+    url: `/teachers/${teacherId}/score-trend`,
+    method: 'get',
+    params
+  })
+}
+
+/** 教师级 AI 综合报告（S2）。无报告时 report=null、status=pending。 */
+export function fetchTeacherAiReportApi(
+  teacherId: number | string,
+  params: { semester?: string } = {}
+): Promise<AiReportEnvelope> {
+  return request<AiReportEnvelope>({
+    url: `/teachers/${teacherId}/ai-report`,
+    method: 'get',
+    params: params.semester ? { semester: params.semester } : undefined
+  })
 }
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api/v1'
