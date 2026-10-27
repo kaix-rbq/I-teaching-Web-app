@@ -11,16 +11,18 @@
 > | 阶段 | 主题 | 状态 |
 > |------|------|------|
 > | **阶段① （Sprint 2.1）** | 评价闭环：授课记录 · 督导评分 · 结构化评语 · 三级聚合 · 主任教师画像 · 教师质量档案/提优页 | **已交付** —— 路由、页面、组件与接口层均已落地（`frontend/src/router/index.ts`、`frontend/src/views/`、`frontend/src/api/session.ts`、`frontend/src/api/teacher.ts`） |
-> | **阶段② （Sprint 2.2）** | 智能体接入：课堂录音 · 异步转写 · AI 单源评分 · 督导页「智能体参考」面板 | **前端已接入真实接口，后端 S1 已实现** —— 录音上传/播放、转写三态、`agentScore` + `evidence` 面板均可用；`agentScore` 由 `evaluations` 的 agent 行提供，S1 已在转写完成后真实调用模型（真实 Key 待配置，端到端待验收） |
-> | **阶段③ （Sprint 3）** | 帮教师：智能体提优建议 · 对话（SSE） · 趋势视图 · 教师级 AI 报告 · 申诉复核 · 质量报告导出 | **智能体部分实施中** —— 建议/趋势/对话/教师级报告后端契约已冻结（`backend_AGENTS.md` §8.15），前端仍用 `frontend/src/mocks/teacherImprove.ts` 演示数据；申诉复核、报告导出未实现 |
+> | **阶段② （Sprint 2.2）** | 智能体接入：课堂录音 · 异步转写 · AI 单源评分 · 督导页「智能体参考」面板 | **已完成** —— 录音上传/播放、转写三态、`agentScore` + `evidence` 面板均可用；S1 已在转写完成后真实调用模型，真实录音端到端已由用户验证 |
+> | **阶段③ （Sprint 3）** | 帮教师：智能体提优建议 · 对话（SSE） · 趋势视图 · 教师级 AI 报告 · 申诉复核 · 质量报告导出 | **智能体部分已完成** —— 建议/趋势/对话/教师级报告已接真实后端，`src/mocks/teacherImprove.ts` 已删除；申诉复核、报告导出未实现 |
 >
 > **本手册覆盖全部三个 Sprint，是前端「技术栈 / 目录 / 路由 / 页面规格 / 组件 / 设计令牌 / 编码规范 / DoD」的唯一事实源。** Sprint 1 的基础平台已交付，Sprint 2/3 的功能与设计事实源是
 > **[`Sprint2-3-教学评价与提优-开发计划.md`](./Sprint2-3-教学评价与提优-开发计划.md)**（下称「开发计划」）。
 > **接口契约以后端 [`backend_AGENTS.md`](./backend_AGENTS.md) §8 为准**；文档冲突时以开发计划与后端契约文档为准（契约先行：先改文档，再改代码）。
 >
-> ⚠️ **效力声明（2026-10-16 重构）**：本手册的技术栈、目录、设计令牌继续有效；但路由页面（§6/§7：草稿箱、督导五维表单、教师落点、督导队列）与展示口径已被 [`2026-10-16-教学提优重构开发计划.md`](./2026-10-16-教学提优重构开发计划.md) §6–§7 取代——教师工作台改造 `/me/quality`（不新建路由）、督导队列改造 `DashboardView`、评估页督导态只留评语表单、草稿箱入口删除。重构 PR 必须同步更新 §6/§7，冲突处以 10.16 计划为准。
+> ⚠️ **效力声明（2026-10-16 重构，2026-10-27 D3–D11 修订）**：本手册的技术栈、分层、目录、设计令牌继续有效。路由页面与展示口径以 [`2026-10-16-教学提优重构开发计划.md`](./2026-10-16-教学提优重构开发计划.md) §6–§7 为基础；2026-10-27 起：督导五维评分恢复为主入口（双轨展示、单纯评语仅兼容）、教师工作台保留 `/workbench`、教师在本人单场页可上传/回放录音、AI 综合总结改为固定摘要 + 四标签页。冲突处以本手册 §7.3A / §7.10 / §7.13 最新口径为准。
 >
-> **重构已落地的前端变更（本轮）**：① 草稿箱路由 `/drafts` 与侧边栏入口删除（`EvaluationForm` 移除「保存草稿」，提交改 `PUT /sessions/:id/supervisor-observation`）；② 督导侧边栏补「听评课管理」（`/supervision`，N12）；③ 评估页督导态 `EvaluationForm` 以 `comment-only` 渲染（无五维刻度，只留评语，B8）；④ 录音区新增 `BrowserRecorder` 浏览器录音**演示占位**（禁用、不调接口，R2.4/B5）；⑤ 新增 `/teachers/:id/report` 一页纸报告打印视图（`TeacherReportView`，N9）；⑥ 顶栏新增 DEV 可见「载入演示数据」按钮（`POST /demo/seed`，B6/N7）。
+> **2026-10-28 状态补记（续作）**：P6 已完成，提优建议 / 趋势 / 教师级 AI 报告全部改真实接口，`src/mocks/teacherImprove.ts` 已删除；本轮进一步恢复督导五维评分（AI 仍为综合分唯一来源）、开放教师本人课程录音回放、单场页媒体前置、教师下课后跳转上传，以及 AI 综合总结四标签页。下列历史版本记录中的“前端仍用 mock”“暂不发请求”等描述均为历史状态，以本节及 [`Sprint开发阶段总结报告.md`](./Sprint开发阶段总结报告.md) §9 为准。当前全量 `verify.sh` 仍有既有课表夹具导致的 1 条干净库失败，详见总结报告 §9.3。
+
+> **重构已落地的前端变更（历史 + 2026-10-27 修订）**：① 草稿箱路由 `/drafts` 与侧边栏入口删除（`EvaluationForm` 移除「保存草稿」）；② 督导侧边栏补「听评课管理」（`/supervision`，N12）；③ 评估页督导态曾以 `comment-only` 渲染，**2026-10-27 D3 已恢复五维评分主入口**（见 §7.10）；④ 录音区曾新增 `BrowserRecorder` 演示占位，单场页现以真实录音上传/回放为主；⑤ 新增 `/teachers/:id/report` 一页纸报告打印视图（`TeacherReportView`，N9）；⑥ 顶栏新增 DEV 可见「载入演示数据」按钮（`POST /demo/seed`，B6/N7）。
 >
 > **重构已落地的前端变更（提优闭环批次）**：⑦ 新增 `/improvements`（教师自评 / 督导确认关闭，含关联反思只读弹窗）、`/reflections`（教师反思 CRUD）、`/notifications`（站内信）三页；⑧ 顶栏新增站内信铃铛 + 未读红点（`el-badge`，进详情自动已读 → 红点收敛）；⑨ 督导侧边栏新增「改进清单」，教师侧边栏新增「改进清单 / 教学反思」；⑩ 督导工作台「草稿箱」区块替换为**抽样复评队列**（`GET /supervision/ai-tasks?pending=1`，B2/T1）；⑪ 教师质量档案 `/me/quality` 追加「待改进清单」与「AI 观察与待改进」区块。动画统一走 `styles/base.scss` 的 `.anim-rise`（带 `--stagger` 级联）与 `.anim-grow-x`，`prefers-reduced-motion` 下禁用。
 
@@ -33,7 +35,7 @@
 > 1. **登录页 `LoginView`**：品牌雷达五轴标注维度名称；移除雷达下方「教研室主任·director / 教师·teacher / 教学督导·supervisor」角色图例；登录后默认落点由 `defaultRouteName(role)` 决定（教师 → `/me/quality`，其余 → `/dashboard`）。
 > 2. **教师端**：**删除「质量驾驶舱」**（与质量档案重复），`/me/quality` 为登录后首页；侧边栏为「我的质量档案 / 我的课程 / 个人中心」。`/me/quality` 重排为**纵向叙事**「AI 评价总览（单环仪表 + 样本口径 + 五维评分）→ 我的课程评分明细 → 授课快照 → 待改进清单 → AI 观察与待改进」；删除「全部评价流」「AI 提优建议摘要」，并删除无真实接口的「提优分析」示例卡。
 > 3. **提优页 `CourseImproveView`**：重排为「课程信息置顶 → 五维双源横向柱条（增长动画）+ 综合雷达 → 督导评语流 → 智能体提优建议 → 分数趋势 → 课程资源置底」，删除与质量档案重复的罗盘/样本/教师级五维区块。
-> 4. **督导端**：「质量驾驶舱」改 **「工作台」**：删除四个统计卡与覆盖率图表；保留 **待评课队列**（今日/本周/本月/**未评**按钮切换）；**评估入口按日期闸门**——`plannedDate <= 今天` 且未评估显示「去评估」（无授课记录先建档），未来课次仅预览不开放评估；「未评」列出已过日期未评课的记录便于补录；工作台右上角新增 **新增授课记录**（替代教务录入），并新增 **待评估授课记录** 区块；新增 **草稿箱**（最近三次 + 更多>>）与 `/drafts` 页面（按课程名查询、编辑/提交/删除）；评估页新增 **保存草稿**。侧边栏精简为「工作台 / 草稿箱 / 个人中心」，删除「全校课程库」「课堂评估」等入口。
+> 4. **督导端**：「质量驾驶舱」改 **「工作台」**：删除四个统计卡与覆盖率图表；保留 **待评课队列**（今日/本周/本月/**未评**按钮切换）；**评估入口按日期闸门**——`plannedDate <= 今天` 且未评估显示「去评估」；无教师授课记录时显示「待教师建档」，不自动创建，未来课次仅预览不开放评估；「未评」列出已过日期未评课的记录便于补录；并新增 **待评估授课记录** 区块；新增 **草稿箱**（最近三次 + 更多>>）与 `/drafts` 页面（按课程名查询、编辑/提交/删除）；评估页新增 **保存草稿**。侧边栏精简为「工作台 / 草稿箱 / 个人中心」，删除「全校课程库」「课堂评估」等入口。
 > 5. **契约同步**：新增接口 `GET/PUT /sessions/:id/draft`、`GET /drafts`、`DELETE /drafts/:id`、`POST /drafts/:id/submit`；`GET /dashboard` 督导 DTO 改为 `recentPlans + recentDrafts`；`PlanItem` 新增 `sessionId`；seed 扩充为多教师/多课程/多记录且 AI 评分覆盖五维。
 >
 > 详细页面规格见本文件 §7，设计令牌与视觉规范见 §9；接口契约见 [`backend_AGENTS.md`](./backend_AGENTS.md) §8。
@@ -48,7 +50,7 @@
 > 2. **待评课队列处理逻辑收敛**：已评估（`evaluated`）的听评课安排**一律从工作台待评课队列清除**（今日/本周/本月/未评四个分档统一过滤），过去未评估课次入口保持开放（「未评」分档 + 日期闸门）；评估提交后授课记录 `status` 置为 `evaluated`，从「待评估授课记录」移除，复盘走课程列表。
 > 3. **转写卡片长度控制**：`TranscriptViewer` 完成态默认只预览部分内容（前 3 条 / 前 220 字），超出显示「展开全文」；点击打开**居中悬浮弹窗**（正文可滚动）查看完整转写，解决督导页内容过长的问题。
 > 4. **教师「授课快照」跳转修正**：原「查看课程提优」与「去提优」同跳 `/courses/:id/improve`；现改为 **「查看详细记录」→ `/sessions/:id/evaluation`**，展示该次课的督导评分（只读）与 AI 智能体评价，并提供当堂课脱敏转写入口。「我的课程评分明细」栏保留课程列表与「去提优」按钮。
-> 5. **契约同步**：`GET /courses` 新增 `mine` 查询参数（仅 supervisor 生效，其他角色忽略）；新增路由 `/supervision/courses/:id`（name `supervisor-course`，权限 supervisor）。**音频隐私不变**：教师端仍不可回放录音，只提供转写文本。
+> 5. **契约同步**：`GET /courses` 新增 `mine` 查询参数（仅 supervisor 生效，其他角色忽略）；新增路由 `/supervision/courses/:id`（name `supervisor-course`，权限 supervisor）。**音频隐私（2026-10-27 D9 修订）**：教师可回放本人课程录音，但仍不能回放其他教师录音；转写文本继续提供。
 >
 > 详细页面规格见 §7.5A、§7.10；接口契约见 [`backend_AGENTS.md`](./backend_AGENTS.md) §8.6 / §8.8。
 
@@ -61,8 +63,8 @@
 | 进阶 | 主题 | 说明 | 迭代 |
 |------|------|------|------|
 | 进阶 1 | **查课程** | 全量课程信息透明可查 | Sprint 1（已交付） |
-| 进阶 2 | **看课堂** | AI 听评课与课堂质量评估（面向督导，兼顾主任/教师查看） | Sprint 2（阶段① 已交付；阶段② 录音/转写/双源参考已接入，S1 已实现，真实 Key 待配置） |
-| 进阶 3 | **帮教师** | 教学改进建议、趋势与对话（面向教师） | Sprint 3（智能体部分实施中；建议/趋势/对话/AI 报告契约已冻结，前端暂为演示数据） |
+| 进阶 2 | **看课堂** | AI 听评课与课堂质量评估（面向督导，兼顾主任/教师查看） | Sprint 2（阶段① 已交付；阶段② 录音/转写/双源参考已接入，S1 已实现并完成真实端到端验证） |
+| 进阶 3 | **帮教师** | 教学改进建议、趋势与对话（面向教师） | Sprint 3（智能体部分已完成真实接口接入；申诉复核、报告导出待排期） |
 
 **核心架构：评分源可插拔。** `supervisor`（督导）与 `agent`（智能体）只是 `evaluations.evaluator_type` 的两个取值，
 向同一张表写同样的结构，聚合层只认该表、不关心分数从哪来。这决定了前端的两个基本事实：
@@ -112,8 +114,8 @@
 **它同时服务两个用户**：督导（录入评分）与主任/教师（查看评分）——**主任端与教师端的数字必须逐位一致**，由后端单一聚合函数保证，前端不得各自造口径。
 
 > **实现状态（以代码为准）**：阶段① 全部页面与接口层已落地；阶段② 的课堂录音上传/播放与异步转写三态、`agentScore` + `evidence` 面板均已接真实接口（`frontend/src/views/SessionEvaluationView.vue:177-206,234`；`frontend/src/api/session.ts:58-69`；`backend/internal/router/router.go:84,102-103,120`）。
-> **后端 S1 单次课 AI 评析已实现**（`3d4a6b9`，2026-10-17）：转写 `done` 后异步调用模型并写 `evaluations` 的 agent 行；本机尚未配置真实 Key，端到端待验收。
-> 仍为**演示数据**的只有阶段③的提优建议 / 趋势 / 对话（`frontend/src/api/agent.ts` → `frontend/src/mocks/teacherImprove.ts`），其后端契约见 `backend_AGENTS.md` §8.15。
+> **后端 S1 单次课 AI 评析已实现**（`3d4a6b9`，2026-10-17）：转写 `done` 后异步调用模型并写 `evaluations` 的 agent 行；真实录音端到端链路已由用户验证。
+> **阶段③ 智能体接口已接入真实后端**：提优建议 / 趋势 / 教师级 AI 报告 / SSE 对话均由 `frontend/src/api/agent.ts` 发真实请求，`src/mocks/teacherImprove.ts` 已删除；申诉复核、报告导出仍待排期。
 
 **用户故事**：
 
@@ -232,15 +234,15 @@
 | 删除课程资源 | 课程详情·资源 Tab | ✗ | ✓（仅本人课程） | ✗ |
 | 下载课程资源 | 课程详情·资源 Tab | ✓ | ✓ | ✓ |
 | 按教师/教研室筛选 | 课程列表筛选栏 | ✓ | ✗（自动限定本人） | ✓ |
-| 创建授课记录 | 工作台「新增授课记录」/ 待评课队列建档 | ✗ | ✗ | ✓ |
+| 创建授课记录 | 教师工作台「下课」成功后创建 | ✗ | **✓（仅本人课程）** | ✗（督导只评价教师已建记录） |
 | 提交/覆盖督导评分 | 当堂课评估页 | ✗ | ✗ | ✓ |
 | 查看督导评语 | 教师画像 / 质量档案 / 提优页 | 本室 | **仅自己** | ✓ |
-| 上传课堂录音 / 触发转写 | 当堂课评估页 · 督导课程综合评分页（阶段②，已实现） | ✗ | ✗ | ✓ |
-| 播放课堂音频 | 当堂课评估页 / 督导课程综合评分页（阶段②，已实现） | ✗ | **✗（不可听）** | ✓ |
+| 上传课堂录音 / 触发转写 | 当堂课评估页 · 督导课程综合评分页（阶段②，已实现） | ✗ | **✓（仅本人课程）** | ✓ |
+| 播放课堂音频 | 当堂课评估页 / 督导课程综合评分页（阶段②，已实现） | ✗ | **✓（仅本人课程；不可听他人录音）** | ✓ |
 | 查看转写文本 | 当堂课评估页 / 教师质量档案→授课记录（阶段②，已实现） | ✗ | 本人课程（已脱敏，用于改进） | ✓ |
 
 > 🔴 **教师绝不能看到同事的评分与评语。** 教师端可见范围严格限定为**仅本人**——这是组织敏感信息，越权等于事故。
-> **音频对教师不可见**：音频里的学生人声与教师人声不可分割，教师端只开放**已脱敏的转写文本**。
+> **录音回放（D9 / B3）**：教师可回放**本人课程**的课堂录音（即使录音由督导代传），但不能回放其他教师录音；主任角色保持原行为、不新增录音权限。教师端同时提供已脱敏转写文本。
 
 **权限实现三原则**：
 1. **路由级**：路由 `meta: { roles: ['director'] }` + 全局前置守卫 `router.beforeEach` 校验，未授权跳转 403 页；
@@ -326,7 +328,7 @@ frontend/                       # 包名 aijiaoxue-web
     │   │   ├── ScheduleTable.vue
     │   │   └── EvaluationQueue.vue     # 督导待评课队列
     │   ├── evaluation/
-    │   │   ├── ScoreRadar.vue           # 五维雷达（单源：AI 评价 / 评分表单），tone 控制语义色
+    │   │   ├── ScoreRadar.vue           # 五维雷达（AI 主序列 + 可选督导辅助序列），tone 控制语义色
     │   │   ├── ScoreDimensionsCard.vue  # 五维评分卡（AI 雷达 + 维度条，雷达左/读数右）
     │   │   ├── ScoreHeatmap.vue         # 教师 × 五维质量热力
     │   │   ├── AiScoreHero.vue          # AI 评价总览横带（单环仪表 + 样本口径读数）
@@ -334,6 +336,7 @@ frontend/                       # 包名 aijiaoxue-web
     │   │   ├── AnchorScale.vue          # 锚点刻度条（评分表单控件）
     │   │   ├── EvaluationForm.vue       # 督导评分表单
     │   │   ├── EvaluationCompare.vue    # 督导 vs 智能体对比
+    │   │   ├── TeacherAiReportCard.vue  # 教师级 AI 综合总结（固定摘要 + 四标签页）
     │   │   ├── EvaluationTimeline.vue   # 竖线评价流
     │   │   ├── CommentPanel.vue         # 结构化评语展示
     │   │   ├── TranscriptViewer.vue     # 转写文本（三态）
@@ -479,14 +482,14 @@ frontend/                       # 包名 aijiaoxue-web
 
 **② 督导**
 ```
-/dashboard  工作台：待评课队列（今日/本周/本月/未评）＋ 草稿箱（最近 3 份）＋ 待评估授课记录 ＋ 新增授课记录
+/dashboard  工作台：待评课队列（今日/本周/本月/未评）＋ 草稿箱（最近 3 份）＋ 待评估授课记录
    ├─▶ /drafts  草稿箱（按课程名查询 · 编辑/提交/删除）
    ├─▶ /courses  课程列表（mine=1，仅本人负责评估的课程）
    │      └─▶ /supervision/courses/:id  课程综合评分（历史授课记录「去评估 / 查看·修改评估」+ 上传录音）
    └─▶ /sessions/:id/evaluation  当堂课质量评估页
-         ├─ AudioPlayer 课堂录音（仅督导）
+         ├─ AudioPlayer 课堂录音（督导 / 授课教师本人）
          ├─ TranscriptViewer 转写文本（三态轮询 + 失败重试）
-         ├─ AnchorScale 五维锚点评分 + 结构化评语 + 保存草稿
+         ├─ 双轨雷达 / 条 + AnchorScale 五维必填 + 结构化评语
          ├─ EvaluationCompare 智能体参考（标「AI 参考」）
          └─ 提交（PUT 幂等覆盖）
 ```
@@ -560,14 +563,21 @@ frontend/                       # 包名 aijiaoxue-web
 | 区块 | director | teacher | supervisor |
 |------|----------|---------|------------|
 | 统计卡（StatCard） | 4 张：本室课程数 / 本室教师数 / 本学期开课班次 / 课程资源总数 | —（教师端不存在工作台，守卫重定向 `/me/quality`） | **无统计卡**（后端 `SupervisorDashboard` 已移除课程数/覆盖率等字段） |
-| 主内容（左 2/3） | **本室质量热力** `ScoreHeatmap`（教师 × 五维矩阵，点行下钻教师画像） | — | **待评课队列** `EvaluationQueue`（今日/本周/本月/**未评**四档切换；日期闸门；右上角「课程列表」+「新增授课记录」） |
+| 主内容（左 2/3） | **本室质量热力** `ScoreHeatmap`（教师 × 五维矩阵，点行下钻教师画像） | — | **待评课队列** `EvaluationQueue`（今日/本周/本月/**未评**四档切换；日期闸门；右上角「课程列表」；无教师授课记录时显示「待教师建档」，不自动建课） |
 | 侧内容（右 1/3） | **重点关注**（由 `GET /teacher-scores` 单次响应派生：维度均分最低 + 样本不足/暂无评价人数）＋ **快捷操作**（新增课程 / 进入课程库 / 进入教师画像） | — | **草稿箱**（`recentDrafts` 最近 3 份 + 「更多>>」跳 `/drafts`） |
 | 整宽区块 | — | — | **待评估授课记录**表（`pendingSessions`：日期/节次/课程/教师/主题/状态 + 「去评估」） |
 
 > 数据源：`GET /api/v1/dashboard` 按角色返回三种 DTO，由 `frontend/src/api/dashboard.ts` 收敛为同一 `DashboardData` 形状；主任工作台额外拉 `GET /teacher-scores?pageSize=100` 派生质量热力与重点关注（`frontend/src/views/DashboardView.vue`）。
 > **督导工作台 DTO 只有 `recentPlans` + `recentDrafts` + `pendingSessions`**（`backend/internal/dto/dashboard.go:26-30`），**不再有 4 张统计卡、`CoverageCard` 或 `byDepartment`**；覆盖率仍由 `GET /supervision/coverage` 单独提供。
-> **待评课队列日期闸门**：`plannedDate <= 今天` 且 `evaluated=false` 才显示「去评估」（无授课记录先 `POST /sessions` 建档）；未来课次仅预览；已评估记录从队列清除，复盘走「课程列表 → 课程综合评分」。
+> **待评课队列日期闸门**：`plannedDate <= 今天` 且 `evaluated=false` 才显示评估入口；**教师创建授课记录、督导评价**——无教师记录时显示「待教师建档」，前端不自动 `POST /sessions`；计划读取优先 `plan_id`，旧数据/教师工作台建课未回填时按「同课程 + 计划日期」回退关联真实场次；未来课次仅预览；已评估记录从队列清除，复盘走「课程列表 → 课程综合评分」。
 > 教师视角的旧「我的课程卡片 + 资源侧栏」已随教师端工作台一并移除（信息与 `/me/quality` 重复）。
+
+### 7.3A WorkbenchView 教师工作台（`/workbench`，仅 teacher）
+
+- 页面承载今日课程队列 / 周课表 / 课堂问题登记；点击课程进入「课堂录音演示」弹窗。
+- **D10**：点击「上课」只切换演示状态，**不创建授课记录、不跳转**。
+- **D8/D10**：点击「下课」调用 `POST /sessions`，**仅创建成功后**跳转 `/sessions/:id/evaluation`，教师可在该页直接上传音频；创建失败留在当前页并由全局拦截器提示错误。
+- `createSessionApi` 的请求字段与 AI 触发逻辑不变。
 
 ### 7.4 CourseListView 课程列表（S2.1 / S2.2 / S2.3）
 
@@ -689,31 +699,36 @@ TeacherScorePanel（summary + timeline 一次传入，纵向四段）：
 ```
 PageHeader：返回 + 课程名 + 课次信息（日期/节次/主题/班级/教师） + 状态 Tag
 场次信息条：授课教师 / 班级 / 授课日期 / 节次 / 主题 / 学期
-评分数据面板（整宽，直观可视且信息全面）：
-   ScoreRadar 五维雷达（督导评分时实时反映表单，其余角色反映所选评价）
-   五维分条：维度名 + 生效权重 + 1–5 分 + 等级；frontier 以「观测项」样式单列（不计入加权）
-   摘要：督导总分（后端 totalScore）、已评督导人数、智能体参考状态、口径版本
-布局（左 2/3 主区 + 右 1/3 参考区）：
-  主区：
-    ① EvaluationForm 督导评分表单
-       5 个维度，每维 1–5 分，以 AnchorScale 锚点刻度条选择（原生 radio，键盘可达）
-       每分档带锚点 tooltip（§7.10.1）
-       结构化评语：总体评语 / 亮点 / 待改进 / 建议（textarea）
-       「保存草稿」按钮（仅督导，v1.2）+ 提交按钮（PUT 幂等覆盖 → 成功提示 → 回填新分数）
-    ② CommentPanel 已提交评语展示（多督导时按时间列出）
-  参考区：
-    ③ 智能体参考（阶段②）—— EvaluationCompare，标注「AI 参考」；有文字评价时补「总体评语 / 亮点 / 待改进 / 改进建议」（v1.3）
-    ④ 音频与转写（阶段②）—— AudioPlayer（仅督导）+ TranscriptViewer
+课堂录音与转写（整宽置顶，位于场次信息之后、评分区之前）：
+  有录音：AudioPlayer + 转写状态 Tag + TranscriptViewer（预览 / 展开全文）
+  无录音：醒目的「上传课堂录音」入口（教师本人课程 / supervisor 可见）
+  文案：「课堂录音仅本人与教学督导可回放」
+督导态布局（左 2/3 主区 + 右 1/3 参考区），删除顶部独立「写下本节观察」面板：
+  主区「督导评分与观察」：
+    ① 双轨五维雷达：AI（紫）+ 督导评分（蓝/青）；AI 缺失但督导有分时仍渲染督导多边形
+    ② 双轨横向分数条：AI 主色、督导辅助色；明确标注「督导分不参与 AI 综合分」
+    ③ 「我的督导总分」0–100（无评分行显示「待提交」；仅有评语行显示「仅评语，无总分」）
+    ④ EvaluationForm：五维 1–5 必填 + 结构化评语（选填），提交走 supervisor-evaluation
+    ⑤ 其他督导记录折叠只读（姓名 / 五维 / 总分 / 评语摘要）
+  参考区「智能体参考」：
+    EvaluationCompare（AI 五维、总分、置信度、证据引用）+ 四段 AI 文字评价
+只读态（teacher / director）：
+  督导评分卡：逐位督导展示姓名 / 五维分 / 0–100 总分 / 评语；
+    仅评语无评分时显示「仅评语，无评分」，不得显示 0 分
+  雷达：一次叠加「AI + 当前选中督导」，并提供逐人只读列表切换对照
+  AI 评分标准与参考：AI 总分 + EvaluationCompare + AI 文字评价
 ```
 
-- **权限**：仅 `supervisor` 可写；主任（本室）、教师（本人）进入为**只读**——表单禁用、隐藏提交按钮（组件级 `v-if`，非 CSS 隐藏）；
-- **五维必填**：任何一维未选即在前端拦截并提示，后端也会返回 `40002`（HTTP **400**）；提交成功后列表/评分需即时反映；
-- **幂等覆盖**：同一督导对同一场次重复提交是**覆盖**，前端需在覆盖前给出轻量确认（"将覆盖你上次的评分"）；
-- **智能体参考位**：`agentScore` 为 `null` 时展示占位说明「阶段②接入」（`SessionEvaluationView.vue:99-101`），**不得显示 0 分或空图表**；有 `agentScore` 时由 `EvaluationCompare` 与四段文字评价（总体评语/亮点/待改进/改进建议）呈现；
+- **权限**：仅 `supervisor` 可写；主任（本室）、教师（本人）进入为**只读**——评分卡与 AI 参考只读，不渲染提交表单；
+- **五维必填**：任何一维未选即在前端拦截并提示，后端也会返回 `40002`（HTTP **400**）；提交成功后重新拉取并即时反映；
+- **幂等覆盖**：同一督导对同一场次重复提交是**覆盖**，前端需在覆盖前给出轻量确认（"将覆盖你上次的五维评分与评语"）；新 UI **不再调用** `supervisor-observation`；
+- **双轨口径**：五维为 1–5 原始分，督导总分为 0–100；不得把总分 ×20 映射到维度色阶。AI 综合分只采用 AI 数据，督导分不参与 `compositeScore` / `agentScore` / `score-trend` / 教师与课程综合雷达；
+- **多督导（D11）**：同一场次多位督导分别展示各自维度分与总分；教师端一次雷达只叠加「AI + 当前选中督导」，逐人只读列表用于切换；
+- **智能体参考位**：`agentScore` 为 `null` 时展示占位说明「本节暂无 AI 评价」，**不得显示 0 分或空图表**；有 `agentScore` 时由 `EvaluationCompare` 与四段文字评价（总体评语/亮点/待改进/改进建议）呈现；
 - `frontier` 在本页同样按「亮点标记」处理（不参与加权总分展示）；
-- 阶段②的转写区按三态渲染：`pending/running` → 进度/轮询提示；`failed` → 错误信息 + 「重试」按钮；`done` → 转写文本（含说话人）。**轮询当前为组件内联实现**：`SessionEvaluationView.vue` 的 `loadMedia()` 在 `transcript.status` 为 `pending/running` 时用 `setTimeout(..., 2500)` 递归自调用（约 L188-201），并在 `onUnmounted` 清理定时器（L348）。**禁止在组件里裸写 `setInterval`**；`useTranscriptionPolling.ts` composable **当前不存在**（提取为独立 composable 属可选重构，不是现状）；
-- **v1.3 教师复盘链路**：教师由「我的质量档案 → 授课快照 → 查看详细记录」进入本页，页面对教师呈现**督导评分（只读）+ AI 智能体评价 + 当堂课脱敏转写入口**，用于回顾授课细节；
-- **v1.3 转写卡片长度控制**：`TranscriptViewer` 在 `done` 态默认只预览前 3 条（或前 220 字），超出时显示「展开全文（共 n 条）」；点击后在**居中悬浮弹窗**（`el-dialog align-center`，正文 `max-height: 60vh; overflow-y: auto`）查看完整转写。音频仍仅督导可回放，教师端只提供转写（隐私红线见 §5.1 权限矩阵）。
+- 录音/转写区按三态渲染：`pending/running` → 进度/轮询提示；`failed` → 错误信息 + 「重试」按钮（教师本人课程可重试）；`done` → 转写文本（含说话人）。**轮询当前为组件内联实现**：`SessionEvaluationView.vue` 的 `loadMedia()` 在 `transcript.status` 为 `pending/running` 时用 `setTimeout(..., 2500)` 递归自调用，并在 `onUnmounted` 清理定时器。**禁止在组件里裸写 `setInterval`**；
+- **教师复盘链路（D8/D9/D11）**：教师由「我的质量档案 → 授课快照」或下课后跳转进入本页；可上传本人课程录音、可回放本人课程录音（即使由督导上传），但不能回放其他教师录音；单场详情只读展示督导评分，不进入 AI 综合分；
+- **转写卡片长度控制**：`TranscriptViewer` 在 `done` 态默认只预览前 3 条（或前 220 字），超出时显示「展开全文（共 n 条）」；点击后在**居中悬浮弹窗**（`el-dialog align-center`，正文 `max-height: 60vh; overflow-y: auto`）查看完整转写。隐私文案统一为「课堂录音仅本人与教学督导可回放」。
 
 #### 7.10.1 评分锚点 tooltip（强制）
 
@@ -785,7 +800,8 @@ PageHeader：「我的质量档案」+ 副标题「AI 评价 · 当前学期口�
   ⑥ AI 观察与待改进 —— 近三次课后 AI 观察 + 待改进；督导纯文字评语作为补充保留
 ```
 
-- 数据源：`GET /teachers/:id/evaluation-summary?semester=`（`id` = 当前登录用户，`fetchTeacherSummaryApi`）+ `GET /teachers/:id/evaluations?semester=&pageSize=50`（授课快照，`fetchTeacherEvaluationsApi`）（`frontend/src/views/ProfileQualityView.vue:66-91`）；
+- 数据源：`GET /teachers/:id/evaluation-summary?semester=`（`id` = 当前登录用户，`fetchTeacherSummaryApi`）+ `GET /teachers/:id/evaluations?semester=&pageSize=50`（授课快照，`fetchTeacherEvaluationsApi`）（`frontend/src/views/ProfileQualityView.vue:66-91`）；AI 综合总结另取 `GET /teachers/:id/ai-report`；
+- **AI 综合总结标签页（TeacherAiReportCard）**：固定摘要 + 置信度/样本数在头部；「亮点 / 趋势解读 / 可提优方向 / 提优建议」四个标签页（键盘方向键/Home/End 可切换，移动端标签横向滚动）；空字段显示「本次暂无该项内容」；尾部展示生成时间与模型版本；`pending/running/failed` 状态逻辑保持不变；
 - 「去提优 →」跳 `/courses/:id/improve`；**授课快照「查看详细记录 →」跳 `/sessions/:id/evaluation`**（`ProfileQualityView.vue:93-103`），展示该次课的督导评分（只读）与 AI 智能体评价，并提供当堂课脱敏转写入口；
 - 分数一律取 AI 评价（`agentScore`，AI 未评时回退后端综合分），不再展示督导分数标注；`null` 显示「暂无评价」，**不得显示 0**；
 - 主任/督导无此路由与菜单（他们走 `/teachers/:id`）。
@@ -1130,7 +1146,7 @@ interface SupervisionPlan {
   supervisorName: string;
   plannedDate: string;
   status: 'planned' | 'completed';
-  sessionId: number | null;  // 关联授课记录；null = 尚未创建，需先建档再评估（v1.2）
+  sessionId: number | null;  // 关联授课记录；null = 教师尚未创建，显示「待教师建档」，不自动建课
   evaluated: boolean;        // 关联授课记录是否已完成督导评价（决定是否暴露评估入口，v1.2）
 }
 
@@ -1400,7 +1416,7 @@ interface TeacherEvaluationTimelineItem {
 | 方法 | 路径 | 前端消费点 |
 |------|------|-----------|
 | GET | `/courses/:id/sessions?semester=&page=&pageSize=` | 课程详情「历史授课记录」/ 督导课程综合评分 |
-| POST | `/sessions` | 工作台「新增授课记录」、待评课队列建档 |
+| POST | `/sessions` | 教师工作台「下课」创建本人课程授课记录；督导只评价已建记录 |
 | GET | `/sessions/:id` | 单场次基本信息 |
 | GET | `/sessions/:id/evaluation` | 当堂课评估页聚合（场次 + 督导评分 + `agentScore`） |
 | PUT | `/sessions/:id/supervisor-evaluation` | 督导提交/覆盖评分（幂等；五维必填，缺失 `40002`） |
@@ -1412,7 +1428,7 @@ interface TeacherEvaluationTimelineItem {
 | POST | `/sessions/:id/recording` | 评估页 / 督导课程综合评分「上传录音」 |
 | GET | `/sessions/:id/transcript` | 评估页录音与转写区（三态轮询） |
 | POST | `/sessions/:id/transcript/retry` | 转写失败「重试」 |
-| GET | `/recordings/:id/stream` | `AudioPlayer`（经 `playbackUrl`，仅督导） |
+| GET | `/recordings/:id/stream` | `AudioPlayer`（经 `playbackUrl`，督导 / 授课教师本人课程） |
 
 **阶段③智能体接口：契约已冻结（`backend_AGENTS.md` §8.15），实现中；前端暂不发请求**（`api/agent.ts` 返回演示数据）：`GET /teachers/:id/score-trend`、`GET /courses/:id/agent-suggestions`、`GET /teachers/:id/ai-report`、`POST /agent/chat`（SSE）。路由注册前**请求不会发出**；就绪后仅替换 `api/agent.ts` 实现，页面与组件无需改动。
 
@@ -1539,9 +1555,9 @@ views ──调用──> api/*（唯一请求出口）
 | 任务/故事 | 前端验收要点 |
 |-----------|-------------|
 | T2.7 / S7.1 | ✅ **已实现**：音频播放器 + 转写查看器三态（pending/running/done/failed）可用；失败可重试；轮询在离开页面后停止（内联 `setTimeout` + `onUnmounted` 清理） |
-| T2.8 / S7.2 | 「智能体参考」面板标注「AI 参考」；低置信度维度有提示；`objective` 为 `null` 时显示空而非 0。**前端已接真实 `GET /sessions/:id/evaluation` 的 `agentScore`；后端 S1 已实现并真实产出 agent 行（真实 Key 待配置）** |
-| T2.9 / S7.3 | 综合分随智能体评价接入更新（后端聚合已支持双源）；`disjoint` 场景有显式提示，不静默 |
-| 隐私 | ✅ **已实现**：教师端看不到音频播放器（`playbackUrl` 为空即不渲染）；转写文本已脱敏 |
+| T2.8 / S7.2 | 「智能体参考」面板标注「AI 参考」；低置信度维度有提示；`objective` 为 `null` 时显示空而非 0。**前端已接真实 `GET /sessions/:id/evaluation` 的 `agentScore`；后端 S1 已实现并真实产出 agent 行，真实录音端到端已由用户验证** |
+| T2.9 / S7.3 | 综合分随 AI 评价接入更新（AI 单源）；`disjoint` 场景有显式提示，不静默 |
+| 隐私 | ✅ **已实现**：教师端可回放本人课程录音（由督导代传也可），不能回放其他教师录音；转写文本已脱敏 |
 
 ### 14.5 Sprint 3（帮教师）
 

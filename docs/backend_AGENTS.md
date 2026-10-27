@@ -9,9 +9,11 @@
 > 必须在**同一个 PR** 内同步更新本文件，以及 `docs/Sprint2-3-教学评价与提优-开发计划.md` 中对应的契约章节。
 > **契约先行：先改文档，再改代码。只改代码不改文档，视为未完成。**
 >
-> ⚠️ **效力声明（2026-10-16 重构）**：本手册的技术栈、分层、目录纪律继续有效；但 §2.4（消息通知 Won't）、§8.8（授课仅督导建课、督导五维必填）、§8.9（录音上传/回放仅督导）、评分双源融合口径等条款已被 [`2026-10-16-教学提优重构开发计划.md`](./2026-10-16-教学提优重构开发计划.md) §3–§6 取代。重构 PR 必须同步更新 §8，冲突处以 10.16 计划为准。
+> ⚠️ **效力声明（2026-10-16 重构，2026-10-27 D3 修订）**：本手册的技术栈、分层、目录纪律继续有效；§2.4（消息通知 Won't）与评分双源融合口径由 [`2026-10-16-教学提优重构开发计划.md`](./2026-10-16-教学提优重构开发计划.md) §3–§6 取代。督导五维评分已按 D3 恢复为主入口（AI 仍为唯一计分源），录音权限按 D8/D9 调整为「教师可回放本人课程」，均以 §8.8 / §8.9 最新表为准。
 
 ---
+
+> **2026-10-28 状态补记（续作）**：S1/S2/S3 智能体核心链路已接入；P3 教师级 AI 报告、P4 SSE 对话、P6 前端真实数据已完成；本轮进一步恢复督导五维评分（AI 仍为综合分唯一来源）、开放教师本人课程录音回放、单场页媒体前置与教师 AI 总结标签页。下列历史段落中“S2/S3 未实现”“前端使用 mock”等描述均为历史状态，以本节、[`Sprint开发阶段总结报告.md`](./Sprint开发阶段总结报告.md) §9 与 §8.15 最新契约条目为准。当前全量 `verify.sh` 仍有既有课表夹具导致的 1 条干净库失败，详见总结报告 §9.3。
 
 ## 1. 项目背景
 
@@ -51,7 +53,7 @@ Sprint 2 分两阶段推进。**任务编号与完整任务列表见 [`Sprint2-3
 
 | 能力 | 后端落点 |
 |------|---------|
-| 授课记录 | `POST /sessions`（督导建课）、`GET /courses/:id/sessions`、`GET /sessions/:id` |
+| 授课记录 | `POST /sessions`（教师工作台下课建课；督导只评价）、`GET /courses/:id/sessions`、`GET /sessions/:id` |
 | 督导评分 | `PUT /sessions/:id/supervisor-evaluation`：**五维必填**、幂等覆盖、写 `formula_version` |
 | 评分计算 | `pkg/scoring`：维度权重、单次总分、综合均值聚合（纯函数 + 表驱动单测） |
 | 评分聚合 | 教师级 / 课程级共用 `scoring.Aggregate`：`GET /teacher-scores`、`GET /teachers/:id/evaluation-summary`、`GET /courses/:id/evaluation-summary` |
@@ -72,12 +74,11 @@ Sprint 2 分两阶段推进。**任务编号与完整任务列表见 [`Sprint2-3
 | **S1 单次课 AI 评析**：五维分 / 置信度 / 证据 / 四段评语，转写 `done` 后异步入队 | `internal/agent/{client,eval,prompt}.go` · `internal/service/aitask.go` · 写 `evaluations`（`evaluator_type='agent'`） |
 | AI 任务链：幂等 / 重试 / 重启恢复 / 教师侧风险标签脱敏 | `migrations/8_ai_tasks_and_reports.up.sql` · `internal/repository/aitask.go` · `internal/service/aitask.go` · §8.10 |
 
-**剩余未实现（不得按已完成对待）**：
+**2026-10-28 更新**：S2 教师级 AI 报告、S3 提优建议/趋势/SSE 对话、知识库（V16、embedder / retriever / `cmd/kb`）均已实现；真实录音端到端已验证。当前仅保留以下交付/运维事项：
 
-- **S2 教师级 AI 报告**：仅有表 `teacher_ai_reports` 与 `TeacherAiReportRepository.GetByTeacherSemester`（`course_id=0`），**无生成 service / handler / route**；
-- **S3 提优对话与读接口**：`GET /courses/:id/agent-suggestions`、`GET /teachers/:id/score-trend`、`POST /agent/chat` 未实现；前端 `frontend/src/api/agent.ts` 仍返回 mock；
-- **知识库**：`knowledge_documents` / `knowledge_chunks`（V16）、embedder / retriever / `cmd/kb` 均未实现；
-- **真实 Key 未配置**：本机 `agent.enabled=false`、`.env.local` 无 `AIJIAOXUE_AGENT_*`，S1 目前只有单测，端到端待验收。
+- P7.5 百炼用量与成本核对仍需按控制台记录；
+- 生产部署需确认 SSE 反向代理关闭缓冲（见 README）；
+- 跨学期 `ai_tasks` 唯一键限制仍按 R8 记录，不在本轮扩展。
 
 ### 2.3 Sprint 3「帮教师」（进行中：智能体部分）：目标与范围
 
@@ -277,7 +278,7 @@ evaluation:
 ```
 
 > 🔴 **计分口径（2026-10-16 重构 §6，破坏性，以本节为准）**：`composite = AI 单侧总分`，
-> 教师级/课程级 = 各场次 AI 综合分均值；**聚合层排除一切 supervisor 行**（督导只写评语、五维全 NULL，见 §8.8）。
+> 教师级/课程级 = 各场次 AI 综合分均值；**聚合层排除一切 supervisor 行**（督导五维分仅作人工参考，不进入聚合，见 §8.8）。
 > `supervisorWeight` / `agentWeight` 已废弃但保留在配置结构中以兼容旧 `config.yaml`；
 > 维度权重（objective 0.30 / content 0.30 / interaction 0.20 / organization 0.20 / frontier 0）与启动校验**不变**。
 > 对外 `weights` 恒为 `{supervisor:0, agent:1}`；`flags` 收敛为 `no_data` + `sample_insufficient`
@@ -310,7 +311,7 @@ evaluation:
 | 40401 | 404 | 资源不存在 | 课程 id 无效 |
 | 40901 | 409 | 数据已存在 | 课程编码+学期重复、同课程同日同节次重复建课 |
 | 50001 | 500 | 服务器内部错误 | 数据库异常 |
-| 50002 | 501 | 功能未实现 | 已废弃接口占位（督导五维评分/草稿箱）；**智能体接口不使用此码** |
+| 50002 | 501 | 功能未实现 | 已废弃接口占位（草稿箱）；**督导评分与智能体接口均不使用此码** |
 | 50003 | 503 | 依赖服务不可用 | ASR 未配置/失败；智能体上游失败（文案需参数化，区分“转写服务不可用/智能体暂时不可用”） |
 
 > 🔴 **新增错误码必须三处同步**：`Code` 常量、`messages` 文案、`HTTPStatus()` 映射，并补 `pkg/errcode/errcode_test.go` 的表驱动用例。
@@ -572,7 +573,7 @@ type PlanItem struct {
 }
 ```
 
-> **评估入口日期闸门（前端约束）**：`evaluated=false` 且 `plannedDate <= 今天` 才显示「去评估」（无授课记录时先 `POST /sessions` 建档再跳转）；
+> **评估入口日期闸门（前端约束）**：`evaluated=false` 且 `plannedDate <= 今天` 才显示评估入口；业务口径为**教师建课、督导评价**，无教师授课记录时显示「待教师建档」，前端不得自动 `POST /sessions`；
 > `plannedDate > 今天` 仅预览、不开放评估。工作台「未评」筛选列出 `plannedDate < 今天 && !evaluated`（不含今日，专用于补录）。
 
 > ⚠️ **覆盖率已停用（2026-10-27）**：原口径（课程数 / 已完成听评课课程数）不再作为业务指标，也不再出现在工作台与验收项。
@@ -587,25 +588,28 @@ type PlanItem struct {
 
 > 契约细节与示例响应见 [`Sprint2-3-教学评价与提优-开发计划.md`](./Sprint2-3-教学评价与提优-开发计划.md) §4.1 / §4.2。
 
-> 🔴 **2026-10-16 重构口径（§6）**：`evaluations` 聚合**只按 AI**；督导行改为「纯评语、五维全 NULL、`total_score` NULL」
-> （B8 督导不打分）。因此 `supervisorScores[]` 的各维度与 `totalScore` 恒为 `null`，`compositeScore`/`agentScore` 为 AI 单侧分，
-> `supervisorScore` 在聚合响应中恒为 `null`，`weights` 恒为 `{supervisor:0, agent:1}`。评分口径详见 §6 配置说明。
+> 🔴 **2026-10-27 督导五维评分恢复（D3 / D6 / B8）**：`PUT /sessions/:id/supervisor-evaluation` 是督导评分**主入口**
+> （五维必填、幂等覆盖、`total_score` 为 0–100）；`PUT /sessions/:id/supervisor-observation` 仅保留旧客户端**纯评语兼容**，
+> 若该督导已有评分行，必须原样保留五维与 `total_score`，只更新评语列。
+> **计分口径不变**：`evaluations` 聚合仍**只按 AI**，`sessionScoreFromDim` 只映射 agent 侧，`scoring.Aggregate(..., alpha=0)`；
+> 督导分作为人工参考独立展示，不进入 `compositeScore` / `agentScore` / `score-trend` / S1 prompt / S2 报告输入。
+> `supervisorScore` 在聚合响应中恒为 `null`，`weights` 恒为 `{supervisor:0, agent:1}`。
 
 > 🔴 **2026-10-27 状态口径（D-1）**：`teaching_sessions.status='evaluated'` 表示**AI 已评析**（S1 完成），**只有 AI 任务写该字段**；
 > 督导是否已评由新增 DTO 字段 `supervisorEvaluated`（bool）表示，取值 = 该场次是否存在 `evaluator_type='supervisor'` 的评价行。
-> `PUT /sessions/:id/supervisor-observation` **不再修改 `status`**，只写督导评价行。
+> `PUT /sessions/:id/supervisor-evaluation` 与 `PUT /sessions/:id/supervisor-observation` **均不修改 `status`**，只写督导评价行。
 > 前端督导课程页的「去评估 / 查看评估」必须用 `supervisorEvaluated`，**不得再用 `status`**。
 > `GET /courses/:id/sessions` 与 `GET /sessions/:id/evaluation` 均需返回该字段（仅加字段，向后兼容）。
 
 | 方法 路径 | 权限 | 说明 |
 |-----------|------|------|
 | GET `/courses/:id/sessions?semester=&page=&pageSize=` | 登录（数据裁剪） | 课程历史授课记录，含每场 AI 评分摘要 + `supervisorEvaluated` |
-| POST `/sessions` | teacher（本人课程）/ supervisor（代录） | 创建授课记录（B1；`classId` 必填且须归属该课程，否则 40002，例外：经听评课计划快捷建课 `planId` 非空时可省略；日期不得晚于今天，`uk_session` 唯一；落 `created_by`） |
+| POST `/sessions` | teacher（本人课程；主路径）/ supervisor（仅后端兼容，前端不再暴露） | 创建授课记录（B1；`classId` 必填且须归属该课程，否则 40002，例外：经听评课计划快捷建课 `planId` 非空时可省略；日期不得晚于今天，`uk_session` 唯一；落 `created_by`） |
 | DELETE `/sessions/:id` | 该课程任课教师本人 / supervisor | 删课并级联清理录音文件/转写/评价/清单关联（D6，service 层） |
 | GET `/sessions/:id` | 登录（数据裁剪） | 单场次基本信息 |
 | GET `/sessions/:id/evaluation` | 登录（数据裁剪） | 当堂课评估页聚合：场次 + 督导评分 + 智能体参考 + 评语 |
-| PUT `/sessions/:id/supervisor-observation` | supervisor | 提交/覆盖**督导纯评语观察**（B8，幂等；无五维分，至少填一项，否则 40002） |
-| PUT `/sessions/:id/supervisor-evaluation` | supervisor | ⚠️ **已废弃**（2026-10-16 §4.5）：五维打分停用，返回 `50002`（HTTP 501） |
+| PUT `/sessions/:id/supervisor-evaluation` | supervisor | 提交/覆盖**督导五维评分与结构化评语**（D3 主入口，幂等；五维必填，任一缺失 40002；`totalScore` 0–100；不改场次 status） |
+| PUT `/sessions/:id/supervisor-observation` | supervisor | 旧客户端兼容：提交/覆盖**纯评语观察**（幂等；至少填一项，否则 40002；已有评分行时保留五维与 totalScore，不改 status） |
 | GET `/supervision/comment-tags` | supervisor | 常用语标签库（N2，纯静态，供评语点选） |
 | GET `/teacher-scores?departmentId=&semester=&page=&pageSize=` | director（本室）/ supervisor（全校） | 教师评分列表 |
 | GET `/teachers/:id/evaluation-summary?semester=` | director（本室）/ teacher（仅自己）/ supervisor | 教师级评分面板 |
@@ -729,16 +733,17 @@ type DraftDTO struct {
 
 ### 8.9 课堂录音与转写（Sprint 2.2 阶段②，已实现，4 条）
 
-> 权限依据见开发计划 §5.1：**音频对教师不可见**（音频中人声不可分割），教师端只开放已脱敏的转写文本。
+> 权限依据（D8 / D9 / B3）：**授课教师可回放本人课程录音**（即使由督导代传），但不能回放其他教师录音；
+> supervisor 可回放全部；主任角色保持原行为，不新增录音权限。教师端仍只看到脱敏转写。
 > DTO 定义在 `backend/internal/dto/evaluation.go`；配置、实现记录与遗留项见 §16。
 
 | 方法 路径 | 权限 | 说明 |
 |-----------|------|------|
 | POST `/sessions/:id/recording` | teacher（本人课程）/ supervisor | multipart 上传音频（`mp3/wav/m4a`，≤ `upload.maxSize`）；**覆盖语义**：已有录音则替换文件并重置转写为 `pending` |
 | DELETE `/sessions/:id/recording` | 上传者本人 / supervisor | 删录音：级联删审计+转写+文件+录音行（D6） |
-| GET `/sessions/:id/transcript` | 登录（数据裁剪） | 返回 `{recording, transcript}`；转写未完成时由 `transcript.status` 供前端轮询 |
-| POST `/sessions/:id/transcript/retry` | supervisor | 转写失败后重新入队（`status` 回到 `pending`） |
-| GET `/recordings/:id/stream` | supervisor 全量 + **上传者本人**（B3） | 音频流式播放，支持 Range；**额外允许 `?ticket=` 短时票据**（见下） |
+| GET `/sessions/:id/transcript` | 登录（数据裁剪） | 返回 `{recording, transcript}`；教师本人课程会签发 `playbackUrl`；转写未完成时由 `transcript.status` 供前端轮询 |
+| POST `/sessions/:id/transcript/retry` | supervisor / teacher（本人课程） | 转写失败后重新入队（`status` 回到 `pending`） |
+| GET `/recordings/:id/stream` | supervisor 全量 + **授课教师本人课程** + 上传者本人（B3/D9） | 音频流式播放，支持 Range；**额外允许 `?ticket=` 短时票据**（见下） |
 
 ```go
 // RecordingDTO —— 阶段②新增 playbackUrl
@@ -751,7 +756,7 @@ type RecordingDTO struct {
     StreamURL    string `json:"streamUrl"`   // 需 Authorization 头
     // PlaybackURL 是带短时票据的流式播放地址，可直接交给 <audio src>：
     // 浏览器播放期间会持续发出 Range 请求，无法携带 Authorization 头，只能靠查询串鉴权。
-    // 仅对 supervisor 返回（教师侧恒为空串）；票据绑定录音 id，TTL 4 小时。
+    // 对 supervisor 与授课教师本人课程签发（其他角色为空串）；票据绑定录音 id，TTL 4 小时。
     PlaybackURL  string `json:"playbackUrl"`
 }
 
@@ -1414,7 +1419,7 @@ curl -s $BASE/supervision/coverage -H "Authorization: Bearer $TOK_S"
 | 存储路径 | `uploads/recordings/{sessionId}/{uuid}.{ext}`；扩展名白名单 `mp3/wav/m4a`；一节课一条主录音（`uk_rec_session`），重复上传 **40901** | `internal/service/recording.go:93-118` |
 | 文件权限 | `0o640` + 显式 `Sync()`（音频含学生人声，不做全局可读；避免崩溃留下半截文件被当完整音频） | `internal/service/recording.go:362-381` |
 | 流式播放 | `GET /recordings/:id/stream` 走 `http.ServeFile`，原生支持 Range（实测 `206 Partial Content` + `Content-Range`） | `internal/handler/recording.go:80` |
-| 播放票据 | `<audio>` 无法发送 `Authorization`，故接受 `?ticket=`：`scope=playback`、绑定录音 `rid`、TTL **4h**、**仅 supervisor 签发**（教师侧 `playbackUrl` 恒为空串） | `internal/service/recording.go:34,152-157` |
+| 播放票据 | `<audio>` 无法发送 `Authorization`，故接受 `?ticket=`：`scope=playback`、绑定录音 `rid`、TTL **4h**、对 supervisor 与授课教师本人课程签发（其他角色 `playbackUrl` 为空串） | `internal/service/recording.go` `canPlayRecording` |
 | 票据校验 | `AuthOrPlaybackTicket` 要求 `scope=playback` 时 `rid == 路径 :id`；`Auth` 中间件**显式拒绝** playback 票据（不得当会话令牌） | `internal/middleware/auth.go:34,50-77` |
 | 🔴 路由位置 | 该路由**必须注册在 `v1` 上，不能放进 `Auth` 组**：否则组上的 `Auth` 先 401，票据中间件根本没机会运行 | `internal/router/router.go:80-84` |
 | 日志脱敏 | `Logger` 把 `ticket`/`token`/`api_key` 等查询参数掩码后落盘（实测 `?ticket=%2A%2A%2A`） | `internal/middleware/logger.go:47` |
