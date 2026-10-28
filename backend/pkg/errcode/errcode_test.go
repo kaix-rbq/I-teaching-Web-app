@@ -41,3 +41,12 @@ func TestFrom(t *testing.T) {
 	assert.Equal(t, Internal, wrapped.Code)
 	assert.ErrorContains(t, wrapped, "plain error")
 }
+
+// TestNewDependencyUnavailable 验证 50003 文案可参数化，且默认 ASR 文案保持不变。
+func TestNewDependencyUnavailable(t *testing.T) {
+	aiErr := NewDependencyUnavailable("智能体暂时不可用")
+	assert.Equal(t, DependencyUnavailable, aiErr.Code)
+	assert.Equal(t, "智能体暂时不可用", aiErr.Msg)
+	assert.Equal(t, "转写服务不可用", DependencyUnavailable.Message(),
+		"ASR 既有默认文案不得被 AI 链路改写")
+}

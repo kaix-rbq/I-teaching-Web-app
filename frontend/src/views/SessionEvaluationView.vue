@@ -4,26 +4,28 @@ import { useRoute, useRouter } from 'vue-router'
 import PageHeader from '@/components/common/PageHeader.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import EvaluationForm from '@/components/evaluation/EvaluationForm.vue'
-import CommentPanel from '@/components/evaluation/CommentPanel.vue'
 import EvaluationCompare from '@/components/evaluation/EvaluationCompare.vue'
 import ScoreRadar from '@/components/evaluation/ScoreRadar.vue'
-import {
-  fetchSessionEvaluationApi,
-  submitSupervisorObservationApi
-} from '@/api/session'
-import { fetchSessionTranscriptApi, retrySessionTranscriptApi, uploadSessionRecordingApi } from '@/api/session'
-import AudioPlayer from '@/components/session/AudioPlayer.vue'
-import BrowserRecorder from '@/components/session/BrowserRecorder.vue'
 import TranscriptViewer from '@/components/evaluation/TranscriptViewer.vue'
 import AiBadge from '@/components/common/AiBadge.vue'
+import AudioPlayer from '@/components/session/AudioPlayer.vue'
+import {
+  fetchSessionEvaluationApi,
+  fetchSessionTranscriptApi,
+  retrySessionTranscriptApi,
+  submitSupervisorEvaluationApi,
+  uploadSessionRecordingApi
+} from '@/api/session'
+import type { SessionMedia } from '@/api/session'
 import { useAuthStore } from '@/stores/auth'
 import { EVALUATION_DIMENSIONS, getScoreLevel, getSessionStatusMeta } from '@/constants'
 import { formatDate, scoreTone, scoreToneColor } from '@/utils/format'
 import type {
+  DimensionKey,
   EvaluationDTO,
   EvaluationFormModel,
   SessionEvaluation,
-  SupervisorObservationPayload
+  SupervisorEvaluationPayload
 } from '@/types/evaluation'
 
 const route = useRoute()
@@ -34,10 +36,11 @@ const data = ref<SessionEvaluation | null>(null)
 const loading = ref(true)
 const error = ref(false)
 const submitting = ref(false)
-const activeEvaluation = ref<EvaluationDTO | null>(null)
+const activeSupervisorId = ref<number | null>(null)
 
 const sessionId = computed(() => String(route.params.id ?? ''))
 const isSupervisor = computed(() => auth.role === 'supervisor')
+const canUpload = computed(() => auth.role === 'supervisor' || auth.role === 'teacher')
 
 function emptyForm(): EvaluationFormModel {
   return {
@@ -80,17 +83,37 @@ const ownEvaluation = computed<EvaluationDTO | null>(() => {
   )
 })
 
-/** 只读角色展示 AI 评价；督导展示自己的已提交评价 */
-const displayedEvaluation = computed<EvaluationDTO | null>(() =>
-  isSupervisor.value ? ownEvaluation.value : activeEvaluation.value
+/** 多督导时按更新时间取最近一条；用于默认对照，不改变逐人只读展示。 */
+function latestSupervisor(list: EvaluationDTO[]): EvaluationDTO | null {
+  if (!list.length) return null
+  return [...list].sort((a, b) => {
+    if (a.updatedAt !== b.updatedAt) return a.updatedAt < b.updatedAt ? 1 : -1
+    return b.evaluatorId - a.evaluatorId
+  })[0]
+}
+
+const selectedSupervisor = computed<EvaluationDTO | null>(() => {
+  if (!data.value) return null
+  if (isSupervisor.value) return ownEvaluation.value
+  const found = data.value.supervisorScores.find(
+    (item) => item.evaluatorId === activeSupervisorId.value
+  )
+  return found ?? latestSupervisor(data.value.supervisorScores)
+})
+
+const otherSupervisors = computed(() =>
+  (data.value?.supervisorScores ?? []).filter(
+    (item) => !(isSupervisor.value && item.evaluatorId === auth.user?.id)
+  )
 )
 
 const agentScore = computed(() => data.value?.agentScore ?? null)
+const agentTotalText = computed(() => {
+  const total = agentScore.value?.totalScore
+  return total === null || total === undefined ? '—' : total.toFixed(2)
+})
 
-/** 只读态的上方面板只展示 AI 评价；督导态展示自己的督导评价（督导只写评语）。 */
-const panelEvaluation = computed<EvaluationDTO | null>(() =>
-  isSupervisor.value ? displayedEvaluation.value : agentScore.value
-)
+const supervisorCount = computed(() => data.value?.supervisorScores.length ?? 0)
 
 const metaItems = computed(() => {
   const session = data.value?.session
@@ -105,16 +128,17 @@ const metaItems = computed(() => {
   ]
 })
 
-/** 雷达图数据：督导编辑时实时反映表单，其余角色反映所选评价 */
+/** 雷达双轨：AI 主序列 + 当前督导（督导编辑时实时反映表单）。 */
 const radarItems = computed(() =>
   EVALUATION_DIMENSIONS.map((dimension) => {
-    const score = isSupervisor.value
+    const supervisorValue = isSupervisor.value
       ? form.value[dimension.key]
-      : panelEvaluation.value?.[dimension.key] ?? null
+      : selectedSupervisor.value?.[dimension.key] ?? null
     return {
       key: dimension.key,
       name: dimension.shortName,
-      score,
+      score: agentScore.value?.[dimension.key] ?? null,
+      supervisorScore: supervisorValue,
       isObservation: dimension.isObservation
     }
   })
@@ -122,50 +146,39 @@ const radarItems = computed(() =>
 
 const dimensionRows = computed(() =>
   EVALUATION_DIMENSIONS.map((dimension) => {
-    const score = isSupervisor.value
+    const aiScore = agentScore.value?.[dimension.key] ?? null
+    const supervisorScore = isSupervisor.value
       ? form.value[dimension.key]
-      : panelEvaluation.value?.[dimension.key] ?? null
+      : selectedSupervisor.value?.[dimension.key] ?? null
     return {
       ...dimension,
-      score,
-      level: score === null ? '' : getScoreLevel(score)?.level ?? '',
-      ratio: score === null ? 0 : (score / 5) * 100
+      aiScore,
+      supervisorScore,
+      aiRatio: aiScore === null ? 0 : (aiScore / 5) * 100,
+      supervisorRatio: supervisorScore === null ? 0 : (supervisorScore / 5) * 100,
+      supervisorLevel:
+        supervisorScore === null ? '' : getScoreLevel(supervisorScore)?.level ?? ''
     }
   })
 )
 
-const displayTotal = computed(() => panelEvaluation.value?.totalScore ?? null)
-
-/* 督导总分是 1-5 制，×20 映射到 0-100 色阶域；AI 总分已是 0-100 */
-const totalToneColor = computed(() =>
-  scoreToneColor(
-    scoreTone(
-      displayTotal.value === null
-        ? null
-        : isSupervisor.value
-          ? displayTotal.value * 20
-          : displayTotal.value
-    )
-  )
+const myTotal = computed(() => ownEvaluation.value?.totalScore ?? null)
+const myTotalText = computed(() => {
+  if (!ownEvaluation.value) return '待提交'
+  if (myTotal.value === null) return '仅评语，无总分'
+  return myTotal.value.toFixed(2)
+})
+const myTotalColor = computed(() =>
+  myTotal.value === null ? undefined : scoreToneColor(scoreTone(myTotal.value))
 )
 
-const supervisorCount = computed(() => data.value?.supervisorScores.length ?? 0)
-
-/** AI 评分标准：维度与权重直接取自前端同一份常量，不另编口径。 */
-const aiStandardDims = computed(() =>
-  EVALUATION_DIMENSIONS.map((dimension) => ({
-    key: dimension.key,
-    name: dimension.name,
-    weight: dimension.weight,
-    isObservation: dimension.isObservation
-  }))
+const formulaVersion = computed(
+  () =>
+    ownEvaluation.value?.formulaVersion ??
+    agentScore.value?.formulaVersion ??
+    'v1'
 )
 
-/**
- * 智能体对本次课的文字评价。
- * 只展示维度分会让「AI 评价」看不出依据；有文本时按督导同构的四段呈现。
- * 教师从「授课快照 → 查看详细记录」进入本页时据此回顾 AI 侧的亮点与改进建议。
- */
 const agentTextItems = computed(() => {
   const agent = agentScore.value
   if (!agent) return []
@@ -176,42 +189,123 @@ const agentTextItems = computed(() => {
     { label: '改进建议', value: agent.suggestions }
   ].filter((item) => Boolean(item.value && item.value.trim()))
 })
-const formulaVersion = computed(() =>
-  isSupervisor.value
-    ? displayedEvaluation.value?.formulaVersion ?? 'v1'
-    : agentScore.value?.formulaVersion ?? 'v1'
+
+const aiStandardDims = computed(() =>
+  EVALUATION_DIMENSIONS.map((dimension) => ({
+    key: dimension.key,
+    name: dimension.name,
+    weight: dimension.weight,
+    isObservation: dimension.isObservation
+  }))
 )
-const media = ref<Awaited<ReturnType<typeof fetchSessionTranscriptApi>>>({ recording: null, transcript: null })
+
+function hasAnyDimension(evaluation: EvaluationDTO): boolean {
+  return EVALUATION_DIMENSIONS.some((dimension) => evaluation[dimension.key] !== null)
+}
+
+function supervisorTotalText(evaluation: EvaluationDTO): string {
+  if (!hasAnyDimension(evaluation)) return '仅评语，无评分'
+  if (evaluation.totalScore === null) return '仅评语，无总分'
+  return `${evaluation.totalScore.toFixed(2)} / 100`
+}
+
+function supervisorTotalTone(evaluation: EvaluationDTO): string | undefined {
+  if (!hasAnyDimension(evaluation) || evaluation.totalScore === null) return undefined
+  return scoreToneColor(scoreTone(evaluation.totalScore))
+}
+
+function supervisorTextBlocks(evaluation: EvaluationDTO): Array<{ label: string; value: string }> {
+  return [
+    { label: '总体评语', value: evaluation.comment },
+    { label: '亮点', value: evaluation.highlights },
+    { label: '待改进', value: evaluation.improvements },
+    { label: '建议', value: evaluation.suggestions }
+  ].filter((item) => Boolean(item.value && item.value.trim()))
+}
+
+function scoreOf(evaluation: EvaluationDTO, key: DimensionKey): string {
+  const value = evaluation[key]
+  return value === null || value === undefined ? '—' : String(value)
+}
+
+function selectSupervisor(id: number): void {
+  activeSupervisorId.value = id
+}
+
+/* ===== 课堂录音与转写 ===== */
+const media = ref<SessionMedia>({ recording: null, transcript: null })
 const mediaLoading = ref(false)
 const uploadProgress = ref(0)
 let pollTimer: ReturnType<typeof setTimeout> | undefined
+
 // 优先用带短时票据的 playbackUrl：<audio> 的 Range 请求带不了 Authorization 头。
-// 教师侧服务端不签发票据（playbackUrl 为空），此时退回空串即不渲染播放器。
 const recordingURL = computed(() => {
   const url = media.value.recording?.playbackUrl
   return url ? `${import.meta.env.VITE_API_BASE_URL || '/api/v1'}${url}` : ''
 })
 
+const transcriptStatusText = computed(() => {
+  switch (media.value.transcript?.status) {
+    case 'pending':
+      return '转写排队中'
+    case 'running':
+      return '转写进行中'
+    case 'done':
+      return '转写已完成'
+    case 'failed':
+      return '转写失败'
+    default:
+      return '暂无转写'
+  }
+})
+
 async function loadMedia(): Promise<void> {
   mediaLoading.value = true
+  if (pollTimer) {
+    clearTimeout(pollTimer)
+    pollTimer = undefined
+  }
   try {
     media.value = await fetchSessionTranscriptApi(sessionId.value)
   } catch {
-    // 录音/转写为阶段②增强项，任何失败都不得阻断评估数据面板。
+    // 录音/转写为增强项，任何失败都不得阻断评估数据面板。
     media.value = { recording: null, transcript: null }
   } finally {
     mediaLoading.value = false
   }
-  if (media.value.transcript && ['pending', 'running'].includes(media.value.transcript.status)) {
-    pollTimer = setTimeout(() => { void loadMedia() }, 2500)
+  if (
+    media.value.transcript &&
+    ['pending', 'running'].includes(media.value.transcript.status)
+  ) {
+    pollTimer = setTimeout(() => {
+      void loadMedia()
+    }, 2500)
   }
 }
+
 async function handleRecording(file: File): Promise<boolean> {
-  try { await uploadSessionRecordingApi(sessionId.value, file, (v) => { uploadProgress.value = v }); ElMessage.success('录音上传成功'); await loadMedia() } catch { /* interceptor */ }
+  try {
+    await uploadSessionRecordingApi(sessionId.value, file, (value) => {
+      uploadProgress.value = value
+    })
+    ElMessage.success('录音上传成功，转写完成后将触发 AI 评析')
+    await loadMedia()
+  } catch {
+    // 错误提示由 interceptor 统一处理
+  }
   return false
 }
-async function retryTranscript(): Promise<void> { try { await retrySessionTranscriptApi(sessionId.value); await loadMedia() } catch { /* interceptor */ } }
 
+async function retryTranscript(): Promise<void> {
+  try {
+    await retrySessionTranscriptApi(sessionId.value)
+    await loadMedia()
+  } catch {
+    // 错误提示由 interceptor 统一处理
+  }
+}
+
+/* ===== 数据加载与提交 ===== */
 async function load(): Promise<void> {
   loading.value = true
   error.value = false
@@ -221,13 +315,15 @@ async function load(): Promise<void> {
     const own = isSupervisor.value
       ? result.supervisorScores.find((item) => item.evaluatorId === auth.user?.id) ?? null
       : null
-    activeEvaluation.value = own ?? latestFrom(result)
-    if (own) {
-      form.value = fromEvaluation(own)
-    } else if (!isSupervisor.value && activeEvaluation.value) {
-      form.value = fromEvaluation(activeEvaluation.value)
-    } else {
-      form.value = emptyForm()
+    form.value = own ? fromEvaluation(own) : emptyForm()
+
+    if (!isSupervisor.value) {
+      const exists = result.supervisorScores.some(
+        (item) => item.evaluatorId === activeSupervisorId.value
+      )
+      if (!exists) {
+        activeSupervisorId.value = latestSupervisor(result.supervisorScores)?.evaluatorId ?? null
+      }
     }
     await loadMedia()
   } catch {
@@ -238,47 +334,55 @@ async function load(): Promise<void> {
   }
 }
 
-function latestFrom(result: SessionEvaluation): EvaluationDTO | null {
-  const list = result.supervisorScores
-  if (list.length === 0) return null
-  return [...list].sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1))[0]
-}
-
-function buildObservationPayload(): SupervisorObservationPayload | null {
+function buildEvaluationPayload(): SupervisorEvaluationPayload | null {
   const value = form.value
-  const payload: SupervisorObservationPayload = {
+  if (
+    value.objective === null ||
+    value.content === null ||
+    value.interaction === null ||
+    value.organization === null ||
+    value.frontier === null
+  ) {
+    return null
+  }
+  return {
+    objective: value.objective,
+    content: value.content,
+    interaction: value.interaction,
+    organization: value.organization,
+    frontier: value.frontier,
     comment: value.comment,
     highlights: value.highlights,
     improvements: value.improvements,
     suggestions: value.suggestions
   }
-  const filled = [payload.comment, payload.highlights, payload.improvements, payload.suggestions].some(
-    (v) => (v ?? '').trim() !== ''
-  )
-  return filled ? payload : null
 }
 
 async function handleSubmit(): Promise<void> {
-  const payload = buildObservationPayload()
+  const payload = buildEvaluationPayload()
   if (!payload) {
-    ElMessage.error('请至少填写一项督导观察评语')
+    ElMessage.error('请先完成五个维度的评分')
     return
   }
   if (ownEvaluation.value) {
     try {
-      await ElMessageBox.confirm('你已提交过本次课的观察，继续将覆盖上次的评语。', '覆盖确认', {
-        type: 'warning',
-        confirmButtonText: '覆盖提交',
-        cancelButtonText: '取消'
-      })
+      await ElMessageBox.confirm(
+        '你已提交过本次课的评分，继续将覆盖上次的五维评分与评语。',
+        '覆盖确认',
+        {
+          type: 'warning',
+          confirmButtonText: '覆盖提交',
+          cancelButtonText: '取消'
+        }
+      )
     } catch {
       return
     }
   }
   submitting.value = true
   try {
-    await submitSupervisorObservationApi(sessionId.value, payload)
-    ElMessage.success('督导观察已提交')
+    await submitSupervisorEvaluationApi(sessionId.value, payload)
+    ElMessage.success('督导评分已提交')
     await load()
   } catch {
     // 错误提示由 api/http.ts 拦截器统一处理
@@ -287,25 +391,22 @@ async function handleSubmit(): Promise<void> {
   }
 }
 
-function handleSelectEvaluation(evaluation: EvaluationDTO): void {
-  activeEvaluation.value = evaluation
-  if (!isSupervisor.value) {
-    form.value = fromEvaluation(evaluation)
-  }
-}
-
 function goBack(): void {
   router.back()
 }
 
 watch(sessionId, () => {
+  activeSupervisorId.value = null
   void load()
 })
 
 onMounted(() => {
   void load()
 })
-onUnmounted(() => { if (pollTimer) clearTimeout(pollTimer) })
+
+onUnmounted(() => {
+  if (pollTimer) clearTimeout(pollTimer)
+})
 </script>
 
 <template>
@@ -340,99 +441,159 @@ onUnmounted(() => { if (pollTimer) clearTimeout(pollTimer) })
         </div>
       </div>
 
-      <!-- 非督导只读：AI 评分标准 + 督导纯文字评语（不含任何督导数字分） -->
-      <template v-if="!isSupervisor">
-        <section class="session-evaluation__panel session-evaluation__ai-standard">
-          <header class="session-evaluation__panel-head">
-            <h2 class="session-evaluation__panel-title">AI 评分标准</h2>
-            <div class="session-evaluation__panel-tags">
-              <AiBadge text="AI 评价" />
-              <span class="session-evaluation__muted">口径 {{ formulaVersion }}</span>
-            </div>
-          </header>
+      <!-- 课堂媒体全宽置顶：先看/听课堂，再评分 -->
+      <section class="session-evaluation__card session-evaluation__media" aria-label="课堂录音与转写">
+        <header class="session-evaluation__card-head">
+          <div>
+            <h2 class="session-evaluation__card-title">课堂录音与转写</h2>
+            <p class="session-evaluation__muted">课堂录音仅本人与教学督导可回放</p>
+          </div>
+          <div v-if="media.recording" class="session-evaluation__media-actions">
+            <el-tag size="small" effect="plain" round>{{ transcriptStatusText }}</el-tag>
+            <el-upload
+              v-if="canUpload"
+              :show-file-list="false"
+              accept=".mp3,.wav,.m4a"
+              :before-upload="handleRecording"
+            >
+              <el-button size="small" plain>替换录音</el-button>
+            </el-upload>
+          </div>
+        </header>
 
-          <p class="session-evaluation__ai-intro">
-            AI 仅依据已脱敏的课堂转写，对目标与内容、内容深度、学生互动、课堂组织四项加权计分；
-            「前沿与交叉学科」为观测项，不计入总分。评分只用于教学改进，不作为考核依据。
-          </p>
+        <el-skeleton v-if="mediaLoading" :rows="3" animated />
 
-          <ul class="session-evaluation__weights" aria-label="AI 评分维度与权重">
-            <li v-for="dim in aiStandardDims" :key="dim.key" class="session-evaluation__weight">
-              <span class="session-evaluation__weight-name">{{ dim.name }}</span>
-              <span class="session-evaluation__weight-value tabular-nums">
-                {{ dim.isObservation ? '观测项' : `${Math.round(dim.weight * 100)}%` }}
-              </span>
-            </li>
-          </ul>
+        <template v-else-if="media.recording">
+          <AudioPlayer
+            v-if="recordingURL"
+            :src="recordingURL"
+            :name="media.recording.originalName"
+          />
+          <el-alert
+            v-else
+            type="info"
+            :closable="false"
+            show-icon
+            title="当前账号无课堂录音回放权限，可查看下方脱敏转写。"
+          />
+          <el-progress
+            v-if="uploadProgress > 0 && uploadProgress < 100"
+            :percentage="uploadProgress"
+          />
+          <TranscriptViewer
+            :transcript="media.transcript"
+            :loading="mediaLoading"
+            @retry="retryTranscript"
+          />
+        </template>
 
-          <EvaluationCompare :agent="agentScore" hide-supervisor />
-        </section>
+        <div v-else class="session-evaluation__media-empty">
+          <div>
+            <h3 class="session-evaluation__media-empty-title">本节课还没有课堂录音</h3>
+            <p class="session-evaluation__muted">
+              上传录音后自动转写，转写完成后会触发 AI 评析。
+            </p>
+          </div>
+          <el-upload
+            v-if="canUpload"
+            :show-file-list="false"
+            accept=".mp3,.wav,.m4a"
+            :before-upload="handleRecording"
+          >
+            <el-button type="primary" size="large">上传课堂录音</el-button>
+          </el-upload>
+          <span v-else class="session-evaluation__muted">暂无课堂录音</span>
+          <el-progress
+            v-if="uploadProgress > 0 && uploadProgress < 100"
+            :percentage="uploadProgress"
+          />
+        </div>
+      </section>
 
-        <section class="session-evaluation__card session-evaluation__readonly-comments">
-          <h2 class="session-evaluation__card-title">督导评语</h2>
-          <CommentPanel :items="data.supervisorScores" :loading="false" text-only />
-        </section>
-
-        <section class="session-evaluation__card session-evaluation__readonly-media">
-          <h2 class="session-evaluation__card-title">课堂转写</h2>
-          <p v-if="media.recording" class="session-evaluation__muted">
-            课堂录音已收录（{{ media.recording.originalName }}）；回放仅教学督导可见，
-            你可以查看下方脱敏转写回顾授课内容。
-          </p>
-          <TranscriptViewer :transcript="media.transcript" :loading="mediaLoading" @retry="retryTranscript" />
-        </section>
-      </template>
-
-      <!-- 督导：写评语（流程不变） -->
-      <template v-else>
-        <section class="session-evaluation__panel">
-          <header class="session-evaluation__panel-head">
-            <h2 class="session-evaluation__panel-title">写下本节观察</h2>
-          </header>
-
-          <div class="session-evaluation__panel-body">
-            <div class="session-evaluation__viz">
-              <ScoreRadar :items="radarItems" :max="5" />
-            </div>
-
-            <div class="session-evaluation__bars">
-              <div
-                v-for="row in dimensionRows"
-                :key="row.key"
-                class="session-evaluation__bar"
-              >
-                <div class="session-evaluation__bar-head">
-                  <span class="session-evaluation__bar-name">
-                    {{ row.name }}
-                    <el-tag
-                      v-if="row.isObservation"
-                      type="warning"
-                      size="small"
-                      effect="light"
-                      round
-                    >
-                      观测项
-                    </el-tag>
-                    <el-tag v-else type="info" size="small" effect="plain" round>
-                      {{ Math.round(row.weight * 100) }}%
-                    </el-tag>
-                  </span>
-                  <span class="session-evaluation__bar-value tabular-nums">
-                    {{ row.score === null ? '—' : row.score }}
-                    <em v-if="row.level">{{ row.level }}</em>
-                  </span>
-                </div>
-                <div class="session-evaluation__bar-track">
-                  <div
-                    class="session-evaluation__bar-fill"
-                    :class="{ 'session-evaluation__bar-fill--observation': row.isObservation }"
-                    :style="{ width: `${row.ratio}%` }"
-                  />
-                </div>
+      <!-- 督导：左侧评分与观察，右侧仅智能体参考 -->
+      <div v-if="isSupervisor" class="session-evaluation__grid">
+        <div class="session-evaluation__main">
+          <section class="session-evaluation__card session-evaluation__supervisor-card">
+            <header class="session-evaluation__card-head">
+              <div>
+                <h2 class="session-evaluation__card-title">督导评分与观察</h2>
+                <p class="session-evaluation__muted">
+                  五维原始分 1–5；我的督导总分为 0–100。督导分不参与 AI 综合分。
+                </p>
               </div>
-              <p class="session-evaluation__bar-note">
-                「前沿与交叉学科」为观测项，仅作亮点展示，不计入加权总分；基础课不因无前沿内容扣分。
-              </p>
+              <div class="session-evaluation__panel-tags">
+                <AiBadge text="AI 参考" />
+                <span class="session-evaluation__muted">口径 {{ formulaVersion }}</span>
+              </div>
+            </header>
+
+            <div class="session-evaluation__viz">
+              <div class="session-evaluation__viz-radar">
+                <ScoreRadar :items="radarItems" :max="5" tone="ai" />
+              </div>
+
+              <div class="session-evaluation__bars" aria-label="五维双轨分数条">
+                <div
+                  v-for="row in dimensionRows"
+                  :key="row.key"
+                  class="session-evaluation__bar"
+                >
+                  <div class="session-evaluation__bar-head">
+                    <span class="session-evaluation__bar-name">
+                      {{ row.name }}
+                      <el-tag
+                        v-if="row.isObservation"
+                        type="warning"
+                        size="small"
+                        effect="light"
+                        round
+                      >
+                        观测项
+                      </el-tag>
+                      <el-tag v-else type="info" size="small" effect="plain" round>
+                        {{ Math.round(row.weight * 100) }}%
+                      </el-tag>
+                    </span>
+                    <span class="session-evaluation__bar-value">
+                      <em v-if="row.supervisorLevel">督导 {{ row.supervisorLevel }}</em>
+                    </span>
+                  </div>
+
+                  <div class="session-evaluation__bar-line">
+                    <span class="session-evaluation__bar-track-label">AI</span>
+                    <div class="session-evaluation__bar-track">
+                      <div
+                        class="session-evaluation__bar-fill session-evaluation__bar-fill--ai"
+                        :class="{ 'session-evaluation__bar-fill--observation': row.isObservation }"
+                        :style="{ width: `${row.aiRatio}%` }"
+                      />
+                    </div>
+                    <span class="session-evaluation__bar-num tabular-nums">
+                      {{ row.aiScore === null ? '—' : row.aiScore }}
+                    </span>
+                  </div>
+
+                  <div class="session-evaluation__bar-line">
+                    <span
+                      class="session-evaluation__bar-track-label session-evaluation__bar-track-label--supervisor"
+                    >
+                      督导
+                    </span>
+                    <div class="session-evaluation__bar-track">
+                      <div
+                        class="session-evaluation__bar-fill session-evaluation__bar-fill--supervisor"
+                        :style="{ width: `${row.supervisorRatio}%` }"
+                      />
+                    </div>
+                    <span class="session-evaluation__bar-num tabular-nums">
+                      {{ row.supervisorScore === null ? '—' : row.supervisorScore }}
+                    </span>
+                  </div>
+                </div>
+                <p class="session-evaluation__bar-note">
+                  五维为 1–5 原始分；督导分不参与 AI 综合分。「前沿与交叉学科」为观测项，不计入加权总分。
+                </p>
+              </div>
             </div>
 
             <div class="session-evaluation__summary">
@@ -440,10 +601,11 @@ onUnmounted(() => { if (pollTimer) clearTimeout(pollTimer) })
                 <span class="session-evaluation__total-label">我的督导总分</span>
                 <span
                   class="session-evaluation__total-value score-num"
-                  :style="{ color: displayTotal === null ? undefined : totalToneColor }"
+                  :style="{ color: myTotalColor }"
                 >
-                  {{ displayTotal === null ? '待提交' : displayTotal.toFixed(2) }}
+                  {{ myTotalText }}
                 </span>
+                <span class="session-evaluation__muted">满分 100，与五维 1–5 原始分分开显示</span>
               </div>
               <dl class="session-evaluation__facts">
                 <div>
@@ -458,61 +620,219 @@ onUnmounted(() => { if (pollTimer) clearTimeout(pollTimer) })
                   </dd>
                 </div>
                 <div>
-                  <dt>口径版本</dt>
-                  <dd>{{ formulaVersion }}</dd>
+                  <dt>AI 总分</dt>
+                  <dd class="tabular-nums">{{ agentTotalText }}</dd>
                 </div>
               </dl>
             </div>
-          </div>
+
+            <EvaluationForm
+              v-model="form"
+              :readonly="false"
+              :submitting="submitting"
+              @submit="handleSubmit"
+            />
+
+            <div v-if="otherSupervisors.length" class="session-evaluation__others">
+              <el-collapse>
+                <el-collapse-item
+                  :title="`其他督导记录（${otherSupervisors.length}）`"
+                  name="other-supervisors"
+                >
+                  <ul class="session-evaluation__other-list">
+                    <li
+                      v-for="item in otherSupervisors"
+                      :key="item.evaluatorId"
+                      class="session-evaluation__other-item"
+                    >
+                      <div class="session-evaluation__other-head">
+                        <strong>{{ item.evaluatorName || `督导 #${item.evaluatorId}` }}</strong>
+                        <span
+                          class="session-evaluation__other-total tabular-nums"
+                          :style="{ color: supervisorTotalTone(item) }"
+                        >
+                          {{ supervisorTotalText(item) }}
+                        </span>
+                      </div>
+
+                      <div v-if="hasAnyDimension(item)" class="session-evaluation__dim-chips">
+                        <span
+                          v-for="dimension in EVALUATION_DIMENSIONS"
+                          :key="`${item.evaluatorId}-${dimension.key}`"
+                          class="session-evaluation__dim-chip"
+                        >
+                          {{ dimension.shortName }}
+                          <strong class="tabular-nums">{{ scoreOf(item, dimension.key) }}</strong>
+                        </span>
+                      </div>
+
+                      <dl
+                        v-if="supervisorTextBlocks(item).length"
+                        class="session-evaluation__other-text"
+                      >
+                        <div
+                          v-for="block in supervisorTextBlocks(item)"
+                          :key="`${item.evaluatorId}-${block.label}`"
+                        >
+                          <dt>{{ block.label }}</dt>
+                          <dd>{{ block.value }}</dd>
+                        </div>
+                      </dl>
+                    </li>
+                  </ul>
+                </el-collapse-item>
+              </el-collapse>
+            </div>
+          </section>
+        </div>
+
+        <aside class="session-evaluation__side">
+          <section class="session-evaluation__card">
+            <header class="session-evaluation__card-head">
+              <h2 class="session-evaluation__card-title">智能体参考</h2>
+              <AiBadge v-if="agentScore" text="AI 参考" />
+            </header>
+
+            <div v-if="agentScore" class="session-evaluation__agent-total">
+              <span class="session-evaluation__muted">AI 总分（0–100）</span>
+              <strong class="score-num">{{ agentTotalText }}</strong>
+            </div>
+
+            <EvaluationCompare :agent="agentScore" hide-supervisor />
+
+            <dl v-if="agentTextItems.length" class="session-evaluation__agent-text">
+              <div v-for="item in agentTextItems" :key="item.label">
+                <dt>{{ item.label }}</dt>
+                <dd>{{ item.value }}</dd>
+              </div>
+            </dl>
+          </section>
+        </aside>
+      </div>
+
+      <!-- 教师/主任只读：督导评分逐人展示 + AI 参考 -->
+      <template v-else>
+        <section class="session-evaluation__card" aria-label="督导评分">
+          <header class="session-evaluation__card-head">
+            <div>
+              <h2 class="session-evaluation__card-title">督导评分</h2>
+              <p class="session-evaluation__muted">
+                AI 综合分仅采用 AI 数据；督导评分作为人工参考，不参与综合分。
+              </p>
+            </div>
+            <span class="session-evaluation__muted tabular-nums">共 {{ supervisorCount }} 位督导</span>
+          </header>
+
+          <template v-if="data.supervisorScores.length">
+            <div class="session-evaluation__teacher-radar">
+              <div class="session-evaluation__teacher-radar-head">
+                <span>
+                  雷达对照：AI + 当前督导
+                  <strong>{{ selectedSupervisor?.evaluatorName || '—' }}</strong>
+                </span>
+                <span class="session-evaluation__muted">五维原始分 1–5</span>
+              </div>
+              <ScoreRadar :items="radarItems" :max="5" tone="ai" />
+            </div>
+
+            <ul class="session-evaluation__supervisor-list">
+              <li
+                v-for="item in data.supervisorScores"
+                :key="item.evaluatorId"
+                class="session-evaluation__supervisor-item"
+                :class="{
+                  'session-evaluation__supervisor-item--active':
+                    item.evaluatorId === selectedSupervisor?.evaluatorId
+                }"
+              >
+                <div class="session-evaluation__supervisor-item-head">
+                  <div>
+                    <strong>{{ item.evaluatorName || `督导 #${item.evaluatorId}` }}</strong>
+                    <span
+                      class="session-evaluation__supervisor-total tabular-nums"
+                      :style="{ color: supervisorTotalTone(item) }"
+                    >
+                      {{ supervisorTotalText(item) }}
+                    </span>
+                  </div>
+                  <el-button
+                    size="small"
+                    :type="item.evaluatorId === selectedSupervisor?.evaluatorId ? 'primary' : 'default'"
+                    plain
+                    @click="selectSupervisor(item.evaluatorId)"
+                  >
+                    {{ item.evaluatorId === selectedSupervisor?.evaluatorId ? '当前对照' : '对照此督导' }}
+                  </el-button>
+                </div>
+
+                <div v-if="hasAnyDimension(item)" class="session-evaluation__dim-chips">
+                  <span
+                    v-for="dimension in EVALUATION_DIMENSIONS"
+                    :key="`${item.evaluatorId}-${dimension.key}`"
+                    class="session-evaluation__dim-chip"
+                  >
+                    {{ dimension.shortName }}
+                    <strong class="tabular-nums">{{ scoreOf(item, dimension.key) }}</strong>
+                  </span>
+                </div>
+                <p v-else class="session-evaluation__muted">仅评语，无评分</p>
+
+                <dl
+                  v-if="supervisorTextBlocks(item).length"
+                  class="session-evaluation__other-text"
+                >
+                  <div
+                    v-for="block in supervisorTextBlocks(item)"
+                    :key="`${item.evaluatorId}-${block.label}`"
+                  >
+                    <dt>{{ block.label }}</dt>
+                    <dd>{{ block.value }}</dd>
+                  </div>
+                </dl>
+              </li>
+            </ul>
+          </template>
+
+          <EmptyState v-else description="暂无督导评分" />
         </section>
 
-        <div class="session-evaluation__grid">
-          <div class="session-evaluation__main">
-            <section class="session-evaluation__card">
-              <h2 class="session-evaluation__card-title">督导观察</h2>
-              <EvaluationForm
-                v-model="form"
-                :readonly="false"
-                :submitting="submitting"
-                comment-only
-                @submit="handleSubmit"
-              />
-            </section>
+        <section class="session-evaluation__card session-evaluation__ai-standard">
+          <header class="session-evaluation__card-head">
+            <div>
+              <h2 class="session-evaluation__card-title">AI 评分标准与参考</h2>
+              <p class="session-evaluation__muted">
+                AI 仅依据已脱敏的课堂转写计分；督导评分不参与 AI 综合分。
+              </p>
+            </div>
+            <div class="session-evaluation__panel-tags">
+              <AiBadge text="AI 评价" />
+              <span class="session-evaluation__muted">口径 {{ formulaVersion }}</span>
+            </div>
+          </header>
+
+          <div v-if="agentScore" class="session-evaluation__agent-total">
+            <span class="session-evaluation__muted">AI 总分（0–100）</span>
+            <strong class="score-num">{{ agentTotalText }}</strong>
           </div>
 
-          <aside class="session-evaluation__side">
-            <section class="session-evaluation__card">
-              <h2 class="session-evaluation__card-title">督导评语</h2>
-              <CommentPanel
-                :items="data.supervisorScores"
-                :loading="false"
-                @select="handleSelectEvaluation"
-              />
-            </section>
+          <ul class="session-evaluation__weights" aria-label="AI 评分维度与权重">
+            <li v-for="dim in aiStandardDims" :key="dim.key" class="session-evaluation__weight">
+              <span class="session-evaluation__weight-name">{{ dim.name }}</span>
+              <span class="session-evaluation__weight-value tabular-nums">
+                {{ dim.isObservation ? '观测项' : `${Math.round(dim.weight * 100)}%` }}
+              </span>
+            </li>
+          </ul>
 
-            <section class="session-evaluation__card">
-              <h2 class="session-evaluation__card-title">智能体参考</h2>
-              <EvaluationCompare :supervisor="displayedEvaluation" :agent="agentScore" />
-              <dl v-if="agentTextItems.length" class="session-evaluation__agent-text">
-                <div v-for="item in agentTextItems" :key="item.label">
-                  <dt>{{ item.label }}</dt>
-                  <dd>{{ item.value }}</dd>
-                </div>
-              </dl>
-            </section>
+          <EvaluationCompare :agent="agentScore" hide-supervisor />
 
-            <section class="session-evaluation__card">
-              <h2 class="session-evaluation__card-title">课堂录音与转写</h2>
-              <el-upload :show-file-list="false" accept=".mp3,.wav,.m4a" :before-upload="handleRecording">
-                <el-button type="primary" plain>上传课堂录音</el-button>
-              </el-upload>
-              <el-progress v-if="uploadProgress > 0 && uploadProgress < 100" :percentage="uploadProgress" />
-              <AudioPlayer v-if="media.recording" :src="recordingURL" :name="media.recording.originalName" />
-              <BrowserRecorder />
-              <TranscriptViewer :transcript="media.transcript" :loading="mediaLoading" @retry="retryTranscript" />
-            </section>
-          </aside>
-        </div>
+          <dl v-if="agentTextItems.length" class="session-evaluation__agent-text">
+            <div v-for="item in agentTextItems" :key="item.label">
+              <dt>{{ item.label }}</dt>
+              <dd>{{ item.value }}</dd>
+            </div>
+          </dl>
+        </section>
       </template>
     </template>
   </div>
@@ -546,6 +866,10 @@ onUnmounted(() => { if (pollTimer) clearTimeout(pollTimer) })
     @media (max-width: 1280px) {
       grid-template-columns: repeat(3, 1fr);
     }
+
+    @media (max-width: 720px) {
+      grid-template-columns: repeat(2, 1fr);
+    }
   }
 
   &__meta-item {
@@ -565,7 +889,7 @@ onUnmounted(() => { if (pollTimer) clearTimeout(pollTimer) })
     color: var(--color-text-primary);
   }
 
-  &__panel {
+  &__card {
     padding: var(--spacing-6);
     margin-bottom: var(--spacing-4);
     background-color: var(--color-bg-card);
@@ -574,55 +898,125 @@ onUnmounted(() => { if (pollTimer) clearTimeout(pollTimer) })
     box-shadow: var(--shadow-card);
   }
 
-  &__panel-head {
+  &__card-head {
     display: flex;
-    align-items: baseline;
+    flex-wrap: wrap;
+    gap: var(--spacing-3);
+    align-items: flex-start;
     justify-content: space-between;
     margin-bottom: var(--spacing-4);
   }
 
-  &__panel-title {
+  &__card-title {
     font-size: var(--font-size-xl);
     color: var(--color-text-primary);
   }
 
-  &__panel-sub {
+  &__muted {
     font-size: var(--font-size-xs);
+    font-weight: 400;
+    line-height: 1.7;
     color: var(--color-text-tertiary);
   }
 
-  &__panel-body {
-    display: grid;
-    grid-template-columns: 320px 1fr 240px;
-    gap: var(--spacing-6);
+  &__panel-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--spacing-2);
     align-items: center;
+  }
 
-    @media (max-width: 1280px) {
+  &__media {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-3);
+  }
+
+  &__media-actions {
+    display: flex;
+    gap: var(--spacing-2);
+    align-items: center;
+  }
+
+  &__media-empty {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--spacing-4);
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--spacing-5);
+    background-color: color-mix(in srgb, var(--color-primary) 5%, #ffffff);
+    border: 1px dashed color-mix(in srgb, var(--color-primary) 35%, #ffffff);
+    border-radius: var(--radius-md);
+  }
+
+  &__media-empty-title {
+    margin-bottom: var(--spacing-1);
+    font-size: var(--font-size-base);
+    color: var(--color-text-primary);
+  }
+
+  &__grid {
+    display: grid;
+    grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr);
+    gap: var(--spacing-4);
+    align-items: start;
+
+    @media (max-width: 1180px) {
       grid-template-columns: 1fr;
     }
   }
 
-  &__viz {
+  &__main,
+  &__side {
     min-width: 0;
   }
 
-  &__bar {
-    margin-bottom: var(--spacing-4);
+  &__side {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-4);
+  }
 
-    &:last-of-type {
-      margin-bottom: var(--spacing-2);
+  &__viz {
+    display: grid;
+    grid-template-columns: minmax(240px, 320px) minmax(0, 1fr);
+    gap: var(--spacing-6);
+    align-items: center;
+    padding-bottom: var(--spacing-4);
+    margin-bottom: var(--spacing-4);
+    border-bottom: 1px dashed var(--color-divider);
+
+    @media (max-width: 900px) {
+      grid-template-columns: 1fr;
     }
+  }
+
+  &__viz-radar {
+    min-width: 0;
+  }
+
+  &__bars {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-3);
+  }
+
+  &__bar + &__bar {
+    margin-top: var(--spacing-1);
   }
 
   &__bar-head {
     display: flex;
     align-items: center;
     justify-content: space-between;
+    gap: var(--spacing-2);
     margin-bottom: var(--spacing-1);
   }
 
   &__bar-name {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: var(--spacing-2);
     font-size: var(--font-size-sm);
@@ -630,21 +1024,34 @@ onUnmounted(() => { if (pollTimer) clearTimeout(pollTimer) })
   }
 
   &__bar-value {
-    font-size: var(--font-size-base);
-    font-weight: 600;
-    color: var(--color-text-primary);
+    font-size: var(--font-size-xs);
+    color: var(--color-text-tertiary);
 
     em {
-      margin-left: var(--spacing-1);
-      font-size: var(--font-size-xs);
       font-style: normal;
-      font-weight: 400;
-      color: var(--color-text-tertiary);
+    }
+  }
+
+  &__bar-line {
+    display: grid;
+    grid-template-columns: 34px minmax(0, 1fr) 24px;
+    gap: var(--spacing-2);
+    align-items: center;
+    margin-top: 4px;
+  }
+
+  &__bar-track-label {
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+    color: var(--color-ai-deep);
+
+    &--supervisor {
+      color: var(--color-teacher);
     }
   }
 
   &__bar-track {
-    height: 8px;
+    height: 7px;
     overflow: hidden;
     background-color: var(--color-divider);
     border-radius: var(--radius-sm);
@@ -652,32 +1059,48 @@ onUnmounted(() => { if (pollTimer) clearTimeout(pollTimer) })
 
   &__bar-fill {
     height: 100%;
-    background-color: var(--color-primary);
     border-radius: var(--radius-sm);
     transition: width 0.3s ease;
 
+    &--ai {
+      background-color: var(--color-ai);
+    }
+
+    &--supervisor {
+      background-color: var(--color-teacher);
+    }
+
     &--observation {
-      background-color: var(--color-warning);
+      opacity: 0.6;
     }
   }
 
+  &__bar-num {
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+    color: var(--color-text-primary);
+    text-align: right;
+  }
+
   &__bar-note {
-    margin-top: var(--spacing-2);
+    margin-top: var(--spacing-1);
     font-size: var(--font-size-xs);
     line-height: 1.6;
     color: var(--color-text-tertiary);
   }
 
   &__summary {
-    display: flex;
-    flex-direction: column;
-    gap: var(--spacing-4);
-    padding-left: var(--spacing-6);
-    border-left: 1px solid var(--color-divider);
+    display: grid;
+    grid-template-columns: minmax(180px, 240px) minmax(0, 1fr);
+    gap: var(--spacing-6);
+    align-items: start;
+    padding: var(--spacing-4);
+    margin-bottom: var(--spacing-4);
+    background-color: var(--color-bg-page);
+    border-radius: var(--radius-md);
 
-    @media (max-width: 1280px) {
-      padding-left: 0;
-      border-left: none;
+    @media (max-width: 720px) {
+      grid-template-columns: 1fr;
     }
   }
 
@@ -701,18 +1124,18 @@ onUnmounted(() => { if (pollTimer) clearTimeout(pollTimer) })
 
   &__facts {
     display: flex;
-    flex-direction: column;
-    gap: var(--spacing-2);
+    flex-wrap: wrap;
+    gap: var(--spacing-3) var(--spacing-6);
 
     > div {
       display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: var(--spacing-2);
+      flex-direction: column;
+      gap: 2px;
       font-size: var(--font-size-sm);
     }
 
     dt {
+      font-size: var(--font-size-xs);
       color: var(--color-text-tertiary);
     }
 
@@ -722,11 +1145,99 @@ onUnmounted(() => { if (pollTimer) clearTimeout(pollTimer) })
     }
   }
 
-  &__muted {
+  &__others {
+    margin-top: var(--spacing-5);
+    border-top: 1px dashed var(--color-divider);
+  }
+
+  &__other-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-4);
+  }
+
+  &__other-item {
+    padding: var(--spacing-3);
+    background-color: var(--color-bg-page);
+    border-radius: var(--radius-md);
+  }
+
+  &__other-head {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--spacing-2);
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: var(--spacing-2);
+  }
+
+  &__other-total {
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+  }
+
+  &__dim-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--spacing-1) var(--spacing-2);
+    margin-bottom: var(--spacing-2);
+  }
+
+  &__dim-chip {
+    display: inline-flex;
+    gap: 4px;
+    align-items: baseline;
+    padding: 2px 8px;
     font-size: var(--font-size-xs);
-    font-weight: 400;
-    line-height: 1.7;
     color: var(--color-text-tertiary);
+    background-color: var(--color-bg-card);
+    border: 1px solid var(--color-divider);
+    border-radius: 999px;
+
+    strong {
+      color: var(--color-text-primary);
+    }
+  }
+
+  &__other-text {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-1);
+
+    > div {
+      display: grid;
+      grid-template-columns: 72px minmax(0, 1fr);
+      gap: var(--spacing-2);
+    }
+
+    dt {
+      font-size: var(--font-size-xs);
+      color: var(--color-text-tertiary);
+    }
+
+    dd {
+      margin: 0;
+      font-size: var(--font-size-sm);
+      line-height: 1.7;
+      color: var(--color-text-secondary);
+      white-space: pre-wrap;
+    }
+  }
+
+  &__agent-total {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--spacing-3);
+    padding: var(--spacing-3) var(--spacing-4);
+    margin-bottom: var(--spacing-3);
+    background-color: var(--color-ai-bg);
+    border-radius: var(--radius-md);
+
+    strong {
+      font-size: var(--font-size-2xl);
+      color: var(--color-ai-deep);
+    }
   }
 
   &__agent-text {
@@ -752,54 +1263,61 @@ onUnmounted(() => { if (pollTimer) clearTimeout(pollTimer) })
     }
   }
 
-  &__grid {
-    display: grid;
-    grid-template-columns: 2fr 1fr;
-    gap: var(--spacing-6);
-    align-items: start;
+  &__teacher-radar {
+    padding: var(--spacing-4);
+    margin-bottom: var(--spacing-4);
+    background-color: var(--color-bg-page);
+    border-radius: var(--radius-md);
+  }
 
-    @media (max-width: 1280px) {
-      grid-template-columns: 1fr;
+  &__teacher-radar-head {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--spacing-2);
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: var(--spacing-2);
+    font-size: var(--font-size-sm);
+    color: var(--color-text-secondary);
+  }
+
+  &__supervisor-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-3);
+  }
+
+  &__supervisor-item {
+    padding: var(--spacing-4);
+    background-color: var(--color-bg-page);
+    border: 1px solid transparent;
+    border-radius: var(--radius-md);
+
+    &--active {
+      background-color: color-mix(in srgb, var(--color-primary) 5%, #ffffff);
+      border-color: color-mix(in srgb, var(--color-primary) 28%, #ffffff);
     }
   }
 
-  &__side {
+  &__supervisor-item-head {
     display: flex;
-    flex-direction: column;
-    gap: var(--spacing-4);
+    flex-wrap: wrap;
+    gap: var(--spacing-2);
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: var(--spacing-2);
   }
 
-  &__card {
-    padding: var(--spacing-6);
-    background-color: var(--color-bg-card);
-    border: 1px solid var(--color-divider);
-    border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-card);
-  }
-
-  &__card-title {
-    margin-bottom: var(--spacing-4);
-    font-size: var(--font-size-xl);
-    color: var(--color-text-primary);
+  &__supervisor-total {
+    margin-left: var(--spacing-3);
+    font-size: var(--font-size-sm);
+    font-weight: 600;
   }
 
   &__ai-standard {
     display: flex;
     flex-direction: column;
-    gap: var(--spacing-4);
-  }
-
-  &__panel-tags {
-    display: flex;
-    gap: var(--spacing-2);
-    align-items: center;
-  }
-
-  &__ai-intro {
-    max-width: 76ch;
-    font-size: var(--font-size-sm);
-    line-height: 1.8;
-    color: var(--color-text-secondary);
+    gap: var(--spacing-3);
   }
 
   &__weights {
@@ -826,17 +1344,6 @@ onUnmounted(() => { if (pollTimer) clearTimeout(pollTimer) })
   &__weight-value {
     font-weight: 600;
     color: var(--color-ai-deep);
-  }
-
-  &__readonly-comments,
-  &__readonly-media {
-    margin-top: var(--spacing-4);
-  }
-
-  &__placeholder {
-    font-size: var(--font-size-sm);
-    line-height: 1.6;
-    color: var(--color-text-tertiary);
   }
 }
 </style>

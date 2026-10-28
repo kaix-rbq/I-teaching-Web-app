@@ -300,12 +300,13 @@ func (s *sessionService) SubmitSupervisorEvaluation(
 	if err := s.evals.Upsert(ctx, record); err != nil {
 		return nil, errcode.Wrap(errcode.Internal, "保存督导评分失败", err)
 	}
-
-	// 督导评分写入后场次进入 evaluated（无草稿态，写入即生效）。
-	if err := s.sessions.UpdateStatus(ctx, sessionID, model.SessionStatusEvaluated); err != nil {
-		return nil, errcode.Wrap(errcode.Internal, "更新授课记录状态失败", err)
+	// B12：督导评分 → 站内信通知授课教师（与纯评语观察保持一致，失败不影响主流程）。
+	if s.notifier != nil {
+		s.notifier.NotifySupervisorComment(ctx, sessionID)
 	}
 
+	// 🔴 督导评分只写 supervisor 行，不改变 teaching_sessions.status；
+	// status='evaluated' 仍只由 AI 任务写入（D-1 状态口径）。
 	// 回读持久化结果，返回真实落库状态（含幂等覆盖后的 updated_at）。
 	rows, err := s.evals.ListBySession(ctx, sessionID)
 	if err != nil {
@@ -321,7 +322,11 @@ func (s *sessionService) SubmitSupervisorEvaluation(
 }
 
 // SubmitSupervisorObservation 提交/覆盖督导纯评语观察（B8 / §4.3）：
-// 复用 supervisor 行、五维全 NULL、只写评语列，不写 total_score，不改场次状态；
+// 复用 supervisor 行、只写评语列，不改场次状态。
+//
+// 🔴 兼容旧客户端：新 UI 只调用 supervisor-evaluation。若该督导此前已提交五维评分，
+// 本次观察必须原样保留 objective/content/interaction/organization/frontier 与 total_score；
+// 只在该督导尚无 supervisor 行时，才创建一行五维为 NULL 的纯评语兼容行。
 // 计分只按 AI，督导意见是独立「督导观察」模块（§6）。
 func (s *sessionService) SubmitSupervisorObservation(
 	ctx context.Context, supervisorID, sessionID uint64, req dto.SupervisorObservationReq,
@@ -337,6 +342,12 @@ func (s *sessionService) SubmitSupervisorObservation(
 		return nil, errcode.New(errcode.BizRule, "督导观察至少填写一项评语")
 	}
 
+	// 先找到当前督导的既有行；Upsert 会整行覆盖评分列，因此必须把已落库的
+	// 五维分与总分复制进待写记录，否则「先评分、后 observation」会被 NULL 抹掉。
+	existing, err := s.supervisorRow(ctx, sessionID, supervisorID)
+	if err != nil {
+		return nil, err
+	}
 	record := &model.Evaluation{
 		SessionID:      sessionID,
 		EvaluatorType:  model.EvaluatorSupervisor,
@@ -346,6 +357,14 @@ func (s *sessionService) SubmitSupervisorObservation(
 		Highlights:     req.Highlights,
 		Improvements:   req.Improvements,
 		Suggestions:    req.Suggestions,
+	}
+	if existing != nil {
+		record.ObjectiveScore = existing.ObjectiveScore
+		record.ContentScore = existing.ContentScore
+		record.InteractionScore = existing.InteractionScore
+		record.OrganizationScore = existing.OrganizationScore
+		record.FrontierScore = existing.FrontierScore
+		record.TotalScore = existing.TotalScore
 	}
 	if err := s.evals.Upsert(ctx, record); err != nil {
 		return nil, errcode.Wrap(errcode.Internal, "保存督导观察失败", err)
@@ -366,6 +385,24 @@ func (s *sessionService) SubmitSupervisorObservation(
 		}
 	}
 	return nil, errcode.New(errcode.Internal, "督导观察写入后未找到")
+}
+
+// supervisorRow 返回某督导在该场次的既有评价行；不存在时返回 (nil, nil)。
+// 仅供 observation 兼容路径保留历史评分，不参与新评分入口。
+func (s *sessionService) supervisorRow(
+	ctx context.Context, sessionID, supervisorID uint64,
+) (*model.Evaluation, error) {
+	rows, err := s.evals.ListBySession(ctx, sessionID)
+	if err != nil {
+		return nil, errcode.Wrap(errcode.Internal, "查询督导评价失败", err)
+	}
+	for i := range rows {
+		if rows[i].EvaluatorType == model.EvaluatorSupervisor && rows[i].EvaluatorID == supervisorID {
+			row := rows[i].Evaluation
+			return &row, nil
+		}
+	}
+	return nil, nil
 }
 
 // Delete 删课：级联清理录音文件 / 转写 / 评价 / 清单关联，最后删授课记录（D6）。

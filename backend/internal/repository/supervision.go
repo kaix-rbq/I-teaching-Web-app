@@ -123,6 +123,11 @@ func (r *supervisionRepository) planBase(ctx context.Context, p PlanListParams) 
 	return tx
 }
 
+// ListPlans 解析计划对应的授课记录（业务口径：教师建课、督导评价）。
+//
+// 优先取显式关联（teaching_sessions.plan_id）；若旧数据/教师从工作台建课未回填
+// plan_id，则回退匹配「同课程 + 计划日期」的教师授课记录，避免督导点「去评估」
+// 时再创建一条空记录，导致评价不到教师实际上传录音的场次。
 func (r *supervisionRepository) ListPlans(ctx context.Context, p PlanListParams) ([]PlanRow, int64, error) {
 	var total int64
 	if err := r.planBase(ctx, p).Count(&total).Error; err != nil {
@@ -134,10 +139,17 @@ func (r *supervisionRepository) ListPlans(ctx context.Context, p PlanListParams)
 		Select(`sp.id, sp.course_id, c.name AS course_name, tu.name AS teacher_name,
 			su.name AS supervisor_name, sp.planned_date, sp.status,
 			(SELECT ts.id FROM teaching_sessions AS ts
-				WHERE ts.plan_id = sp.id ORDER BY ts.id DESC LIMIT 1) AS session_id,
+				WHERE ts.plan_id = sp.id
+				   OR (ts.plan_id IS NULL AND ts.course_id = sp.course_id AND ts.session_date = sp.planned_date)
+				ORDER BY (ts.plan_id = sp.id) DESC,
+				         (EXISTS(SELECT 1 FROM recordings AS r WHERE r.session_id = ts.id)) DESC,
+				         (ts.created_by = c.teacher_id) DESC, ts.id DESC
+				LIMIT 1) AS session_id,
 			EXISTS(SELECT 1 FROM teaching_sessions AS ts
 				JOIN evaluations AS e ON e.session_id = ts.id
-				WHERE ts.plan_id = sp.id AND e.evaluator_type = 'supervisor') AS evaluated`).
+				WHERE (ts.plan_id = sp.id
+				   OR (ts.plan_id IS NULL AND ts.course_id = sp.course_id AND ts.session_date = sp.planned_date))
+				  AND e.evaluator_type = 'supervisor') AS evaluated`).
 		Order("sp.planned_date ASC, sp.id ASC").
 		Offset((p.Page - 1) * p.PageSize).
 		Limit(p.PageSize).

@@ -177,7 +177,11 @@ const citedChunks = computed(() => props.agent?.evidence?.citedChunks ?? [])
         />
 
         <p class="evaluation-compare__ethics">
-          {{ hideSupervisor ? 'AI 评分基于课堂转写生成，仅用于教学改进参考。' : 'AI 评分仅作参考，最终以督导评分为准；低置信分不参与对照结论。' }}
+          {{
+            hideSupervisor
+              ? 'AI 综合分仅采用 AI 数据；督导评分作为人工参考，不参与综合分。'
+              : 'AI 综合分仅采用 AI 数据；督导评分作为人工参考，不参与综合分。低置信分不参与对照结论。'
+          }}
         </p>
       </div>
     </template>

@@ -65,8 +65,9 @@ func TestAnalyzeSessionFiltersCitedChunksAgainstKnowledge(t *testing.T) {
 	assert.Empty(t, res.Evidence.CitedChunks, "无 KB 时必须清空模型返回的 citedChunks")
 }
 
-// TestAnalyzeSessionUsesMaxTokens3000 锁定 P1.4：S1 输出空间必须为 3000。
-func TestAnalyzeSessionUsesMaxTokens3000(t *testing.T) {
+// TestAnalyzeSessionUsesMaxTokens8000 锁定 S1 输出空间。
+// 该模型 reasoning token 计入 max_tokens，3000 会在长评析时截断 JSON。
+func TestAnalyzeSessionUsesMaxTokens8000(t *testing.T) {
 	valid := chatCompletionBody(t, `{"dimensions":{},"confidence":0.5,"comment":"ok"}`)
 	var got chatRequest
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -85,7 +86,26 @@ func TestAnalyzeSessionUsesMaxTokens3000(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.Equal(t, "ok", res.Comment)
-	assert.Equal(t, 3000, got.MaxTokens)
+	assert.Equal(t, 8000, got.MaxTokens)
+}
+
+// TestAnalyzeSessionRejectsLengthFinish 锁定截断诊断：上游 finish_reason=length
+// 时不得继续解析残缺 JSON，应给出可读错误；仍按既有策略重试一次。
+func TestAnalyzeSessionRejectsLengthFinish(t *testing.T) {
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"choices":[{"message":{"content":"{\"dimensions\":{"},"finish_reason":"length"}]}`)
+	}))
+	defer srv.Close()
+
+	_, err := newTestClient(t, srv.URL).AnalyzeSession(context.Background(), EvalInput{
+		Transcript: "今天我们讲用户故事。",
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "截断")
+	assert.Equal(t, 2, calls, "parse/length 错误仍只重试一次")
 }
 
 // TestAnalyzeSessionRetriesOnceOnParseFailure 锁定 P1.4：第一次截断/非法 JSON

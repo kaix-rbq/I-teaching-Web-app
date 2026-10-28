@@ -241,8 +241,8 @@ func (s *recordingService) Media(ctx context.Context, role string, deptID, userI
 	var td *dto.TranscriptDTO
 	if rec != nil {
 		rd = &dto.RecordingDTO{ID: rec.ID, OriginalName: rec.OriginalName, Format: rec.Format, Size: rec.Size, DurationSec: rec.DurationSec, StreamURL: fmt.Sprintf("/recordings/%d/stream", rec.ID)}
-		// B3：supervisor 全量 + 上传者本人可回听自己上传的这一节；其余教师不签发播放票据。
-		if role == RoleSupervisor || rec.UploadedBy == userID {
+		// B3（D9）：supervisor 全量 + 授课教师本人课程 + 上传者本人可回听；其余角色不签发播放票据。
+		if canPlayRecording(role, userID, row, rec) {
 			ticket, err := s.jwt.SignPlayback(userID, role, deptID, rec.ID, playbackTicketTTL, time.Now())
 			if err != nil {
 				return nil, nil, errcode.Wrap(errcode.Internal, "签发播放票据失败", err)
@@ -256,6 +256,22 @@ func (s *recordingService) Media(ctx context.Context, role string, deptID, userI
 	return rd, td, nil
 }
 
+// canPlayRecording 是 Media 与 Stream 共用的回放权限判定（D9 / B3）。
+//
+//   - supervisor：全校全部录音；
+//   - teacher：仅本人任课课程（session.teacher_id == userID）的场次，
+//     即使录音由督导代传也可回放；
+//   - 其他角色（含 director）：保持原行为，仅允许上传者本人。
+func canPlayRecording(role string, userID uint64, row *repository.SessionDetailRow, rec *model.Recording) bool {
+	if role == RoleSupervisor {
+		return true
+	}
+	if role == RoleTeacher && row != nil && row.TeacherID == userID {
+		return true
+	}
+	return rec != nil && rec.UploadedBy == userID
+}
+
 func (s *recordingService) Stream(ctx context.Context, role string, deptID, userID, recordingID uint64) (*model.Recording, error) {
 	rec, err := s.recordings.GetRecording(ctx, recordingID)
 	if err != nil {
@@ -264,15 +280,16 @@ func (s *recordingService) Stream(ctx context.Context, role string, deptID, user
 		}
 		return nil, errcode.Wrap(errcode.Internal, "查询录音失败", err)
 	}
-	// B3：supervisor 全量 + 上传者本人可回听；其余教师不可听（40302）。
-	if role != RoleSupervisor && rec.UploadedBy != userID {
-		return nil, errcode.New(errcode.ForbiddenData, "仅上传者本人或督导可回听课堂音频")
-	}
 	row, err := s.sessions.GetDetail(ctx, rec.SessionID)
 	if err != nil {
 		return nil, errcode.Wrap(errcode.Internal, "查询授课记录失败", err)
 	}
-	// 上传者本人放行时仍校验其数据范围（教师只能触及本人课程的场次）。
+	// B3（D9）：supervisor 全量 + 授课教师本人课程 + 上传者本人可回听；其余角色 40302。
+	// 权限判定与 Media 共用 canPlayRecording，避免两处漂移。
+	if !canPlayRecording(role, userID, row, rec) {
+		return nil, errcode.New(errcode.ForbiddenData, "仅授课教师本人或督导可回听课堂音频")
+	}
+	// 放行后仍校验数据范围（教师只能触及本人课程的场次）。
 	if err := checkSessionScope(ScopeFor(role, deptID, userID), row); err != nil {
 		return nil, err
 	}
@@ -281,12 +298,19 @@ func (s *recordingService) Stream(ctx context.Context, role string, deptID, user
 }
 
 func (s *recordingService) Retry(ctx context.Context, role string, deptID, userID, sessionID uint64) error {
-	if role != RoleSupervisor {
-		return errcode.New(errcode.ForbiddenRole, "仅督导可重试转写")
-	}
 	row, err := s.sessions.GetDetail(ctx, sessionID)
 	if err != nil {
 		return errcode.Wrap(errcode.Internal, "查询授课记录失败", err)
+	}
+	// D8：教师上传本人课程录音后，转写失败也应能自行重试；其余角色保持原行为。
+	switch role {
+	case RoleSupervisor:
+	case RoleTeacher:
+		if row.TeacherID != userID {
+			return errcode.New(errcode.ForbiddenData, "只能重试本人课程的转写")
+		}
+	default:
+		return errcode.New(errcode.ForbiddenRole, "仅授课教师本人或督导可重试转写")
 	}
 	if err := checkSessionScope(ScopeFor(role, deptID, userID), row); err != nil {
 		return err

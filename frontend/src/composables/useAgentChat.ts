@@ -28,6 +28,12 @@ export function useAgentChat() {
     if (!text || streaming.value) return
 
     stop()
+    // 当前问题单独放在 payload.question；history 只带此前最近 6 轮已完成消息，
+    // 不含本次刚 push 的用户消息与待填充的 agent 占位。
+    // 后端契约要求 history 最后一条必须是 user，因此去掉末尾已完成的 agent 回答。
+    const recent = messages.value.filter((message) => !message.pending).slice(-12)
+    while (recent.length > 0 && recent[recent.length - 1]?.role === 'agent') recent.pop()
+    const history = recent.map((message) => ({ role: message.role, content: message.content }))
     const now = new Date().toISOString()
     messages.value.push(
       { id: (seq += 1), role: 'user', content: text, createdAt: now },
@@ -36,7 +42,7 @@ export function useAgentChat() {
     const agentIndex = messages.value.length - 1
     streaming.value = true
 
-    cancel = streamAgentChatApi(payload, {
+    cancel = streamAgentChatApi({ ...payload, history }, {
       onDelta(chunk) {
         const message = messages.value[agentIndex]
         if (message) message.content += chunk

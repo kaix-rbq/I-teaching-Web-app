@@ -59,6 +59,8 @@ agent:
   timeout: "3m" # 单次评析超时
   maxConcurrency: 2 # 并发闸门
   promptVersion: "v1" # 写入 evidence.promptVersion，变更提示词时必须递增
+  reportDebounce: "10m" # S2 教师级报告去抖窗口
+  reportEnabled: true # 关闭时停止生成 S2，但读接口仍可用
 
 # 知识库向量化（RAG §5；与 agent 共用百炼凭据）
 # 🔴 模型选定后不得中途更换：向量空间不同，换模型必须 kb rebuild。

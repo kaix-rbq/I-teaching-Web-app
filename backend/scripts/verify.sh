@@ -198,6 +198,39 @@ want "P2 教师趋势返回 6 条 series"      "6"           "$TR" "len(d['data'
 want "P2 教师趋势首条=composite"        "composite"   "$TR" "d['data'][0]['key']"
 want "P2 教师趋势 frontier 为观测项"    "True"        "$TR" "d['data'][5]['isObservation']"
 want "P2 教师趋势点含 value 字段"       "True"        "$TR" "all('value' in p for s in d['data'] for p in s['points'])"
+# 课程 2 属于种子教师 3，不属于 teacher 2，用于验证课程范围裁剪。
+want "P6 教师访问他人课程建议 40302"    "40302"      "$(req "$BASE/courses/2/agent-suggestions?semester=2026-2027-1" "${AUTH_T[@]}")" "d['code']"
+TR_DIM="$(req "$BASE/teachers/2/score-trend?semester=2026-2027-1&dimension=interaction" "${AUTH_S[@]}")"
+want "P7 趋势 dimension 过滤只返回 interaction" "interaction" "$TR_DIM" "d['data'][0]['key']"
+want "P7 趋势 dimension 过滤返回 1 条"           "1"           "$TR_DIM" "len(d['data'])"
+
+echo
+echo "${c_dim}== 10.2 P3 教师级 AI 报告 smoke（不要求真实模型生成）==${c_reset}"
+# 建议以 AIJIAOXUE_AGENT_REPORT_ENABLED=false 运行本脚本，避免 regenerate 触发真实 S2 调用。
+AR="$(req "$BASE/teachers/2/ai-report?semester=2026-2027-1" "${AUTH_S[@]}")"
+want "P3 AI 报告读接口 code=0"          "0"     "$AR" "d['code']"
+want "P3 AI 报告响应含 status"           "True"  "$AR" "'status' in d['data']"
+want "P3 AI 报告响应含 report 字段"      "True"  "$AR" "'report' in d['data']"
+want "P3 AI 报告 status 合法"            "True"  "$AR" "d['data']['status'] in ['pending','running','done','failed']"
+REG="$(req -X POST "$BASE/teachers/2/ai-report/regenerate?semester=2026-2027-1" "${AUTH_S[@]}")"
+want "P3 督导重生成返回 pending"         "pending" "$REG" "d['data']['status']"
+AR_T="$(req "$BASE/teachers/2/ai-report?semester=2026-2027-1" "${AUTH_T[@]}")"
+want "P7 教师本人读取 AI 报告"           "0"     "$AR_T" "d['code']"
+want "P7 教师本人读取报告 status 合法"    "True"  "$AR_T" "d['data']['status'] in ['pending','running','done','failed']"
+AR_D="$(req "$BASE/teachers/2/ai-report?semester=2026-2027-1" "${AUTH_D[@]}")"
+want "P7 主任读取本室教师报告"           "0"     "$AR_D" "d['code']"
+want "P3 教师重生成返回 40301"           "40301" "$(req -X POST "$BASE/teachers/2/ai-report/regenerate?semester=2026-2027-1" "${AUTH_T[@]}")" "d['code']"
+want "P3 教师查看他人报告返回 40302"     "40302" "$(req "$BASE/teachers/3/ai-report?semester=2026-2027-1" "${AUTH_T[@]}")" "d['code']"
+
+echo
+echo "${c_dim}== 10.3 P4 SSE 错误帧 smoke（不触发模型）==${c_reset}"
+chat_err="$(req -X POST "$BASE/agent/chat" "${AUTH_T[@]}" -H 'Content-Type: application/json' \
+  -d '{"courseId":0,"question":"参数校验","history":[]}')"
+if [[ "$chat_err" == *'"error"'* && "$chat_err" == *'"code":40001'* && "$chat_err" == *'data: [DONE]'* ]]; then
+  pass "P4 SSE 错误帧结构可解析（40001 + [DONE]）"
+else
+  fail "P4 SSE 错误帧结构异常：$chat_err"
+fi
 
 echo
 echo "${c_dim}== 11. 教师级/课程级聚合（与 pkg/scoring 种子数据集单测同源）==${c_reset}"
@@ -298,7 +331,7 @@ want "同日同节次重复返回 40901"       "40901" "$(req -X POST "$BASE/ses
 
 EV="$(req -X PUT "$BASE/sessions/$SESS_ID/supervisor-observation" "${AUTH_S[@]}" -H 'Content-Type: application/json' \
   -d '{"comment":"verify.sh 审核意见","highlights":"亮点A","improvements":"主要问题B","suggestions":"改进建议C"}')"
-want "督导提交观察成功"               "0"   "$EV" "d['code']"
+want "旧客户端 observation 提交成功"   "0"   "$EV" "d['code']"
 want "观察无五维 objective=null"       "None" "$EV" "d['data']['objective']"
 want "观察无五维 totalScore=null"      "None" "$EV" "d['data']['totalScore']"
 want "观察 highlights 生效"            "亮点A" "$EV" "d['data']['highlights']"
@@ -306,12 +339,24 @@ want "观察写入口径版本=v1"             "v1"  "$EV" "d['data']['formulaVe
 want "督导观察不改场次状态（仍 scheduled）" "scheduled" "$(req "$BASE/sessions/$SESS_ID" "${AUTH_S[@]}")" "d['data']['status']"
 want "空观察返回 40002"                "40002" "$(req -X PUT "$BASE/sessions/$SESS_ID/supervisor-observation" "${AUTH_S[@]}" -H 'Content-Type: application/json' -d '{}')" "d['code']"
 want "教师提交督导观察返回 40301"      "40301" "$(req -X PUT "$BASE/sessions/$SESS_ID/supervisor-observation" "${AUTH_T[@]}" -H 'Content-Type: application/json' -d '{"comment":"x"}')" "d['code']"
-want "旧五维评分接口返回 50002"        "50002" "$(req -X PUT "$BASE/sessions/$SESS_ID/supervisor-evaluation" "${AUTH_S[@]}" -H 'Content-Type: application/json' -d '{"objective":5}')" "d['code']"
+want "五维评分缺维度返回 40002"        "40002" "$(req -X PUT "$BASE/sessions/$SESS_ID/supervisor-evaluation" "${AUTH_S[@]}" -H 'Content-Type: application/json' -d '{"objective":5}')" "d['code']"
 want "草稿列表接口返回 50002"          "50002" "$(req "$BASE/drafts" "${AUTH_S[@]}")" "d['code']"
+
+SE="$(req -X PUT "$BASE/sessions/$SESS_ID/supervisor-evaluation" "${AUTH_S[@]}" -H 'Content-Type: application/json' \
+  -d '{"objective":5,"content":4,"interaction":4,"organization":3,"frontier":2,"comment":"verify.sh 正式评分","highlights":"亮点A","improvements":"主要问题B","suggestions":"改进建议C"}')"
+want "督导五维评分主入口成功"           "0"    "$SE" "d['code']"
+want "督导总分=77.5（0-100）"           "77.5" "$SE" "d['data']['totalScore']"
+want "督导评分写入口径版本=v1"          "v1"   "$SE" "d['data']['formulaVersion']"
+want "督导评分不改场次状态（仍 scheduled）" "scheduled" "$(req "$BASE/sessions/$SESS_ID" "${AUTH_S[@]}")" "d['data']['status']"
+want "evaluation 暴露 supervisorEvaluated" "True" "$(req "$BASE/sessions/$SESS_ID/evaluation" "${AUTH_S[@]}")" "d['data']['supervisorEvaluated']"
+want "AI 综合分不受督导评分影响=null"   "None" "$(req "$BASE/sessions/$SESS_ID/evaluation" "${AUTH_S[@]}")" "d['data']['agentScore']"
+want "督导评分后趋势仍无 agent 点"      "True" "$(req "$BASE/teachers/2/score-trend?semester=2026-2027-1" "${AUTH_S[@]}")" "any(p['value'] is None for s in d['data'] if s['key']=='composite' for p in s['points'] if p['date']=='2026-09-16')"
 
 EV2="$(req -X PUT "$BASE/sessions/$SESS_ID/supervisor-observation" "${AUTH_S[@]}" -H 'Content-Type: application/json' \
   -d '{"comment":"verify.sh 审核意见（重提）","highlights":"亮点A2"}')"
-want "观察幂等覆盖 comment 生效"       "verify.sh 审核意见（重提）" "$EV2" "d['data']['comment']"
+want "observation 兼容覆盖评语生效"    "verify.sh 审核意见（重提）" "$EV2" "d['data']['comment']"
+want "observation 保留五维 objective=5" "5"  "$EV2" "d['data']['objective']"
+want "observation 保留 totalScore=77.5" "77.5" "$EV2" "d['data']['totalScore']"
 want "幂等覆盖后评价仍为 1 条"         "1"   "$(req "$BASE/sessions/$SESS_ID/evaluation" "${AUTH_S[@]}")" "len(d['data']['supervisorScores'])"
 want "新增后课程 1 授课记录总数=4"     "4"   "$(req "$BASE/courses/1/sessions" "${AUTH_S[@]}")" "d['data']['total']"
 
@@ -379,14 +424,18 @@ want "主任访问清单返回 40301"           "40301"     "$(req "$BASE/improv
 want "教师创建反思成功"                 "0"         "$(req -X POST "$BASE/teaching-reflections" "${AUTH_T[@]}" -H 'Content-Type: application/json' -d '{"sessionId":1,"content":"反思内容"}')" "d['code']"
 want "教师反思列表非空"                 "True"      "$(req "$BASE/teaching-reflections" "${AUTH_T[@]}")" "len(d['data'])>0"
 want "督导提交观察成功（站内信前置）"   "0"         "$(req -X PUT "$BASE/sessions/1/supervisor-observation" "${AUTH_S[@]}" -H 'Content-Type: application/json' -d '{"comment":"站内信测试"}')" "d['code']"
+DEC="$(req "$BASE/sessions/1/evaluation" "${AUTH_S[@]}")"
+want "P7.4 督导观察后 supervisorEvaluated=true" "True"     "$DEC" "d['data']['supervisorEvaluated']"
+want "P7.4 督导观察不改 AI 场次状态"            "evaluated" "$DEC" "d['data']['session']['status']"
+want "P7.4 计划 1 的 evaluated 仍为 true"       "True"     "$(req "$BASE/supervision/plans?page=1&pageSize=10" "${AUTH_S[@]}")" "[p['evaluated'] for p in d['data']['list'] if p['id']==1][0]"
 want "教师收到站内信"                   "True"      "$(req "$BASE/notifications" "${AUTH_T[@]}")" "d['data']['total']>0"
 want "站内信全部已读成功"               "0"         "$(req -X PUT "$BASE/notifications/read-all" "${AUTH_T[@]}")" "d['code']"
 want "全部已读后未读数=0"               "0"         "$(req "$BASE/notifications" "${AUTH_T[@]}")" "d['data']['unread']"
 
 # 清理本轮提优闭环新增数据，保持种子纯净
 mysql -h 127.0.0.1 -P "${MYSQL_PORT:-3306}" -u aijiaoxue -paijiaoxue_dev aijiaoxue \
-  -e "DELETE FROM improvement_items; DELETE FROM teaching_reflections; DELETE FROM user_notifications; DELETE FROM ai_tasks;" >/dev/null 2>&1 \
-  && echo "${c_dim}已清理提优闭环新增数据${c_reset}"
+  -e "DELETE FROM improvement_items; DELETE FROM teaching_reflections; DELETE FROM user_notifications; DELETE FROM ai_tasks; DELETE FROM teacher_ai_reports WHERE teacher_id=2 AND semester='2026-2027-1' AND course_id=0;" >/dev/null 2>&1 \
+  && echo "${c_dim}已清理提优闭环与 P3 smoke 新增数据${c_reset}"
 
 echo
 echo "${c_dim}== 15. 报告导出（N9）与演示模式（B6/N7）==${c_reset}"

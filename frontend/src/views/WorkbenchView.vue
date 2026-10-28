@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import dayjs from 'dayjs'
 import { ElMessage } from 'element-plus'
 import PageHeader from '@/components/common/PageHeader.vue'
@@ -14,6 +15,7 @@ import type { TimetableItem } from '@/types/dict'
  * 教师工作台：周课表 + 今日课程 + 课堂问题登记。
  * 分数与档案相关能力留在「我的质量档案」，本页只回答「今天上什么、怎么记录」。
  */
+const router = useRouter()
 const { semester } = useSemester()
 
 const WEEK_LABELS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
@@ -146,26 +148,32 @@ function stopRecording(): void {
 }
 
 async function toggleRecording(): Promise<void> {
+  // 仅「下课」创建授课记录；「上课」只切换演示状态，不跳转。
   if (recordingState.value === 'idle') {
     recordingState.value = 'recording'
     return
   }
   const row = recordingRow.value
-  recordingState.value = 'idle'
-  recordingVisible.value = false
-  if (!row) return
+  if (!row || creating.value) return
   creating.value = true
   try {
-    await createSessionApi({
+    const session = await createSessionApi({
       courseId: row.courseId,
       classId: row.classId,
       sessionDate: todayKey,
       period: periodLabel(row),
       topic: ''
     })
-    ElMessage.success('已创建授课记录，补传录音后将触发 AI 评分')
+    recordingState.value = 'idle'
+    recordingVisible.value = false
+    ElMessage.success('已创建授课记录，请上传课堂录音')
+    // D8/D10：创建成功后才跳转；失败保持当前页，错误由 http 拦截器提示。
+    await router.push({
+      name: 'session-evaluation',
+      params: { id: session.id }
+    })
   } catch {
-    // 错误提示由 http 拦截器统一处理
+    // 创建失败：保留弹窗与当前页，便于教师核对后重试。
   } finally {
     creating.value = false
   }
@@ -391,10 +399,11 @@ watch(semester, () => {
           type="button"
           class="recorder__button"
           :class="{ 'recorder__button--stop': recordingState === 'recording' }"
+          :disabled="creating"
           :aria-label="recordingState === 'recording' ? '下课并创建授课记录' : '上课，开始录音演示'"
           @click="toggleRecording"
         >
-          {{ recordingState === 'recording' ? '下课' : '上课' }}
+          {{ creating ? '创建中…' : recordingState === 'recording' ? '下课' : '上课' }}
         </button>
         <p class="recorder__note">演示模式不会调用真实麦克风，下课后仅创建授课记录。</p>
       </div>

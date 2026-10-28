@@ -6,7 +6,8 @@ import type { SupervisionPlan } from '@/types/supervision'
 /**
  * 督导待评安排台账行。
  * 只负责把一组听评课安排排成时间轨行；今日、未来、补录的分组由工作台决定。
- * 未来课次不开放评估入口，已评估课次不会出现在传入的 plans 中。
+ * 业务口径：教师创建授课记录、督导评价。无教师授课记录时只提示等待，
+ * 绝不在此创建新记录（避免评价不到教师实际上传录音的场次）。
  */
 const props = withDefaults(
   defineProps<{
@@ -18,7 +19,6 @@ const props = withDefaults(
 )
 
 const emit = defineEmits<{
-  create: [plan: SupervisionPlan]
   evaluate: [plan: SupervisionPlan]
 }>()
 
@@ -51,12 +51,8 @@ function statusText(plan: SupervisionPlan): string {
 }
 
 function handleEvaluateClick(plan: SupervisionPlan): void {
-  if (isFuture(plan)) return
-  if (plan.sessionId === null) {
-    emit('create', plan)
-  } else {
-    emit('evaluate', plan)
-  }
+  if (isFuture(plan) || plan.sessionId === null) return
+  emit('evaluate', plan)
 }
 </script>
 
@@ -79,6 +75,13 @@ function handleEvaluateClick(plan: SupervisionPlan): void {
 
           <span v-if="isFuture(plan)" class="evaluation-queue__wait" title="授课日期未到，评估入口在当天开放">
             当天开放
+          </span>
+          <span
+            v-else-if="plan.sessionId === null"
+            class="evaluation-queue__wait"
+            title="教师尚未创建本场授课记录；教师下课后刷新即可评估"
+          >
+            待教师建档
           </span>
           <button
             v-else

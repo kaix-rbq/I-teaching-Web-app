@@ -105,6 +105,30 @@ type AgentSuggestionFilter struct {
 	FormulaVersion string
 }
 
+// TeacherReportRow 是教师级报告所需的单场 agent 评价摘要。
+// 一次查询返回教师本学期全部 agent 行，避免逐场 N+1。
+type TeacherReportRow struct {
+	SessionID         uint64    `gorm:"column:session_id"`
+	CourseID          uint64    `gorm:"column:course_id"`
+	CourseCode        string    `gorm:"column:course_code"`
+	CourseName        string    `gorm:"column:course_name"`
+	SessionDate       time.Time `gorm:"column:session_date"`
+	Period            string    `gorm:"column:period"`
+	Topic             string    `gorm:"column:topic"`
+	ObjectiveScore    *uint8    `gorm:"column:objective_score"`
+	ContentScore      *uint8    `gorm:"column:content_score"`
+	InteractionScore  *uint8    `gorm:"column:interaction_score"`
+	OrganizationScore *uint8    `gorm:"column:organization_score"`
+	FrontierScore     *uint8    `gorm:"column:frontier_score"`
+	Comment           string    `gorm:"column:comment"`
+	Highlights        string    `gorm:"column:highlights"`
+	Improvements      string    `gorm:"column:improvements"`
+	Suggestions       string    `gorm:"column:suggestions"`
+	AIModelVersion    string    `gorm:"column:ai_model_version"`
+	AIConfidence      *float64  `gorm:"column:ai_confidence"`
+	CreatedAt         time.Time `gorm:"column:created_at"`
+}
+
 // EvaluationRepository 定义课堂评价数据访问。
 type EvaluationRepository interface {
 	Upsert(ctx context.Context, e *model.Evaluation) error
@@ -115,6 +139,10 @@ type EvaluationRepository interface {
 	ListAgentSessions(ctx context.Context, semester, formulaVersion string) ([]AgentSessionRow, error)
 	// ListAgentSuggestions 返回课程内 agent 评价行，按课次倒序（GET /courses/:id/agent-suggestions）。
 	ListAgentSuggestions(ctx context.Context, f AgentSuggestionFilter) ([]AgentSuggestionRow, error)
+	// ListTeacherReportRows 返回教师本学期全部 agent 评价摘要（S2 输入，按课次升序）。
+	ListTeacherReportRows(ctx context.Context, teacherID uint64, semester, formulaVersion string) ([]TeacherReportRow, error)
+	// ListSupervisorCommentsByTeacherSemester 返回该教师本学期的督导评语（仅文本汇总）。
+	ListSupervisorCommentsByTeacherSemester(ctx context.Context, teacherID uint64, semester string) ([]string, error)
 	// DeleteBySession 删除某场次的全部评价（删课级联用）。
 	DeleteBySession(ctx context.Context, sessionID uint64) error
 }
@@ -239,6 +267,61 @@ func (r *evaluationRepository) ListAgentSuggestions(
 	}
 	var rows []AgentSuggestionRow
 	err := tx.Order("ts.session_date DESC, e.id DESC").Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+// ListTeacherReportRows 返回教师本学期全部 agent 评价摘要，按课次升序。
+// 只取结构化字段，不读取 transcripts，S2 因此不可能接触转写全文。
+func (r *evaluationRepository) ListTeacherReportRows(
+	ctx context.Context, teacherID uint64, semester, formulaVersion string,
+) ([]TeacherReportRow, error) {
+	tx := r.db.WithContext(ctx).
+		Table("evaluations AS e").
+		Select(`ts.id AS session_id, ts.course_id, c.code AS course_code, c.name AS course_name,
+			ts.session_date, ts.period, ts.topic,
+			e.objective_score, e.content_score, e.interaction_score,
+			e.organization_score, e.frontier_score,
+			e.comment, e.highlights, e.improvements, e.suggestions,
+			e.ai_model_version, e.ai_confidence, e.created_at`).
+		Joins("JOIN teaching_sessions AS ts ON ts.id = e.session_id").
+		Joins("JOIN courses AS c ON c.id = ts.course_id").
+		Where("e.evaluator_type = ?", model.EvaluatorAgent).
+		Where("ts.teacher_id = ?", teacherID)
+	if semester != "" {
+		tx = tx.Where("c.semester = ?", semester)
+	}
+	if formulaVersion != "" {
+		tx = tx.Where("e.formula_version = ?", formulaVersion)
+	}
+	var rows []TeacherReportRow
+	err := tx.Order("ts.session_date ASC, ts.id ASC, e.id ASC").Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+// ListSupervisorCommentsByTeacherSemester 返回督导评语文本，按课次倒序。
+// 该查询只取 comment，不参与 AI 评分，只作为 S2 的文本汇总输入。
+func (r *evaluationRepository) ListSupervisorCommentsByTeacherSemester(
+	ctx context.Context, teacherID uint64, semester string,
+) ([]string, error) {
+	var rows []string
+	tx := r.db.WithContext(ctx).
+		Table("evaluations AS e").
+		Select("e.comment").
+		Joins("JOIN teaching_sessions AS ts ON ts.id = e.session_id").
+		Joins("JOIN courses AS c ON c.id = ts.course_id").
+		Where("e.evaluator_type = ?", model.EvaluatorSupervisor).
+		Where("ts.teacher_id = ?", teacherID).
+		Where("e.comment <> ''")
+	if semester != "" {
+		tx = tx.Where("c.semester = ?", semester)
+	}
+	err := tx.Order("ts.session_date DESC, e.created_at DESC").Scan(&rows).Error
 	if err != nil {
 		return nil, err
 	}

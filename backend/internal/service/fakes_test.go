@@ -367,12 +367,14 @@ func (f *fakeDraftRepo) Delete(ctx context.Context, id, supervisorID uint64) err
 }
 
 type fakeEvalRepo struct {
-	upsert               func(ctx context.Context, e *model.Evaluation) error
-	listBySession        func(ctx context.Context, sessionID uint64) ([]repository.EvaluationRow, error)
-	listBySessionIDs     func(ctx context.Context, sessionIDs []uint64) ([]repository.EvaluationRow, error)
-	listSessionDimRows   func(ctx context.Context, flt repository.SessionDimFilter) ([]repository.SessionDimRow, error)
-	listAgentSessions    func(ctx context.Context, semester, formulaVersion string) ([]repository.AgentSessionRow, error)
-	listAgentSuggestions func(ctx context.Context, flt repository.AgentSuggestionFilter) ([]repository.AgentSuggestionRow, error)
+	upsert                                  func(ctx context.Context, e *model.Evaluation) error
+	listBySession                           func(ctx context.Context, sessionID uint64) ([]repository.EvaluationRow, error)
+	listBySessionIDs                        func(ctx context.Context, sessionIDs []uint64) ([]repository.EvaluationRow, error)
+	listSessionDimRows                      func(ctx context.Context, flt repository.SessionDimFilter) ([]repository.SessionDimRow, error)
+	listAgentSessions                       func(ctx context.Context, semester, formulaVersion string) ([]repository.AgentSessionRow, error)
+	listAgentSuggestions                    func(ctx context.Context, flt repository.AgentSuggestionFilter) ([]repository.AgentSuggestionRow, error)
+	listTeacherReportRows                   func(ctx context.Context, teacherID uint64, semester, formulaVersion string) ([]repository.TeacherReportRow, error)
+	listSupervisorCommentsByTeacherSemester func(ctx context.Context, teacherID uint64, semester string) ([]string, error)
 }
 
 func (f *fakeEvalRepo) Upsert(ctx context.Context, e *model.Evaluation) error {
@@ -412,6 +414,24 @@ func (f *fakeEvalRepo) ListAgentSuggestions(
 		return nil, nil
 	}
 	return f.listAgentSuggestions(ctx, flt)
+}
+
+func (f *fakeEvalRepo) ListTeacherReportRows(
+	ctx context.Context, teacherID uint64, semester, formulaVersion string,
+) ([]repository.TeacherReportRow, error) {
+	if f.listTeacherReportRows == nil {
+		return nil, nil
+	}
+	return f.listTeacherReportRows(ctx, teacherID, semester, formulaVersion)
+}
+
+func (f *fakeEvalRepo) ListSupervisorCommentsByTeacherSemester(
+	ctx context.Context, teacherID uint64, semester string,
+) ([]string, error) {
+	if f.listSupervisorCommentsByTeacherSemester == nil {
+		return nil, nil
+	}
+	return f.listSupervisorCommentsByTeacherSemester(ctx, teacherID, semester)
 }
 
 func (f *fakeEvalRepo) DeleteBySession(ctx context.Context, sessionID uint64) error { return nil }
